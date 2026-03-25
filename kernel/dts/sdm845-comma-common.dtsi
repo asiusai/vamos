@@ -353,59 +353,18 @@
 			   <GCC_LPASS_SWAY_CLK>;
 };
 
-&gmu {
-	status = "okay";
-};
-
-&gpi_dma0 {
-	status = "okay";
-};
-
-&gpu {
-	status = "okay";
-
-	zap-shader {
-		memory-region = <&gpu_mem>;
-		firmware-name = "qcom/sdm845/a630_zap.mbn";
-	};
-};
-
-&i2c4 {
-	clock-frequency = <400000>;
-
-	status = "okay";
-};
-
-&i2c5 {
-	clock-frequency = <100000>;
-
-	status = "okay";
-};
-
 &mdss {
 	status = "okay";
 };
 
 &mdss_dsi0 {
-	vdda-supply = <&vdda_mipi_dsi0_1p2>;
-
 	status = "okay";
+	vdda-supply = <&vdda_mipi_dsi0_1p2>;
 };
 
 &mdss_dsi0_phy {
+	status = "okay";
 	vdds-supply = <&vdda_mipi_dsi0_pll>;
-
-	status = "okay";
-};
-
-&mss_pil {
-	firmware-name = "qcom/sdm845/mba.mbn", "qcom/sdm845/modem_nm.mbn";
-
-	status = "okay";
-};
-
-&qupv3_id_0 {
-	status = "okay";
 };
 
 &qupv3_id_1 {
