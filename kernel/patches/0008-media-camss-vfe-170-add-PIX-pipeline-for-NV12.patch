@@ -1,0 +1,439 @@
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+index e5ee7e717b3b..0fd26b23c5db 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -14,6 +14,8 @@
+ #include "camss.h"
+ #include "camss-vfe.h"
+ 
++#define VFE_REG_UPDATE_PIX			BIT(0)
++
+ #define VFE_GLOBAL_RESET_CMD			(0x018)
+ #define		GLOBAL_RESET_CMD_CORE		BIT(0)
+ #define		GLOBAL_RESET_CMD_CAMIF		BIT(1)
+@@ -98,6 +100,8 @@
+ #define VFE_BUS_IRQ_MASK(n)		(0x2044 + (n) * 4)
+ #define VFE_BUS_IRQ_CLEAR(n)		(0x2050 + (n) * 4)
+ #define VFE_BUS_IRQ_STATUS(n)		(0x205c + (n) * 4)
++/* Composite group config: bitmask of WM clients per group */
++#define VFE_BUS_COMP_GROUP(n)		(0x2070 + (n) * 4)
+ #define		STATUS0_COMP_RESET_DONE		BIT(0)
+ #define		STATUS0_COMP_REG_UPDATE0_DONE	BIT(1)
+ #define		STATUS0_COMP_REG_UPDATE1_DONE	BIT(2)
+@@ -181,6 +185,197 @@ static inline void vfe_reg_set(struct vfe_device *vfe, u32 reg, u32 set_bits)
+ 	writel_relaxed(bits | set_bits, vfe->base + reg);
+ }
+ 
++/* ------------------------------------------------------------------ */
++/* PIX (ISP pixel processing) pipeline for debayered NV12 output      */
++/* Register values from openpilot ife.h (programs same HW via CDM)    */
++/* ------------------------------------------------------------------ */
++
++/*
++ * Program the IFE Titan 170 ISP pipeline.
++ * Pipeline: CAMIF -> Demux -> BlackLevel -> WhiteBalance -> Debayer
++ *           -> ColorCorrection -> YUV -> Scale -> Crop -> WM
++ * Gamma/linearization/vignetting skipped (need DMI LUT uploads).
++ */
++static void vfe_pix_configure_isp(struct vfe_device *vfe,
++				  u32 in_w, u32 in_h,
++				  u32 out_w, u32 out_h)
++{
++	/* Clear status registers */
++	writel_relaxed(~0u, vfe->base + 0x2c);
++	writel_relaxed(~0u, vfe->base + 0x30);
++	writel_relaxed(~0u, vfe->base + 0x34);
++	writel_relaxed(~0u, vfe->base + 0x38);
++	writel_relaxed(~0u, vfe->base + 0x3c);
++
++	/* CAMIF: clear status, enable VFE + bus output */
++	writel_relaxed(0x00000004, vfe->base + 0x478);
++	writel_relaxed(0x004000c0, vfe->base + 0x47c);
++	writel_relaxed(0x00000000, vfe->base + 0x488);
++	writel_relaxed(0x00000000, vfe->base + 0x48c);
++	writel_relaxed(0x00000f0f, vfe->base + 0x490);
++	writel_relaxed(0x00000001, vfe->base + 0x49c);
++
++	/* Demux: enable, Bayer RGGB routing */
++	writel_relaxed(0x00000001, vfe->base + 0x560);
++	writel_relaxed(0x04440444, vfe->base + 0x564);
++	writel_relaxed(0x04450445, vfe->base + 0x568);
++	writel_relaxed(0x04440444, vfe->base + 0x56c);
++	writel_relaxed(0x04450445, vfe->base + 0x570);
++	writel_relaxed(0x000000ca, vfe->base + 0x574);
++	writel_relaxed(0x0000009c, vfe->base + 0x578);
++
++	/* White balance: identity gains (R=G=B=1.0) */
++	writel_relaxed(0x00800080, vfe->base + 0x6fc);
++	writel_relaxed(0x00000080, vfe->base + 0x700);
++	writel_relaxed(0x00000000, vfe->base + 0x704);
++	writel_relaxed(0x00000000, vfe->base + 0x708);
++
++	/* Module enables: debayer + white_balance + zoom, no vignetting */
++	writel_relaxed(0x00000c06, vfe->base + 0x40);
++	writel_relaxed(0x00000000, vfe->base + 0x44);
++	writel_relaxed(0x0000000a, vfe->base + 0x48);
++	writel_relaxed(0x00000019, vfe->base + 0x4c);
++
++	/* Color transform output config */
++	writel_relaxed(0x00000000, vfe->base + 0xf00);
++
++	/* Cropping module enable */
++	writel_relaxed(0x00000e00, vfe->base + 0xe0c);
++	writel_relaxed(0x00000e00, vfe->base + 0xe2c);
++
++	/* Black level (12-bit sensor, bl=64) */
++	writel_relaxed(0x04001000, vfe->base + 0x6b0);
++	writel_relaxed(0x00000000, vfe->base + 0x6b4);
++	writel_relaxed(0x00000000, vfe->base + 0x6b8);
++
++	/* Linearization: disabled */
++	writel_relaxed(0x00000000, vfe->base + 0x4dc);
++
++	/* DMI config: idle */
++	writel_relaxed(0x00000000, vfe->base + 0xce4);
++	writel_relaxed(0x00000000, vfe->base + 0xce8);
++
++	/* Debayer */
++	writel_relaxed(0x00000100, vfe->base + 0x6f8);
++	writel_relaxed(0x00008000, vfe->base + 0x71c);
++	writel_relaxed(0x08000066, vfe->base + 0x720);
++
++	/* Color correction: identity (Q7: 0x80=1.0) */
++	writel_relaxed(0x00000080, vfe->base + 0x760);
++	writel_relaxed(0x00000000, vfe->base + 0x764);
++	writel_relaxed(0x00000000, vfe->base + 0x768);
++	writel_relaxed(0x00000000, vfe->base + 0x76c);
++	writel_relaxed(0x00000080, vfe->base + 0x770);
++	writel_relaxed(0x00000000, vfe->base + 0x774);
++	writel_relaxed(0x00000000, vfe->base + 0x778);
++	writel_relaxed(0x00000000, vfe->base + 0x77c);
++	writel_relaxed(0x00000080, vfe->base + 0x780);
++
++	/* Gamma: disabled */
++	writel_relaxed(0x00000000, vfe->base + 0x798);
++
++	/* Y scaling: 1:1 (factor 0x30036666) */
++	writel_relaxed(0x00000003, vfe->base + 0xa3c);
++	writel_relaxed(((out_w - 1) << 16) | (in_w - 1), vfe->base + 0xa40);
++	writel_relaxed(0x30036666, vfe->base + 0xa44);
++	writel_relaxed(0x00000000, vfe->base + 0xa48);
++	writel_relaxed(0x00000000, vfe->base + 0xa4c);
++	writel_relaxed(in_w - 1, vfe->base + 0xa50);
++	writel_relaxed(((out_h - 1) << 16) | (in_h - 1), vfe->base + 0xa54);
++	writel_relaxed(0x30036666, vfe->base + 0xa58);
++	writel_relaxed(0x00000000, vfe->base + 0xa5c);
++	writel_relaxed(0x00000000, vfe->base + 0xa60);
++	writel_relaxed(in_h - 1, vfe->base + 0xa64);
++
++	/* CbCr scaling: 2:1 for NV12 4:2:0 (factor 0x3006cccc) */
++	writel_relaxed(0x00000003, vfe->base + 0xa68);
++	writel_relaxed(((out_w / 2 - 1) << 16) | (in_w - 1),
++		       vfe->base + 0xa6c);
++	writel_relaxed(0x3006cccc, vfe->base + 0xa70);
++	writel_relaxed(0x00000000, vfe->base + 0xa74);
++	writel_relaxed(0x00000000, vfe->base + 0xa78);
++	writel_relaxed(in_w - 1, vfe->base + 0xa7c);
++	writel_relaxed(((out_h / 2 - 1) << 16) | (in_h - 1),
++		       vfe->base + 0xa80);
++	writel_relaxed(0x3006cccc, vfe->base + 0xa84);
++	writel_relaxed(0x00000000, vfe->base + 0xa88);
++	writel_relaxed(0x00000000, vfe->base + 0xa8c);
++	writel_relaxed(in_h - 1, vfe->base + 0xa90);
++
++	/* Crop: Y (full resolution) */
++	writel_relaxed(out_h - 1, vfe->base + 0xe10);
++	writel_relaxed(out_w - 1, vfe->base + 0xe14);
++	writel_relaxed(0x0ff00000, vfe->base + 0xe18);
++
++	/* Crop: CbCr (half height for NV12) */
++	writel_relaxed(out_h / 2 - 1, vfe->base + 0xe30);
++	writel_relaxed(out_w - 1, vfe->base + 0xe34);
++	writel_relaxed(0x0ff00000, vfe->base + 0xe38);
++
++	/* YUV conversion: BT.601 (from openpilot ife.h) */
++	writel_relaxed(0x00680208, vfe->base + 0xf30);
++	writel_relaxed(0x00000108, vfe->base + 0xf34);
++	writel_relaxed(0x00400000, vfe->base + 0xf38);
++	writel_relaxed(0x03ff0000, vfe->base + 0xf3c);
++	writel_relaxed(0x01c01ed8, vfe->base + 0xf40);
++	writel_relaxed(0x00001f68, vfe->base + 0xf44);
++	writel_relaxed(0x02000000, vfe->base + 0xf48);
++	writel_relaxed(0x03ff0000, vfe->base + 0xf4c);
++	writel_relaxed(0x1fb81e88, vfe->base + 0xf50);
++	writel_relaxed(0x000001c0, vfe->base + 0xf54);
++	writel_relaxed(0x02000000, vfe->base + 0xf58);
++	writel_relaxed(0x03ff0000, vfe->base + 0xf5c);
++
++	wmb();
++}
++
++/* Route crop Y/CbCr output to specific WM client indices */
++static void vfe_pix_set_crop_wm(struct vfe_device *vfe, u8 wm_y, u8 wm_uv)
++{
++	writel_relaxed(wm_y, vfe->base + 0xe1c);
++	writel_relaxed(wm_uv, vfe->base + 0xe3c);
++	wmb();
++}
++
++/* Start a WM in PIX mode (QCOM_PLAIN, line-based) for NV12 output */
++static void vfe_wm_start_pix(struct vfe_device *vfe, u8 wm,
++			     struct vfe_line *line, int plane)
++{
++	struct v4l2_pix_format_mplane *pix =
++		&line->video_out.active_fmt.fmt.pix_mp;
++	u32 stride = pix->plane_fmt[0].bytesperline;
++	u32 height = (plane == 1) ? pix->height / 2 : pix->height;
++	u32 val;
++
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_ADDR_SYNC_FRAME_HEADER);
++	writel_relaxed(WM_CGC_OVERRIDE_ALL, vfe->base + VFE_BUS_WM_CGC_OVERRIDE);
++	writel_relaxed(0x0, vfe->base + VFE_BUS_WM_TEST_BUS_CTRL);
++	writel_relaxed(WM_ADDR_NO_SYNC_DEFAULT_VAL,
++		       vfe->base + VFE_BUS_WM_ADDR_SYNC_NO_SYNC);
++
++	writel_relaxed(0xf, vfe->base + VFE_BUS_WM_BURST_LIMIT(wm));
++	writel_relaxed(stride, vfe->base + VFE_BUS_WM_BUFFER_WIDTH_CFG(wm));
++	writel_relaxed(height - 1, vfe->base + VFE_BUS_WM_BUFFER_HEIGHT_CFG(wm));
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_PACKER_CFG(wm));
++	writel_relaxed(stride, vfe->base + VFE_BUS_WM_STRIDE(wm));
++
++	/* QCOM_PLAIN mode for processed pixel data */
++	val = 1 << WM_CFG_EN | MODE_QCOM_PLAIN << WM_CFG_MODE;
++	writel_relaxed(val, vfe->base + VFE_BUS_WM_CFG(wm));
++}
++
++static void vfe_wm_update_pix(struct vfe_device *vfe, u8 wm, u32 addr,
++			      struct vfe_line *line, int plane)
++{
++	struct v4l2_pix_format_mplane *pix =
++		&line->video_out.active_fmt.fmt.pix_mp;
++	u32 stride = pix->plane_fmt[0].bytesperline;
++	u32 height = (plane == 1) ? pix->height / 2 : pix->height;
++
++	writel_relaxed(addr, vfe->base + VFE_BUS_WM_IMAGE_ADDR(wm));
++	writel_relaxed(stride * height, vfe->base + VFE_BUS_WM_FRAME_INC(wm));
++}
++
+ static void vfe_global_reset(struct vfe_device *vfe)
+ {
+ 	u32 reset_bits = GLOBAL_RESET_CMD_CORE		|
+@@ -266,21 +461,23 @@ static void vfe_wm_update(struct vfe_device *vfe, u8 wm, u32 addr,
+ 
+ static void vfe_reg_update(struct vfe_device *vfe, enum vfe_line_id line_id)
+ {
+-	vfe->reg_update |= REG_UPDATE_RDI(line_id);
++	if (line_id == VFE_LINE_PIX)
++		vfe->reg_update |= VFE_REG_UPDATE_PIX;
++	else
++		vfe->reg_update |= REG_UPDATE_RDI(line_id);
+ 
+-	/* Enforce ordering between previous reg writes and reg update */
+ 	wmb();
+-
+ 	writel_relaxed(vfe->reg_update, vfe->base + VFE_REG_UPDATE_CMD);
+-
+-	/* Enforce ordering between reg update and subsequent reg writes */
+ 	wmb();
+ }
+ 
+ static inline void vfe_reg_update_clear(struct vfe_device *vfe,
+ 					enum vfe_line_id line_id)
+ {
+-	vfe->reg_update &= ~REG_UPDATE_RDI(line_id);
++	if (line_id == VFE_LINE_PIX)
++		vfe->reg_update &= ~VFE_REG_UPDATE_PIX;
++	else
++		vfe->reg_update &= ~REG_UPDATE_RDI(line_id);
+ }
+ 
+ static void vfe_enable_irq_common(struct vfe_device *vfe)
+@@ -389,6 +586,7 @@ static int vfe_get_output(struct vfe_line *line)
+ 	struct vfe_output *output;
+ 	unsigned long flags;
+ 	int wm_idx;
++	int i;
+ 
+ 	spin_lock_irqsave(&vfe->output_lock, flags);
+ 
+@@ -398,14 +596,17 @@ static int vfe_get_output(struct vfe_line *line)
+ 		goto error;
+ 	}
+ 
+-	output->wm_num = 1;
++	/* PIX NV12: 2 WMs (Y + UV). RDI: 1 WM. */
++	output->wm_num = (line->id == VFE_LINE_PIX) ? 2 : 1;
+ 
+-	wm_idx = vfe_reserve_wm(vfe, line->id);
+-	if (wm_idx < 0) {
+-		dev_err(vfe->camss->dev, "Can not reserve wm\n");
+-		goto error_get_wm;
++	for (i = 0; i < output->wm_num; i++) {
++		wm_idx = vfe_reserve_wm(vfe, line->id);
++		if (wm_idx < 0) {
++			dev_err(vfe->camss->dev, "Can not reserve wm\n");
++			goto error_get_wm;
++		}
++		output->wm_idx[i] = wm_idx;
+ 	}
+-	output->wm_idx[0] = wm_idx;
+ 
+ 	output->drop_update_idx = 0;
+ 
+@@ -414,7 +615,8 @@ static int vfe_get_output(struct vfe_line *line)
+ 	return 0;
+ 
+ error_get_wm:
+-	vfe_release_wm(vfe, output->wm_idx[0]);
++	for (i--; i >= 0; i--)
++		vfe_release_wm(vfe, output->wm_idx[i]);
+ 	output->state = VFE_OUTPUT_OFF;
+ error:
+ 	spin_unlock_irqrestore(&vfe->output_lock, flags);
+@@ -446,6 +648,25 @@ static int vfe_enable(struct vfe_line *line)
+ 	if (ret < 0)
+ 		goto error_get_output;
+ 
++	/* PIX: configure ISP pipeline and start PIX WMs before enable_output */
++	if (line->id == VFE_LINE_PIX) {
++		struct v4l2_mbus_framefmt *sink = &line->fmt[MSM_VFE_PAD_SINK];
++		struct v4l2_pix_format_mplane *out =
++			&line->video_out.active_fmt.fmt.pix_mp;
++		struct vfe_output *output = &line->output;
++
++		vfe_pix_configure_isp(vfe, sink->width, sink->height,
++				      out->width, out->height);
++		vfe_pix_set_crop_wm(vfe, output->wm_idx[0],
++				    output->wm_idx[1]);
++		vfe_wm_start_pix(vfe, output->wm_idx[0], line, 0);
++		vfe_wm_start_pix(vfe, output->wm_idx[1], line, 1);
++
++		/* Composite group 0: fire when both Y+UV WMs done */
++		writel_relaxed(BIT(output->wm_idx[0]) | BIT(output->wm_idx[1]),
++			       vfe->base + VFE_BUS_COMP_GROUP(0));
++	}
++
+ 	ret = vfe_enable_output_v2(line);
+ 	if (ret < 0)
+ 		goto error_enable_output;
+@@ -513,6 +734,7 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 	unsigned long flags;
+ 	u32 index;
+ 	u64 ts = ktime_get_ns();
++	int i;
+ 
+ 	spin_lock_irqsave(&vfe->output_lock, flags);
+ 
+@@ -523,6 +745,13 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 	}
+ 	output = &vfe->line[vfe->wm_output_map[wm]].output;
+ 
++	/*
++	 * For multi-WM PIX (NV12: Y + UV), only deliver when the
++	 * last WM completes. Y always finishes before UV.
++	 */
++	if (output->wm_num > 1 && wm != output->wm_idx[output->wm_num - 1])
++		goto out_unlock;
++
+ 	ready_buf = output->buf[0];
+ 	if (!ready_buf) {
+ 		dev_err_ratelimited(vfe->camss->dev,
+@@ -540,10 +769,20 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 
+ 	output->buf[index] = vfe_buf_get_pending(output);
+ 
+-	if (output->buf[index])
+-		vfe_wm_update(vfe, output->wm_idx[0], output->buf[index]->addr[0], line);
+-	else
++	if (output->buf[index]) {
++		for (i = 0; i < output->wm_num; i++) {
++			if (output->wm_num > 1)
++				vfe_wm_update_pix(vfe, output->wm_idx[i],
++						  output->buf[index]->addr[i],
++						  line, i);
++			else
++				vfe_wm_update(vfe, output->wm_idx[0],
++					      output->buf[index]->addr[0],
++					      line);
++		}
++	} else {
+ 		output->gen2.active_num--;
++	}
+ 
+ 	spin_unlock_irqrestore(&vfe->output_lock, flags);
+ 
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
+index dff8d0a1e8c2..674a25206c96 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c
+@@ -277,10 +277,28 @@ const struct camss_formats vfe_formats_rdi_845 = {
+ 	.formats = formats_rdi_845
+ };
+ 
+-/* TODO: Replace with pix formats */
++static const struct camss_format_info formats_pix_845[] = {
++	{ MEDIA_BUS_FMT_YUYV8_1_5X8, 8, V4L2_PIX_FMT_NV12, 1,
++	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
++	{ MEDIA_BUS_FMT_YVYU8_1_5X8, 8, V4L2_PIX_FMT_NV12, 1,
++	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
++	{ MEDIA_BUS_FMT_UYVY8_1_5X8, 8, V4L2_PIX_FMT_NV12, 1,
++	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
++	{ MEDIA_BUS_FMT_VYUY8_1_5X8, 8, V4L2_PIX_FMT_NV12, 1,
++	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
++	{ MEDIA_BUS_FMT_YUYV8_1_5X8, 8, V4L2_PIX_FMT_NV21, 1,
++	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
++	{ MEDIA_BUS_FMT_YVYU8_1_5X8, 8, V4L2_PIX_FMT_NV21, 1,
++	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
++	{ MEDIA_BUS_FMT_UYVY8_1_5X8, 8, V4L2_PIX_FMT_NV21, 1,
++	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
++	{ MEDIA_BUS_FMT_VYUY8_1_5X8, 8, V4L2_PIX_FMT_NV21, 1,
++	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
++};
++
+ const struct camss_formats vfe_formats_pix_845 = {
+-	.nformats = ARRAY_SIZE(formats_rdi_845),
+-	.formats = formats_rdi_845
++	.nformats = ARRAY_SIZE(formats_pix_845),
++	.formats = formats_pix_845
+ };
+ 
+ static u32 vfe_src_pad_code(struct vfe_line *line, u32 sink_code,
+@@ -539,15 +557,20 @@ int vfe_enable_output_v2(struct vfe_line *line)
+ 	output->wait_reg_update = 0;
+ 	reinit_completion(&output->reg_update);
+ 
+-	ops->vfe_wm_start(vfe, output->wm_idx[0], line);
++	/* PIX WMs already started in vfe_enable; only start RDI WM here */
++	if (line->id != VFE_LINE_PIX)
++		ops->vfe_wm_start(vfe, output->wm_idx[0], line);
+ 
+ 	for (i = 0; i < 2; i++) {
++		unsigned int j;
++
+ 		output->buf[i] = vfe_buf_get_pending(output);
+ 		if (!output->buf[i])
+ 			break;
+ 		output->gen2.active_num++;
+-		ops->vfe_wm_update(vfe, output->wm_idx[0],
+-				   output->buf[i]->addr[0], line);
++		for (j = 0; j < output->wm_num; j++)
++			ops->vfe_wm_update(vfe, output->wm_idx[j],
++					   output->buf[i]->addr[j], line);
+ 		ops->reg_update(vfe, line->id);
+ 	}
+ 
+@@ -581,9 +604,12 @@ int vfe_queue_buffer_v2(struct camss_video *vid,
+ 
+ 	if (output->state == VFE_OUTPUT_ON &&
+ 	    output->gen2.active_num < 2) {
++		unsigned int j;
++
+ 		output->buf[output->gen2.active_num++] = buf;
+-		ops->vfe_wm_update(vfe, output->wm_idx[0],
+-				   buf->addr[0], line);
++		for (j = 0; j < output->wm_num; j++)
++			ops->vfe_wm_update(vfe, output->wm_idx[j],
++					   buf->addr[j], line);
+ 		ops->reg_update(vfe, line->id);
+ 	} else {
+ 		vfe_buf_add_pending(output, buf);
