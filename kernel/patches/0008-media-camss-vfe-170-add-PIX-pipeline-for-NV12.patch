@@ -1,5 +1,5 @@
 diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
-index e5ee7e717b3b..84e8218da3fb 100644
+index e5ee7e717b3b..27f4a97755e7 100644
 --- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
 +++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
 @@ -92,9 +92,64 @@
@@ -97,7 +97,7 @@ index e5ee7e717b3b..84e8218da3fb 100644
 +	/* CORE_CFG: pixel_pattern=1 (GRBG, matches downstream) */
 +	writel_relaxed(0x01, vfe->base + VFE_CORE_CFG);
 +
-+	/* Module enables: debayer + WB + color correct + more */
++	/* Module enables: downstream value */
 +	writel_relaxed(0x00000c06, vfe->base + VFE_MODULE_EN);
 +	writel_relaxed(0x00000000, vfe->base + VFE_MODULE_STATS);
 +	writel_relaxed((1 << 3) | (1 << 1), vfe->base + VFE_MODULE_COLOR);
@@ -119,8 +119,8 @@ index e5ee7e717b3b..84e8218da3fb 100644
 +	writel_relaxed(0x00000000, vfe->base + VFE_WB_CFG + 0x08);
 +	writel_relaxed(0x00000000, vfe->base + VFE_WB_CFG + 0x0c);
 +
-+	/* Black level: max scale (passthrough), offset=0 */
-+	writel_relaxed(0x3fff8000, vfe->base + VFE_BLC_CFG + 0x00);
++	/* Black level: downstream value (scale=2048, offset=0) */
++	writel_relaxed(0x04000000, vfe->base + VFE_BLC_CFG + 0x00);
 +	writel_relaxed(0x00000000, vfe->base + VFE_BLC_CFG + 0x04);
 +	writel_relaxed(0x00000000, vfe->base + VFE_BLC_CFG + 0x08);
 +
@@ -287,12 +287,12 @@ index e5ee7e717b3b..84e8218da3fb 100644
 -	      MODE_MIPI_RAW << WM_CFG_MODE;
 -	writel_relaxed(val, vfe->base + VFE_BUS_WM_CFG(wm));
 +	if (is_pix) {
++		u32 stride = pix->plane_fmt[0].bytesperline;
 +		u8 wm_idx = wm - line->output.wm_idx[0];
 +
 +		/*
-+		 * Match downstream exactly for bring-up:
-+		 * WM3 (Y):  w=0x788(1928), h=0x4c8(1224), stride=0x800(2048)
-+		 * WM4 (UV): w=0x788(1928), h=0x264(612),  stride=0x800(2048)
++		 * WM width/height from downstream: w=1928, Y h=1224, UV h=612.
++		 * Stride comes from V4L2 format (2048-aligned).
 +		 */
 +		writel_relaxed(0x788, vfe->base + VFE_BUS_WM_BUFFER_WIDTH_CFG(wm));
 +		if (wm_idx == 0)
@@ -300,7 +300,7 @@ index e5ee7e717b3b..84e8218da3fb 100644
 +		else
 +			writel_relaxed(0x264, vfe->base + VFE_BUS_WM_BUFFER_HEIGHT_CFG(wm));
 +		writel_relaxed(0x0e, vfe->base + VFE_BUS_WM_PACKER_CFG(wm));
-+		writel_relaxed(0x800, vfe->base + VFE_BUS_WM_STRIDE(wm));
++		writel_relaxed(stride, vfe->base + VFE_BUS_WM_STRIDE(wm));
 +
 +		/* Subsample/framedrop: pass all (pattern=1 means no drop) */
 +		writel_relaxed(0, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(wm));
@@ -331,7 +331,7 @@ index e5ee7e717b3b..84e8218da3fb 100644
  }
  
  static void vfe_wm_stop(struct vfe_device *vfe, u8 wm)
-@@ -256,17 +524,33 @@ static void vfe_wm_stop(struct vfe_device *vfe, u8 wm)
+@@ -256,17 +524,31 @@ static void vfe_wm_stop(struct vfe_device *vfe, u8 wm)
  static void vfe_wm_update(struct vfe_device *vfe, u8 wm, u32 addr,
  			  struct vfe_line *line)
  {
@@ -344,13 +344,11 @@ index e5ee7e717b3b..84e8218da3fb 100644
 -	writel_relaxed(stride * pix->height, vfe->base + VFE_BUS_WM_FRAME_INC(wm));
 +
 +	if (line->id == VFE_LINE_PIX) {
-+		/* Match downstream: stride=2048, Y=2048*1216, UV=2048*608 */
++		u32 stride = line->video_out.active_fmt.fmt.pix_mp.plane_fmt[0].bytesperline;
 +		u8 wm_idx = wm - line->output.wm_idx[0];
 +
-+		if (wm_idx == 0)
-+			frame_inc = 0x00260000; /* 2048 * 1216 = 2490368 */
-+		else
-+			frame_inc = 0x00130000; /* 2048 * 608 = 1245184 */
++		/* ISP outputs 1208 Y lines and 604 UV lines (metadata cropped) */
++		frame_inc = stride * (wm_idx == 0 ? 1216 : 608);
 +	} else {
 +		struct v4l2_pix_format_mplane *pix =
 +			&line->video_out.active_fmt.fmt.pix_mp;
@@ -370,7 +368,7 @@ index e5ee7e717b3b..84e8218da3fb 100644
  
  	/* Enforce ordering between previous reg writes and reg update */
  	wmb();
-@@ -280,11 +564,15 @@ static void vfe_reg_update(struct vfe_device *vfe, enum vfe_line_id line_id)
+@@ -280,11 +562,15 @@ static void vfe_reg_update(struct vfe_device *vfe, enum vfe_line_id line_id)
  static inline void vfe_reg_update_clear(struct vfe_device *vfe,
  					enum vfe_line_id line_id)
  {
@@ -387,36 +385,11 @@ index e5ee7e717b3b..84e8218da3fb 100644
  	vfe_reg_set(vfe, VFE_IRQ_MASK_0, ~0u);
  	vfe_reg_set(vfe, VFE_IRQ_MASK_1, ~0u);
  
-@@ -351,11 +639,45 @@ static irqreturn_t vfe_isr(int irq, void *dev)
+@@ -351,11 +637,20 @@ static irqreturn_t vfe_isr(int irq, void *dev)
  	if (status0 & STATUS_0_RESET_ACK)
  		vfe->isr_ops.reset_ack(vfe);
  
 -	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++)
-+	/* Debug: log ISR with CAMIF and DEMUX status on first frames */
-+	if ((status0 & STATUS_0_CAMIF_SOF) && vfe->stream_count) {
-+		static int dbg_cnt;
-+		if (dbg_cnt++ < 5) {
-+			/* CAMIF status registers */
-+			u32 camif_status = readl_relaxed(vfe->base + 0x484);
-+			/* DEMUX output: read a demux register to check */
-+			u32 demux_cfg = readl_relaxed(vfe->base + 0x560);
-+			u32 core_cfg = readl_relaxed(vfe->base + VFE_CORE_CFG);
-+			u32 module_en = readl_relaxed(vfe->base + 0x040);
-+			u32 camif_cfg = readl_relaxed(vfe->base + 0x47c);
-+			/* Composite mask 2 at 0x2018 */
-+			u32 comp_mask2 = readl_relaxed(vfe->base + 0x2018);
-+
-+			dev_info(vfe->camss->dev,
-+				 "VFE PIX: s0=0x%08x s1=0x%08x bus=[0x%08x,0x%08x]\n",
-+				 status0, status1,
-+				 vfe_bus_status[0], vfe_bus_status[1]);
-+			dev_info(vfe->camss->dev,
-+				 "  CAMIF: cfg=0x%08x status=0x%08x core=0x%x mod=0x%x demux=0x%x comp2=0x%x\n",
-+				 camif_cfg, camif_status, core_cfg,
-+				 module_en, demux_cfg, comp_mask2);
-+		}
-+	}
-+
 +	/* PIX CAMIF SOF */
 +	if (status0 & STATUS_0_CAMIF_SOF)
 +		vfe->isr_ops.sof(vfe, VFE_LINE_PIX);
@@ -435,7 +408,7 @@ index e5ee7e717b3b..84e8218da3fb 100644
  		if (status0 & STATUS_1_RDI_SOF(i))
  			vfe->isr_ops.sof(vfe, i);
  
-@@ -398,14 +720,22 @@ static int vfe_get_output(struct vfe_line *line)
+@@ -398,14 +693,22 @@ static int vfe_get_output(struct vfe_line *line)
  		goto error;
  	}
  
@@ -465,7 +438,7 @@ index e5ee7e717b3b..84e8218da3fb 100644
  
  	output->drop_update_idx = 0;
  
-@@ -446,6 +776,26 @@ static int vfe_enable(struct vfe_line *line)
+@@ -446,6 +749,20 @@ static int vfe_enable(struct vfe_line *line)
  	if (ret < 0)
  		goto error_get_output;
  
@@ -477,12 +450,6 @@ index e5ee7e717b3b..84e8218da3fb 100644
 +		u32 out_w = pix->width;
 +		u32 out_h = pix->height;
 +
-+		dev_info(vfe->camss->dev,
-+			 "PIX enable: in=%ux%u out=%ux%u wm=[%u,%u] stride=%u\n",
-+			 in_w, in_h, out_w, out_h,
-+			 line->output.wm_idx[0], line->output.wm_idx[1],
-+			 pix->plane_fmt[0].bytesperline);
-+
 +		vfe_pix_configure_isp(vfe, in_w, in_h, out_w, out_h);
 +
 +		/* Send reg_update to latch ISP config before first frame */
@@ -492,7 +459,7 @@ index e5ee7e717b3b..84e8218da3fb 100644
  	ret = vfe_enable_output_v2(line);
  	if (ret < 0)
  		goto error_enable_output;
-@@ -512,6 +862,7 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+@@ -512,6 +829,7 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
  	struct vfe_output *output;
  	unsigned long flags;
  	u32 index;
@@ -500,7 +467,7 @@ index e5ee7e717b3b..84e8218da3fb 100644
  	u64 ts = ktime_get_ns();
  
  	spin_lock_irqsave(&vfe->output_lock, flags);
-@@ -523,6 +874,10 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+@@ -523,6 +841,10 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
  	}
  	output = &vfe->line[vfe->wm_output_map[wm]].output;
  
@@ -511,7 +478,7 @@ index e5ee7e717b3b..84e8218da3fb 100644
  	ready_buf = output->buf[0];
  	if (!ready_buf) {
  		dev_err_ratelimited(vfe->camss->dev,
-@@ -540,10 +895,13 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+@@ -540,10 +862,13 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
  
  	output->buf[index] = vfe_buf_get_pending(output);
  
@@ -529,7 +496,7 @@ index e5ee7e717b3b..84e8218da3fb 100644
  	spin_unlock_irqrestore(&vfe->output_lock, flags);
  
 diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
-index dff8d0a1e8c2..3349cca73a52 100644
+index dff8d0a1e8c2..d28b9b23bee0 100644
 --- a/drivers/media/platform/qcom/camss/camss-vfe.c
 +++ b/drivers/media/platform/qcom/camss/camss-vfe.c
 @@ -277,10 +277,46 @@ const struct camss_formats vfe_formats_rdi_845 = {
@@ -613,7 +580,7 @@ index dff8d0a1e8c2..3349cca73a52 100644
  			if (index > 0)
  				return 0;
  
-@@ -539,15 +599,26 @@ int vfe_enable_output_v2(struct vfe_line *line)
+@@ -539,15 +599,20 @@ int vfe_enable_output_v2(struct vfe_line *line)
  	output->wait_reg_update = 0;
  	reinit_completion(&output->reg_update);
  
@@ -631,19 +598,13 @@ index dff8d0a1e8c2..3349cca73a52 100644
  		output->gen2.active_num++;
 -		ops->vfe_wm_update(vfe, output->wm_idx[0],
 -				   output->buf[i]->addr[0], line);
-+		for (j = 0; j < output->wm_num; j++) {
++		for (j = 0; j < output->wm_num; j++)
 +			ops->vfe_wm_update(vfe, output->wm_idx[j],
 +					   output->buf[i]->addr[j], line);
-+			if (i == 0 && output->wm_num > 1)
-+				dev_info(vfe->camss->dev,
-+					 "PIX WM%u addr=0x%pad\n",
-+					 output->wm_idx[j],
-+					 &output->buf[i]->addr[j]);
-+		}
  		ops->reg_update(vfe, line->id);
  	}
  
-@@ -581,9 +652,12 @@ int vfe_queue_buffer_v2(struct camss_video *vid,
+@@ -581,9 +646,12 @@ int vfe_queue_buffer_v2(struct camss_video *vid,
  
  	if (output->state == VFE_OUTPUT_ON &&
  	    output->gen2.active_num < 2) {
@@ -658,7 +619,7 @@ index dff8d0a1e8c2..3349cca73a52 100644
  		ops->reg_update(vfe, line->id);
  	} else {
  		vfe_buf_add_pending(output, buf);
-@@ -660,14 +734,18 @@ int vfe_get_output_v2(struct vfe_line *line)
+@@ -660,14 +728,18 @@ int vfe_get_output_v2(struct vfe_line *line)
  		goto error;
  	}
  
@@ -684,4 +645,13 @@ index dff8d0a1e8c2..3349cca73a52 100644
 +	}
  
  	output->drop_update_idx = 0;
+ 
+@@ -2075,7 +2147,7 @@ int msm_vfe_register_entities(struct vfe_device *vfe,
+ 		video_out->bpl_alignment = vfe_bpl_align(vfe);
+ 		video_out->line_based = 0;
+ 		if (i == VFE_LINE_PIX) {
+-			video_out->bpl_alignment = 16;
++			video_out->bpl_alignment = 2048;
+ 			video_out->line_based = 1;
+ 		}
  
