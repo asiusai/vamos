@@ -10,7 +10,9 @@ set -e
 # Usage:
 #   ./tools/build/dev.sh                  # build camss module
 #   ./tools/build/dev.sh kernel           # full kernel + modules
-#   ./tools/build/dev.sh push [host]      # scp module to device
+#   ./tools/build/dev.sh boot             # build signed boot.img from kernel output
+#   ./tools/build/dev.sh push [host]      # scp modules to device
+#   ./tools/build/dev.sh flash [host]     # scp boot.img + flash to boot_b + reboot
 #   ./tools/build/dev.sh config           # reconfigure kernel (after config changes)
 #
 
@@ -58,10 +60,9 @@ run() {
 case "${1:-module}" in
   module|camss)
     echo "Building camera modules..."
-    run "$MAKE -j\$(nproc) M=drivers/media/platform/qcom/camss modules"
-    run "$MAKE -j\$(nproc) M=drivers/media/i2c modules"
+    run "$MAKE -j\$(nproc) modules"
     ls -lh "$MODULE_KO"
-    find "$KBUILD_OUT/drivers/media/i2c" -name "ox03c10.ko" -exec ls -lh {} \; 2>/dev/null
+    find "$KBUILD_OUT/drivers/media/i2c" -name "ox03c10.ko" -o -name "os04c10.ko" 2>/dev/null | xargs ls -lh 2>/dev/null
     ;;
 
   kernel)
@@ -80,10 +81,94 @@ case "${1:-module}" in
     run "$MAKE olddefconfig"
     ;;
 
+  boot)
+    echo "Building signed boot.img..."
+    TOOLS="$DIR/tools/bin"
+    OUT_DIR="$DIR/build"
+    BOOT_IMG="$OUT_DIR/boot.img"
+    IMAGE_GZ="$KBUILD_OUT/arch/arm64/boot/Image.gz"
+    TMP_IMG=$(mktemp -d)
+
+    # Concatenate kernel + DTBs
+    cp "$IMAGE_GZ" "$TMP_IMG/Image.gz-dtb"
+    for dtb in "$KBUILD_OUT"/arch/arm64/boot/dts/qcom/sdm845-comma-*.dtb; do
+      [ -f "$dtb" ] && cat "$dtb" >> "$TMP_IMG/Image.gz-dtb"
+    done
+
+    # Create unsigned boot.img
+    "$TOOLS/mkbootimg" \
+      --kernel "$TMP_IMG/Image.gz-dtb" \
+      --ramdisk /dev/null \
+      --cmdline "console=ttyMSM0,115200n8 earlycon=msm_geni_serial,0xA84000 androidboot.hardware=qcom androidboot.console=ttyMSM0 ehci-hcd.park=3 lpm_levels.sleep_disabled=1 service_locator.enable=1 androidboot.selinux=permissive firmware_class.path=/lib/firmware/updates net.ifnames=0 fbcon=rotate:3" \
+      --pagesize 4096 \
+      --base 0x80000000 \
+      --kernel_offset 0x8000 \
+      --ramdisk_offset 0x8000 \
+      --tags_offset 0x100 \
+      --output "$TMP_IMG/boot.img.nonsecure"
+
+    # Sign
+    openssl dgst -sha256 -binary "$TMP_IMG/boot.img.nonsecure" > "$TMP_IMG/boot.sha256"
+    openssl pkeyutl -sign -in "$TMP_IMG/boot.sha256" \
+      -inkey "$DIR/tools/build/vble-qti.key" \
+      -out "$TMP_IMG/boot.sig" \
+      -pkeyopt digest:sha256 -pkeyopt rsa_padding_mode:pkcs1
+    dd if=/dev/zero of="$TMP_IMG/boot.sig.padded" bs=2048 count=1 2>/dev/null
+    dd if="$TMP_IMG/boot.sig" of="$TMP_IMG/boot.sig.padded" conv=notrunc 2>/dev/null
+    cat "$TMP_IMG/boot.img.nonsecure" "$TMP_IMG/boot.sig.padded" > "$BOOT_IMG"
+
+    rm -rf "$TMP_IMG"
+    ls -lh "$BOOT_IMG"
+    echo "Signed boot.img ready."
+    ;;
+
   push)
     HOST="${2:-$DEVICE}"
-    scp "$MODULE_KO" "$HOST:/tmp/"
-    echo "Reload: sudo rmmod qcom-camss; sudo insmod /tmp/qcom-camss.ko"
+    echo "Pushing modules to $HOST..."
+    MODULES=()
+    for ko in \
+      drivers/media/mc/mc.ko \
+      drivers/media/v4l2-core/videodev.ko \
+      drivers/media/v4l2-core/v4l2-async.ko \
+      drivers/media/v4l2-core/v4l2-fwnode.ko \
+      drivers/media/v4l2-core/v4l2-cci.ko \
+      drivers/media/common/videobuf2/videobuf2-common.ko \
+      drivers/media/common/videobuf2/videobuf2-v4l2.ko \
+      drivers/media/common/videobuf2/videobuf2-memops.ko \
+      drivers/media/common/videobuf2/videobuf2-dma-sg.ko \
+      drivers/media/platform/qcom/camss/qcom-camss.ko \
+      drivers/media/i2c/ox03c10.ko \
+      drivers/media/i2c/os04c10.ko \
+    ; do
+      [ -f "$KBUILD_OUT/$ko" ] && MODULES+=("$KBUILD_OUT/$ko")
+    done
+    scp "${MODULES[@]}" "$HOST:/tmp/"
+    echo "Load: ssh $HOST 'sudo /tmp/load_camera.sh'"
+    # Also push a load script
+    cat <<'LOADEOF' | ssh "$HOST" "cat > /tmp/load_camera.sh && chmod +x /tmp/load_camera.sh"
+#!/bin/sh
+set -e
+for m in mc videodev v4l2-async v4l2-fwnode v4l2-cci \
+         videobuf2-common videobuf2-v4l2 videobuf2-memops videobuf2-dma-sg \
+         qcom-camss ox03c10; do
+  mod="/tmp/${m}.ko"
+  [ -f "$mod" ] && insmod "$mod" 2>/dev/null && echo "loaded $m" || echo "skip $m (already loaded or missing)"
+done
+LOADEOF
+    ;;
+
+  flash)
+    HOST="${2:-$DEVICE}"
+    BOOT_IMG="$DIR/build/boot.img"
+    if [ ! -f "$BOOT_IMG" ]; then
+      echo "No boot.img found. Run: $0 boot"
+      exit 1
+    fi
+    echo "Flashing boot.img to boot_b on $HOST..."
+    scp "$BOOT_IMG" "$HOST:/tmp/boot.img"
+    ssh "$HOST" "sudo dd if=/tmp/boot.img of=/dev/disk/by-partlabel/boot_b bs=4096 && sync && echo 'FLASH OK'"
+    echo "Rebooting..."
+    ssh "$HOST" "sudo reboot" || true
     ;;
 
   shell)
@@ -96,6 +181,6 @@ case "${1:-module}" in
     ;;
 
   *)
-    echo "Usage: $0 {module|kernel|config|push [host]|shell|clean}"
+    echo "Usage: $0 {module|kernel|boot|push [host]|flash [host]|config|shell|clean}"
     ;;
 esac
