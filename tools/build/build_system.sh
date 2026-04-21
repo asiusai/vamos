@@ -19,7 +19,7 @@ OUT_IMAGE="$OUTPUT_DIR/system.img"
 
 # the partition is 10G, but openpilot's updater didn't always handle the full size
 # Increased from 4500M to 6G for Python packages
-ROOTFS_IMAGE_SIZE=6G
+ROOTFS_IMAGE_SIZE=10G
 
 # Create temp dir if non-existent
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR" "$DOWNLOADS_DIR"
