@@ -12,3 +12,15 @@ userspace/root/usr/share/fonts/*.woff2 filter=lfs diff=lfs merge=lfs -text
 kernel/firmware/**/*.mbn filter=lfs diff=lfs merge=lfs -text
 kernel/firmware/**/*.bin filter=lfs diff=lfs merge=lfs -text
 kernel/firmware/**/*.tlv filter=lfs diff=lfs merge=lfs -text
+
+# Dragon Q6A firmware — Qualcomm-signed blobs for QCS6490 peripherals.
+userspace/root/usr/lib/firmware/**/*.mbn filter=lfs diff=lfs merge=lfs -text
+userspace/root/usr/lib/firmware/**/*.bin filter=lfs diff=lfs merge=lfs -text
+userspace/root/usr/lib/firmware/**/*.tlv filter=lfs diff=lfs merge=lfs -text
+userspace/root/usr/lib/firmware/**/*.Fv  filter=lfs diff=lfs merge=lfs -text
+userspace/root/usr/lib/firmware/**/*.fw  filter=lfs diff=lfs merge=lfs -text
+userspace/root/usr/lib/firmware/**/*.fw2 filter=lfs diff=lfs merge=lfs -text
+userspace/root/usr/lib/firmware/**/*.wmfw filter=lfs diff=lfs merge=lfs -text
+
+# Dragon EDL Firehose flasher + Radxa boot XMLs
+firmware-dragon/** filter=lfs diff=lfs merge=lfs -text
