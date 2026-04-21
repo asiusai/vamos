@@ -1,0 +1,3 @@
+SUBSYSTEM=="video4linux", MODE="0666"
+KERNEL=="media[0-9]*", MODE="0666"
+SUBSYSTEM=="dma_heap", MODE="0666"

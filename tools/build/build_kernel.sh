@@ -111,29 +111,11 @@ docker build -f tools/build/Dockerfile.builder -t vamos-builder "$DIR" \
   --build-arg GID="$(id -g)"
 
 echo "Starting vamos-builder container"
-if [ "$HOST_OS" = "Darwin" ]; then
-  if ! kernel_workspace_ready; then
-    echo "Kernel workspace volume is missing, uninitialized, or out of date; reseeding"
-    prepare_kernel_volume
-    seed_kernel_workspace
-  fi
-  prepare_ccache_volume
-  CONTAINER_ID=$(docker run -d \
-    -u "$(id -u):$(id -g)" \
-    -v "$DIR":"$DIR" \
-    -v "$KERNEL_LINUX_VOLUME:$KERNEL_DIR" \
-    -v "$CCACHE_VOLUME:/ccache" \
-    -w "$DIR" \
-    vamos-builder)
-else
-  # For a git worktree, mount the shared .git so in-container git resolves
-  GIT_MOUNT_ARGS=()
-  if [ -f "$DIR/.git" ]; then
-    GIT_COMMON_DIR="$(git -C "$DIR" rev-parse --path-format=absolute --git-common-dir)"
-    GIT_MOUNT_ARGS=(-v "$GIT_COMMON_DIR":"$GIT_COMMON_DIR")
-  fi
-  CONTAINER_ID=$(docker run -d -u "$(id -u):$(id -g)" -v "$DIR":"$DIR" "${GIT_MOUNT_ARGS[@]}" -w "$DIR" vamos-builder)
-fi
+# If vamOS is itself a git submodule, mount the outer superproject so that
+# nested .git gitfiles (kernel/linux/.git → ../../../.git/modules/...) resolve.
+MOUNT_ROOT="$(git -C "$DIR" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+[ -z "$MOUNT_ROOT" ] && MOUNT_ROOT="$DIR"
+CONTAINER_ID=$(docker run -d --ulimit nofile=65536:65536 -u "$(id -u):$(id -g)" -v "$MOUNT_ROOT":"$MOUNT_ROOT":z -w "$DIR" vamos-builder)
 
 trap cleanup EXIT
 

@@ -1,24 +1,22 @@
-From: Andrei Radulescu <andi.radulescu@gmail.com>
-Subject: [PATCH] media: camss: add VFE PIX pipeline and userspace register control
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Karel Nagel <nagelkarel@gmail.com>
+Date: Mon, 21 Apr 2025 00:00:00 +0000
+Subject: [PATCH] media: camss: add VFE PIX pipeline and userspace register
+ control
 
-Add VFE 170 PIX ISP pipeline (debayer, color correction, gamma, scaler,
-NV12 output) with full userspace register control for SDM845.
+Add custom ioctls (VFE_START, VFE_STOP, VFE_WAIT_SOF, VFE_MAP_BUF,
+VFE_WRITE_REGS, SENSOR_WRITE_REGS) allowing userspace to drive the
+ISP pipeline directly. The kernel handles power, clocks, IOMMU,
+interrupt delivery, and upstream entity streaming. Userspace (camerad)
+programs ISP registers and controls frame output directly.
 
-New UAPI header (include/uapi/linux/qcom-camss-vfe.h) defines ioctls:
-- VFE_WRITE_REGS / VFE_WRITE_DMI: direct ISP register and DMI LUT writes
-- VFE_MAP_BUF / VFE_UNMAP_BUF: DMA-BUF IOMMU mapping for output buffers
-- VFE_SET_BUF / VFE_REG_UPDATE: per-frame buffer and register latching
-- VFE_START / VFE_STOP: pipeline lifecycle (powers VFE, starts upstream)
-- VFE_WAIT_SOF: blocking wait for start-of-frame IRQ
-- SENSOR_WRITE_REGS: sensor register writes via CCI (used by sensor drivers)
-
-The kernel handles power, clocks, IOMMU, interrupt delivery, and
-upstream entity streaming. Userspace (camerad) programs ISP registers
-and controls frame output directly.
+VFE_START now calls s_power(1) on upstream subdevs (CSIPHY, CSID) before
+s_stream(1), ensuring clocks are enabled and hardware is reset before
+streaming configuration.
 
 ---
 diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
-index e5ee7e717b3b..ac96c78bcd73 100644
+index e5ee7e717b3b..fd2656e359d6 100644
 --- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
 +++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
 @@ -10,6 +10,7 @@
@@ -418,25 +416,12 @@ index e5ee7e717b3b..ac96c78bcd73 100644
  
 -	val = WM_BUFFER_DEFAULT_WIDTH;
 -	writel_relaxed(val, vfe->base + VFE_BUS_WM_BUFFER_WIDTH_CFG(wm));
--
--	val = 0;
--	writel_relaxed(val, vfe->base + VFE_BUS_WM_BUFFER_HEIGHT_CFG(wm));
--
--	val = 0;
--	writel_relaxed(val, vfe->base + VFE_BUS_WM_PACKER_CFG(wm)); // XXX 1 for PLAIN8?
--
--	/* Configure stride for RDIs */
--	val = WM_STRIDE_DEFAULT_STRIDE;
--	writel_relaxed(val, vfe->base + VFE_BUS_WM_STRIDE(wm));
--
--	/* Enable WM */
--	val = 1 << WM_CFG_EN |
--	      MODE_MIPI_RAW << WM_CFG_MODE;
--	writel_relaxed(val, vfe->base + VFE_BUS_WM_CFG(wm));
 +	if (is_pix) {
 +		u32 stride = pix->plane_fmt[0].bytesperline;
 +		u8 wm_idx = wm - line->output.wm_idx[0];
-+
+ 
+-	val = 0;
+-	writel_relaxed(val, vfe->base + VFE_BUS_WM_BUFFER_HEIGHT_CFG(wm));
 +		/*
 +		 * WM width/height from downstream: w=1928, Y h=1224, UV h=612.
 +		 * Stride comes from V4L2 format (2048-aligned).
@@ -448,13 +433,18 @@ index e5ee7e717b3b..ac96c78bcd73 100644
 +			writel_relaxed(0x264, vfe->base + VFE_BUS_WM_BUFFER_HEIGHT_CFG(wm));
 +		writel_relaxed(0x0e, vfe->base + VFE_BUS_WM_PACKER_CFG(wm));
 +		writel_relaxed(stride, vfe->base + VFE_BUS_WM_STRIDE(wm));
-+
+ 
+-	val = 0;
+-	writel_relaxed(val, vfe->base + VFE_BUS_WM_PACKER_CFG(wm)); // XXX 1 for PLAIN8?
 +		/* Subsample/framedrop: pass all (pattern=1 means no drop) */
 +		writel_relaxed(0, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(wm));
 +		writel_relaxed(1, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PATTERN(wm));
 +		writel_relaxed(0, vfe->base + VFE_BUS_WM_FRAMEDROP_PERIOD(wm));
 +		writel_relaxed(1, vfe->base + VFE_BUS_WM_FRAMEDROP_PATTERN(wm));
-+
+ 
+-	/* Configure stride for RDIs */
+-	val = WM_STRIDE_DEFAULT_STRIDE;
+-	writel_relaxed(val, vfe->base + VFE_BUS_WM_STRIDE(wm));
 +		/* Enable WM: QCOM_PLAIN mode for processed output */
 +		val = 1 << WM_CFG_EN |
 +		      MODE_QCOM_PLAIN << WM_CFG_MODE;
@@ -462,7 +452,11 @@ index e5ee7e717b3b..ac96c78bcd73 100644
 +	} else {
 +		val = WM_BUFFER_DEFAULT_WIDTH;
 +		writel_relaxed(val, vfe->base + VFE_BUS_WM_BUFFER_WIDTH_CFG(wm));
-+
+ 
+-	/* Enable WM */
+-	val = 1 << WM_CFG_EN |
+-	      MODE_MIPI_RAW << WM_CFG_MODE;
+-	writel_relaxed(val, vfe->base + VFE_BUS_WM_CFG(wm));
 +		writel_relaxed(0, vfe->base + VFE_BUS_WM_BUFFER_HEIGHT_CFG(wm));
 +		writel_relaxed(0, vfe->base + VFE_BUS_WM_PACKER_CFG(wm));
 +
@@ -655,7 +649,7 @@ index e5ee7e717b3b..ac96c78bcd73 100644
  
  	spin_unlock_irqrestore(&vfe->output_lock, flags);
  
-@@ -575,6 +1025,292 @@ static void vfe_subdev_init(struct device *dev, struct vfe_device *vfe)
+@@ -575,6 +1025,316 @@ static void vfe_subdev_init(struct device *dev, struct vfe_device *vfe)
  	vfe->video_ops = vfe_video_ops_170;
  }
  
@@ -865,13 +859,14 @@ index e5ee7e717b3b..ac96c78bcd73 100644
 +	if (ret < 0)
 +		goto error_stream;
 +
-+	/* Configure PIX write masters */
++	/* Configure PIX write masters and BUS routing */
 +	{
 +		struct vfe_output *output = &line->output;
 +		int i;
 +
 +		for (i = 0; i < output->wm_num; i++)
 +			vfe->res->hw_ops->vfe_wm_start(vfe, output->wm_idx[i], line);
++		vfe_pix_set_crop_wm(vfe, output->wm_idx[0], output->wm_idx[1]);
 +	}
 +
 +	/* Start media pipeline (validates format matching across links) */
@@ -879,7 +874,7 @@ index e5ee7e717b3b..ac96c78bcd73 100644
 +	if (ret < 0)
 +		pr_warn("vfe_17x_start: pipeline_start returned %d, continuing anyway\n", ret);
 +
-+	/* Walk upstream from VFE subdev and call s_stream(1) on each entity */
++	/* Walk upstream: power on (s_power) then start streaming (s_stream) */
 +	entity = &line->subdev.entity;
 +	while (1) {
 +		pad = &entity->pads[0];
@@ -892,6 +887,11 @@ index e5ee7e717b3b..ac96c78bcd73 100644
 +
 +		entity = pad->entity;
 +		subdev = media_entity_to_v4l2_subdev(entity);
++
++		ret = v4l2_subdev_call(subdev, core, s_power, 1);
++		if (ret < 0 && ret != -ENOIOCTLCMD)
++			pr_warn("vfe_17x_start: s_power on %s returned %d\n",
++				subdev->name, ret);
 +
 +		pr_info("vfe_17x_start: calling s_stream(1) on %s\n", subdev->name);
 +		ret = v4l2_subdev_call(subdev, video, s_stream, 1);
@@ -923,7 +923,25 @@ index e5ee7e717b3b..ac96c78bcd73 100644
 +static long vfe_17x_stop(struct vfe_device *vfe, struct vfe_line *line)
 +{
 +	struct vfe_output *output = &line->output;
++	struct media_entity *entity;
++	struct media_pad *pad;
++	struct v4l2_subdev *subdev;
 +	int i;
++
++	/* Stop upstream: s_stream(0) then s_power(0) */
++	entity = &line->subdev.entity;
++	while (1) {
++		pad = &entity->pads[0];
++		if (!(pad->flags & MEDIA_PAD_FL_SINK))
++			break;
++		pad = media_pad_remote_pad_first(pad);
++		if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
++			break;
++		entity = pad->entity;
++		subdev = media_entity_to_v4l2_subdev(entity);
++		v4l2_subdev_call(subdev, video, s_stream, 0);
++		v4l2_subdev_call(subdev, core, s_power, 0);
++	}
 +
 +	for (i = 0; i < output->wm_num; i++)
 +		vfe->res->hw_ops->vfe_wm_stop(vfe, output->wm_idx[i]);
@@ -948,7 +966,7 @@ index e5ee7e717b3b..ac96c78bcd73 100644
  const struct vfe_hw_ops vfe_ops_170 = {
  	.global_reset = vfe_global_reset,
  	.hw_version = vfe_hw_version,
-@@ -592,4 +1328,14 @@ const struct vfe_hw_ops vfe_ops_170 = {
+@@ -592,4 +1352,14 @@ const struct vfe_hw_ops vfe_ops_170 = {
  	.vfe_wm_start = vfe_wm_start,
  	.vfe_wm_stop = vfe_wm_stop,
  	.vfe_wm_update = vfe_wm_update,

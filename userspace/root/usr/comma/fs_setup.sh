@@ -59,6 +59,10 @@ mkswap /dev/zram0
 swapon -p 100 /dev/zram0
 echo 10 > /proc/sys/vm/swappiness
 
+# Camera and DMA-BUF device permissions
+chmod 666 /dev/dma_heap/* 2>/dev/null
+chmod 666 /dev/video* /dev/media* 2>/dev/null
+
 # Signal readiness for services that depend on the overlay
 mkdir -p /run
 chmod 0755 /run

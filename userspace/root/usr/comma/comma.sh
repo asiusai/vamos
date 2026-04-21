@@ -80,6 +80,18 @@ ln -s /data/tmp/vscode-server ~/.vscode-server
 ln -s /data/tmp/vscode-server ~/.cursor-server
 ln -s /data/tmp/vscode-server ~/.windsurf-server
 
+# Auto-install openpilot if no continue.sh and no openpilot
+if [[ ! -f $CONTINUE && ! -d /data/openpilot ]]; then
+  echo "No openpilot found, cloning asiusai/openpilot vamos branch..."
+  git clone --depth 1 -b vamos https://github.com/asiusai/openpilot.git /data/openpilot
+  cat > $CONTINUE << 'CONT'
+#!/usr/bin/env bash
+cd /data/openpilot
+exec /data/openpilot/launch_openpilot.sh
+CONT
+  chmod +x $CONTINUE
+fi
+
 while true; do
   pkill -f "$SETUP"
   handle_setup_keys

@@ -37,7 +37,7 @@ case "${1:-}" in
       system)   exec "$DIR/tools/flash/system.sh" ;;
       firmware) exec "$DIR/tools/flash/firmware.sh" ;;
       gpt)      exec "$DIR/tools/flash/gpt.sh" ;;
-      all)      "$DIR/tools/flash/gpt.sh" && "$DIR/tools/flash/firmware.sh" && "$DIR/tools/flash/kernel.sh" && "$DIR/tools/flash/system.sh" ;;
+      all)      VAMOS_NO_RESET=1 "$DIR/tools/flash/gpt.sh" && VAMOS_NO_RESET=1 "$DIR/tools/flash/firmware.sh" && VAMOS_NO_RESET=1 "$DIR/tools/flash/kernel.sh" && VAMOS_NO_RESET=1 "$DIR/tools/flash/system.sh" && "$DIR/tools/bin/qdl" reset ;;
       *)        echo "Usage: vamos flash <kernel|system|firmware|gpt|all>"; exit 1 ;;
     esac ;;
   profile)

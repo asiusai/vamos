@@ -33,9 +33,14 @@ if [ ! -f "$VOID_ROOTFS_FILE" ]; then
   fi
 fi
 
-# Check SHA256 sum
-if [ "$(shasum -a 256 "$VOID_ROOTFS_FILE" | awk '{print $1}')" != "$VOID_ROOTFS_SHA256" ]; then
-  echo "Checksum mismatch"
+# Check SHA256 sum (shasum is macOS/Ubuntu, sha256sum is Fedora/RHEL)
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL_HASH=$(sha256sum "$VOID_ROOTFS_FILE" | awk '{print $1}')
+else
+  ACTUAL_HASH=$(shasum -a 256 "$VOID_ROOTFS_FILE" | awk '{print $1}')
+fi
+if [ "$ACTUAL_HASH" != "$VOID_ROOTFS_SHA256" ]; then
+  echo "Checksum mismatch: got $ACTUAL_HASH, expected $VOID_ROOTFS_SHA256"
   exit 1
 fi
 
@@ -57,7 +62,11 @@ docker build -f tools/build/Dockerfile.builder -t vamos-builder "$DIR" \
   --build-arg GID="$(id -g)"
 
 echo "Starting builder container"
-MOUNT_CONTAINER_ID=$(docker run -d --privileged -v "$DIR:$DIR" vamos-builder)
+# If vamOS is itself a git submodule, mount the outer superproject so that
+# nested .git gitfiles resolve inside the container.
+MOUNT_ROOT="$(git -C "$DIR" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+[ -z "$MOUNT_ROOT" ] && MOUNT_ROOT="$DIR"
+MOUNT_CONTAINER_ID=$(docker run -d --ulimit nofile=65536:65536 --privileged -v /dev:/dev -v "$MOUNT_ROOT:$MOUNT_ROOT:z" vamos-builder)
 
 # Cleanup containers on possible exit
 trap "echo \"Cleaning up containers:\"; \

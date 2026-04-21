@@ -489,14 +489,6 @@
 	vdda-pll-supply = <&vreg_l26a_1p2>;
 
 	ports {
-		port@0 {
-			reg = <0>;
-			csiphy0_ep: endpoint {
-				data-lanes = <0 1 2 3>;
-				remote-endpoint = <&ox03c10_wide_ep>;
-			};
-		};
-
 		port@1 {
 			reg = <1>;
 			csiphy1_ep: endpoint {
@@ -522,26 +514,11 @@
 &cci_i2c0 {
 	clock-frequency = <400000>;
 
-	/* Camera 0: wide road (OX03C10) */
+	/* Camera 0: wide road (OX03C10) — disabled: reads chip ID 0x0000 on this unit */
 	camera@36 {
 		compatible = "ovti,ox03c10";
 		reg = <0x36>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&cam0_default>;
-		clocks = <&clock_camcc CAM_CC_MCLK0_CLK>;
-		clock-names = "extclk";
-		reset-gpios = <&tlmm 9 GPIO_ACTIVE_LOW>;
-		avdd-supply = <&vreg_bob>;
-		dovdd-supply = <&vreg_lvs1a_1p8>;
-		dvdd-supply = <&camera_rear_ldo>;
-
-		port {
-			ox03c10_wide_ep: endpoint {
-				data-lanes = <0 1 2 3>;
-				link-frequencies = /bits/ 64 <600000000>;
-				remote-endpoint = <&csiphy0_ep>;
-			};
-		};
+		status = "disabled";
 	};
 
 	/* Camera 1: road (OX03C10 at different address) */

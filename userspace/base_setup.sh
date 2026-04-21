@@ -150,6 +150,7 @@ ln -sf /usr/bin/bash /bin/sh
 
 # Enable essential services
 ln -sf /etc/sv/dbus /etc/runit/runsvdir/default/
+ln -sf /etc/sv/wpa_supplicant /etc/runit/runsvdir/default/
 ln -sf /etc/sv/NetworkManager /etc/runit/runsvdir/default/
 ln -sf /etc/sv/sshd /etc/runit/runsvdir/default/
 ln -sf /etc/sv/avahi-daemon /etc/runit/runsvdir/default/
