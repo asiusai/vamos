@@ -12,19 +12,21 @@ CONTINUE="/data/continue.sh"
 INSTALLER="/tmp/installer"
 RESET_TRIGGER="/data/__system_reset__"
 
-echo "waiting for magic"
-for i in {1..200}; do
-  # Check for drmfd socket (magic service creates this when ready)
-  if [ -S /tmp/drmfd.sock ]; then
-    break
-  fi
-  sleep 0.1
-done
+if [ ! -f /ASIUS ]; then
+  echo "waiting for magic"
+  for i in {1..200}; do
+    # Check for drmfd socket (magic service creates this when ready)
+    if [ -S /tmp/drmfd.sock ]; then
+      break
+    fi
+    sleep 0.1
+  done
 
-if [ -S /tmp/drmfd.sock ]; then
-  echo "magic ready after ${SECONDS}s"
-else
-  echo "timed out waiting for magic, ${SECONDS}s"
+  if [ -S /tmp/drmfd.sock ]; then
+    echo "magic ready after ${SECONDS}s"
+  else
+    echo "timed out waiting for magic, ${SECONDS}s"
+  fi
 fi
 
 sudo chown comma: /data

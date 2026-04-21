@@ -85,6 +85,8 @@ RUN mkdir -p /root/.config
 # Re-enable as Dragon support for those subsystems lands.
 RUN for svc in \
   sshd rsyslogd busybox-ntpd iptables \
+  bluetoothd \
+  comma \
   agetty-ttyMSM0 agetty-ttyAMA0; do \
     ln -sf /etc/sv/$svc /etc/runit/runsvdir/default/; \
   done

@@ -132,6 +132,39 @@ exec_as_root sh -c "
   printf '%s\n%s\n' '$GIT_HASH' '$DATETIME' > BUILD
 "
 
+# Bake openpilot into /data/openpilot so first boot works offline.
+# Path resolution: vamos may be a submodule; the outer asius repo contains
+# openpilot/ alongside vamos/. Fall back to not baking if not found.
+OP_SRC=""
+for cand in "$DIR/../openpilot" "$(git -C "$DIR" rev-parse --show-superproject-working-tree 2>/dev/null)/openpilot"; do
+  [ -d "$cand" ] && OP_SRC="$(cd "$cand" && pwd)" && break
+done
+if [ -n "$OP_SRC" ]; then
+  echo "Baking openpilot from $OP_SRC into /data/openpilot"
+  exec_as_root mkdir -p "$ROOTFS_DIR/data/openpilot"
+  # Use rsync inside the container so Alpine's rsync handles mount ownership
+  # cp -a outside container (simpler than adding rsync to builder)
+  sudo cp -a "$OP_SRC/." "$ROOTFS_DIR/data/openpilot/"
+  # strip heavy dirs we don't need at runtime
+  sudo rm -rf "$ROOTFS_DIR/data/openpilot/.git" \
+              "$ROOTFS_DIR/data/openpilot/build" \
+              "$ROOTFS_DIR/data/openpilot/scons_cache"
+  sudo find "$ROOTFS_DIR/data/openpilot" -name '__pycache__' -type d -prune -exec rm -rf {} +
+  sudo find "$ROOTFS_DIR/data/openpilot" -name '*.o' -delete
+  # Mark it so the comma.sh auto-install path skips the git clone on firstboot
+  exec_as_root sh -c "
+    cat > '$ROOTFS_DIR/data/continue.sh' <<'CONT'
+#!/usr/bin/env bash
+cd /data/openpilot
+exec /data/openpilot/launch_openpilot.sh
+CONT
+    chmod +x '$ROOTFS_DIR/data/continue.sh'
+  "
+  exec_as_root chown -R 1000:1000 "$ROOTFS_DIR/data/openpilot" "$ROOTFS_DIR/data/continue.sh"
+else
+  echo "WARN: openpilot not found next to vamos; /data/openpilot will be empty on first boot"
+fi
+
 # Profile rootfs (before unmount)
 echo "Profiling rootfs"
 MOUNT_CONTAINER_ID="$MOUNT_CONTAINER_ID" ROOTFS_DIR="$ROOTFS_DIR" \

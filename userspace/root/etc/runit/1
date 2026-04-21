@@ -120,6 +120,24 @@ mount_part() {
 # don't exist on Dragon. If a future build adds them, wire up mount_part calls.
 echo "=> Skipping optional partition mounts (Dragon layout is esp+rootfs only)"
 
+# readonly_setup moved /home to /usr/default/home at build time. comma's
+# fs_setup service overlay-mounts it back at runtime from /data — we don't
+# run fs_setup on Dragon (no /data partition), so restore /home/comma
+# with a plain copy on first boot if missing.
+if [ -d /usr/default/home/comma ] && [ ! -e /home/comma/.bashrc ]; then
+  echo "=> Restoring /home/comma from /usr/default/home/comma"
+  mkdir -p /home
+  cp -a /usr/default/home/comma /home/comma
+  chown -R comma:comma /home/comma
+fi
+
+# /data writable scaffolding (comma mounted /data from a real partition; we
+# fake it by keeping directories writable on the rw rootfs).
+for d in /data/scons_cache /data/media/0/realdata /data/log /data/params/d /data/stats /data/safe_staging; do
+  mkdir -p "$d" 2>/dev/null || true
+done
+chown -R comma:comma /data/scons_cache /data/media /data/log /data/params /data/stats /data/safe_staging 2>/dev/null || true
+
 echo "=> Setting hostname..."
 /usr/comma/set-hostname.sh
 
