@@ -115,21 +115,10 @@ mount_part() {
     fi
 }
 
-echo "=> Mounting partitions..."
-# Critical partitions (with options: partlabel:mountpoint:options)
-# Note: /firmware (modem_a) is mounted earlier before udev
-for part in \
-    "userdata:/data:rw,noatime,nodiratime" \
-    "dsp_a:/dsp:ro" \
-    "persist:/persist:ro" \
-    "cache:/cache:relatime,data=ordered,noauto_da_alloc,discard,noexec,nodev,nosuid" \
-; do
-    label="${part%%:*}"
-    rest="${part#*:}"
-    mnt="${rest%%:*}"
-    opts="${rest#*:}"
-    mount_part "$label" "$mnt" "$opts"
-done
+# No extra partitions to mount on Dragon Q6A (vamOS target): only esp + rootfs.
+# Comma devices mounted dsp_a/persist/cache/userdata here; those partitions
+# don't exist on Dragon. If a future build adds them, wire up mount_part calls.
+echo "=> Skipping optional partition mounts (Dragon layout is esp+rootfs only)"
 
 echo "=> Setting hostname..."
 /usr/comma/set-hostname.sh

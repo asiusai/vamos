@@ -29,16 +29,15 @@ case "${1:-}" in
     case "${2:-}" in
       kernel) exec "$DIR/tools/build/build_kernel.sh" ;;
       system) exec "$DIR/tools/build/build_system.sh" ;;
-      *)      echo "Usage: vamos build <kernel|system>"; exit 1 ;;
+      disk)   exec "$DIR/tools/build/build_disk.sh" ;;
+      all)    "$DIR/tools/build/build_kernel.sh" && "$DIR/tools/build/build_system.sh" && "$DIR/tools/build/build_disk.sh" ;;
+      *)      echo "Usage: vamos build <kernel|system|disk|all>"; exit 1 ;;
     esac ;;
   flash)
     case "${2:-}" in
-      kernel)   exec "$DIR/tools/flash/kernel.sh" "${3:-}" ;;
-      system)   exec "$DIR/tools/flash/system.sh" ;;
-      firmware) exec "$DIR/tools/flash/firmware.sh" ;;
-      gpt)      exec "$DIR/tools/flash/gpt.sh" ;;
-      all)      VAMOS_NO_RESET=1 "$DIR/tools/flash/gpt.sh" && VAMOS_NO_RESET=1 "$DIR/tools/flash/firmware.sh" && VAMOS_NO_RESET=1 "$DIR/tools/flash/kernel.sh" && VAMOS_NO_RESET=1 "$DIR/tools/flash/system.sh" && "$DIR/tools/bin/qdl" reset ;;
-      *)        echo "Usage: vamos flash <kernel|system|firmware|gpt|all>"; exit 1 ;;
+      kernel) exec "$DIR/tools/flash/kernel.sh" ;;
+      system) exec "$DIR/tools/flash/system.sh" ;;
+      *)      echo "Usage: vamos flash <kernel|system>"; exit 1 ;;
     esac ;;
   profile)
     shift
@@ -47,13 +46,12 @@ case "${1:-}" in
     echo "Usage: vamos <setup|build|flash|profile>"
     echo ""
     echo "  setup              Initialize submodules and udev rules"
-    echo "  build kernel       Build the kernel (output/boot.img)"
-    echo "  build system       Build the system image (output/system.img)"
-    echo "  flash kernel       Flash boot.img to device via EDL (--legacy for legacy kernel)"
-    echo "  flash system       Flash system.img to device via EDL"
-    echo "  flash firmware     Flash firmware partitions to device via EDL"
-    echo "  flash gpt          Flash GPT partition tables to device via EDL"
-    echo "  flash all          Flash gpt + firmware + kernel + system"
+    echo "  build kernel       Build the kernel → build/Image + dtb"
+    echo "  build system       Build the rootfs  → build/system.img (ext4)"
+    echo "  build disk         Assemble full disk image → build/dragon.img (GPT+ESP+rootfs)"
+    echo "  build all          Do all three in order"
+    echo "  flash system       Flash build/dragon.img to Dragon eMMC via EDL (full reflash)"
+    echo "  flash kernel       Flash just the ESP partition to Dragon eMMC via EDL (fast iter)"
     echo "  profile [diff]     Profile rootfs or diff two profiles"
     exit 1 ;;
 esac

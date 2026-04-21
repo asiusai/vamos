@@ -1,0 +1,75 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] arm64: dts: qcom: qcs6490-radxa-dragon-q6a: enable CAM2 IMX219
+
+Inlines Radxa's stock qcs6490-radxa-dragon-q6a-cam2-radxa-camera-8m-219.dtso
+overlay into the base DTS.
+
+Signed-off-by: Asius <dev@asius.ai>
+---
+ .../boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts     | 57 ++++++++++++++++++++++
+ 1 file changed, 57 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+--- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
++++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+@@ -1563,3 +1563,60 @@
+ 		bias-pull-up;
+ 	};
+ };
++
++&camss {
++	status = "okay";
++
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@2 {
++			reg = <2>;
++
++			csiphy2_ep: endpoint {
++				clock-lanes = <7>;
++				data-lanes = <1 0>;
++				remote-endpoint = <&imx219_cam2_ep>;
++			};
++		};
++	};
++};
++
++&cci1 {
++	status = "okay";
++};
++
++&cci1_i2c0 {
++	#address-cells = <1>;
++	#size-cells = <0>;
++	status = "okay";
++
++	imx219_cam2: camera@10 {
++		compatible = "sony,imx219";
++		reg = <0x10>;
++		clocks = <&camcc CAM_CC_MCLK2_CLK>;
++		clock-names = "xclk";
++		assigned-clocks = <&camcc CAM_CC_MCLK2_CLK>;
++		assigned-clock-rates = <24000000>;
++		reset-gpios = <&tlmm 77 0>;
++
++		port {
++			imx219_cam2_ep: endpoint {
++				link-frequencies = /bits/ 64 <456000000>;
++				data-lanes = <1 2>;
++				remote-endpoint = <&csiphy2_ep>;
++			};
++		};
++	};
++};
++
++&tlmm {
++	cam_pwdn_gpio_0: cam-pwdn-gpio-0-state {
++		pins = "gpio77";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-pull-up;
++	};
++};
++

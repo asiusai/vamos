@@ -4,22 +4,16 @@ set -e
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null && pwd)"
 cd "$DIR"
 
-TOOLS="$DIR/tools/bin"
 KERNEL_DIR="$DIR/kernel/linux"
 PATCHES_DIR="$DIR/kernel/patches"
 KBUILD_OUT="$DIR/build/kernel-out"
-TMP_DIR="$DIR/build/tmp-kernel"
 OUT_DIR="$DIR/build"
-BOOT_IMG=./boot.img
 
 BASE_DEFCONFIG="defconfig"
 CONFIG_FRAGMENT="$DIR/kernel/configs/vamos.config"
 
-COMMON_DTSI="$DIR/kernel/dts/sdm845-comma-common.dtsi"
-DTS_FILES=(
-  "$DIR/kernel/dts/sdm845-comma-mici.dts"
-  "$DIR/kernel/dts/sdm845-comma-tizi.dts"
-)
+# Dragon Q6A DTB (patched into the kernel tree by kernel/patches/0032,0051)
+DTB_TARGET="qcom/qcs6490-radxa-dragon-q6a.dtb"
 
 HOST_OS="$(uname)"
 KERNEL_LINUX_VOLUME="vamos-kernel-linux"
@@ -91,8 +85,8 @@ apply_patches() {
     echo "-- Applying patches --"
     for patch in "$PATCHES_DIR"/*.patch; do
       echo "Applying $(basename "$patch")"
-      git apply --check --whitespace=error "$patch"
-      git apply --whitespace=error "$patch"
+      git apply --check --whitespace=nowarn "$patch"
+      git apply --whitespace=nowarn "$patch"
     done
   fi
 
@@ -120,9 +114,6 @@ CONTAINER_ID=$(docker run -d --ulimit nofile=65536:65536 -u "$(id -u):$(id -g)" 
 trap cleanup EXIT
 
 build_kernel() {
-  # Install the device tree files
-  install_dts
-
   # Cross-compilation setup
   ARCH_HOST=$(uname -m)
   export ARCH=arm64
@@ -143,7 +134,7 @@ build_kernel() {
   export KBUILD_BUILD_HOST="vamos"
   export KCFLAGS="-w"
 
-  # GIT_REV is computed on the host and passed in via the container heredoc.
+  GIT_REV="$(git -C $DIR rev-parse --short HEAD)"
   export LOCALVERSION="-vamos-$GIT_REV"
 
   # Build kernel
@@ -163,56 +154,17 @@ build_kernel() {
   echo "CONFIG_EXTRA_FIRMWARE_DIR=\"$DIR/kernel/firmware\"" >> "$KBUILD_OUT/.config"
   make CC="$CC_CMD" O="$KBUILD_OUT" olddefconfig
 
-  local dtb_targets=()
-  local dts_name
-  local IMAGE_GZ_DTB
-
-  for dts in "${DTS_FILES[@]}"; do
-    dts_name="$(basename "$dts")"
-    dtb_targets+=("qcom/${dts_name%.dts}.dtb")
-  done
-
   echo "-- Building kernel with $(nproc) cores --"
-  make CC="$CC_CMD" -j$(nproc) O="$KBUILD_OUT" Image.gz "${dtb_targets[@]}"
+  make CC="$CC_CMD" -j$(nproc) O="$KBUILD_OUT" Image Image.gz "$DTB_TARGET"
 
-  # Assemble Image.gz-dtb
-  mkdir -p "$TMP_DIR"
-  IMAGE_GZ_DTB="$TMP_DIR/Image.gz-dtb"
-  cp "$KBUILD_OUT/arch/arm64/boot/Image.gz" "$IMAGE_GZ_DTB"
-
-  for dts in "${DTS_FILES[@]}"; do
-    dts_name="$(basename "$dts")"
-    dtb_path="$KBUILD_OUT/arch/arm64/boot/dts/qcom/${dts_name%.dts}.dtb"
-    cat "$dtb_path" >> "$IMAGE_GZ_DTB"
-  done
-
-  cd "$TMP_DIR"
-
-  # Create boot.img
+  # Collect artifacts: EFI-stub Image + Dragon DTB
   mkdir -p "$OUT_DIR"
-  $TOOLS/mkbootimg \
-    --kernel Image.gz-dtb \
-    --ramdisk /dev/null \
-    --cmdline "console=ttyMSM0,115200n8 earlycon=msm_geni_serial,0xA84000 androidboot.hardware=qcom androidboot.console=ttyMSM0 ehci-hcd.park=3 lpm_levels.sleep_disabled=1 service_locator.enable=1 androidboot.selinux=permissive firmware_class.path=/lib/firmware/updates net.ifnames=0 fbcon=rotate:3" \
-    --pagesize 4096 \
-    --base 0x80000000 \
-    --kernel_offset 0x8000 \
-    --ramdisk_offset 0x8000 \
-    --tags_offset 0x100 \
-    --output $BOOT_IMG.nonsecure
+  cp "$KBUILD_OUT/arch/arm64/boot/Image" "$OUT_DIR/Image"
+  cp "$KBUILD_OUT/arch/arm64/boot/Image.gz" "$OUT_DIR/Image.gz"
+  cp "$KBUILD_OUT/arch/arm64/boot/dts/${DTB_TARGET}" "$OUT_DIR/$(basename "$DTB_TARGET")"
 
-  # Sign boot.img
-  openssl dgst -sha256 -binary $BOOT_IMG.nonsecure > $BOOT_IMG.sha256
-  openssl pkeyutl -sign -in $BOOT_IMG.sha256 -inkey $DIR/tools/build/vble-qti.key -out $BOOT_IMG.sig -pkeyopt digest:sha256 -pkeyopt rsa_padding_mode:pkcs1
-  dd if=/dev/zero of=$BOOT_IMG.sig.padded bs=2048 count=1 2>/dev/null
-  dd if=$BOOT_IMG.sig of=$BOOT_IMG.sig.padded conv=notrunc 2>/dev/null
-  cat $BOOT_IMG.nonsecure $BOOT_IMG.sig.padded > $BOOT_IMG
-
-  rm -f $BOOT_IMG.nonsecure $BOOT_IMG.sha256 $BOOT_IMG.sig $BOOT_IMG.sig.padded
-
-  mv $BOOT_IMG "$OUT_DIR/"
-  echo "-- Done! boot.img: $OUT_DIR/boot.img --"
-  ls -lh "$OUT_DIR/boot.img"
+  echo "-- Done --"
+  ls -lh "$OUT_DIR/Image" "$OUT_DIR/Image.gz" "$OUT_DIR/$(basename "$DTB_TARGET")"
 }
 
 cleanup() {
@@ -229,18 +181,6 @@ EOF
   fi
 
   docker container rm -f "${CONTAINER_ID:-}" >/dev/null 2>&1 || true
-  rm -rf "$TMP_DIR"
-}
-
-install_dts() {
-  local dst_dir="$KERNEL_DIR/arch/arm64/boot/dts/qcom"
-
-  echo "-- Installing DTS/DTSI files --"
-
-  cp "$COMMON_DTSI" "$dst_dir/"
-  for dts in "${DTS_FILES[@]}"; do
-    cp "$dts" "$dst_dir/"
-  done
 }
 
 # Run build inside container
@@ -250,24 +190,18 @@ set -e
 HOST_OS='$HOST_OS'
 BASE_DEFCONFIG='$BASE_DEFCONFIG'
 CONFIG_FRAGMENT='$CONFIG_FRAGMENT'
-COMMON_DTSI='$COMMON_DTSI'
+DTB_TARGET='$DTB_TARGET'
 DIR='$DIR'
-TOOLS='$TOOLS'
 KERNEL_DIR='$KERNEL_DIR'
 PATCHES_DIR='$PATCHES_DIR'
 KBUILD_OUT='$KBUILD_OUT'
-TMP_DIR='$TMP_DIR'
 OUT_DIR='$OUT_DIR'
-BOOT_IMG='$BOOT_IMG'
-GIT_REV='$GIT_REV'
 
-DTS_FILES=(
-  '${DTS_FILES[0]}'
-  '${DTS_FILES[1]}'
-)
+# building both kernel and system at same time causes git dubious ownership errors
+git config --global --add safe.directory '$DIR'
+git config --global --add safe.directory '$KERNEL_DIR'
 
 $(declare -f build_kernel)
-$(declare -f install_dts)
 
 build_kernel
 EOF

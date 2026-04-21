@@ -153,9 +153,10 @@ exec_as_root mkfs.erofs \
 echo "Unmount filesystem"
 exec_as_root umount -l "$ROOTFS_DIR"
 
-# Sparsify system image
-echo "Sparsifying system image"
-exec_as_user img2simg "$ROOTFS_IMAGE" "$OUT_IMAGE"
+# Copy raw ext4 image to output. edl-ng write-sector takes raw bytes, not the
+# Android-sparse format qdl used to consume — so no img2simg step.
+echo "Copying system image to output"
+exec_as_user cp "$ROOTFS_IMAGE" "$OUT_IMAGE"
 
 # Copy EROFS image to output
 cp "$EROFS_IMAGE" "$OUT_EROFS_IMAGE"

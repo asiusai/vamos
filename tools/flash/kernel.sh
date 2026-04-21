@@ -1,27 +1,34 @@
 #!/usr/bin/env bash
+# Flash just the ESP partition (kernel + dtb) to Dragon Q6A eMMC via EDL.
+# Faster iteration than a full system flash once the GPT exists on-device.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null && pwd)"
 cd "$DIR"
 
-BUILD_DIR="$DIR/build"
+ESP_IMG="$DIR/build/esp.img"
+LOADER="$DIR/firmware-dragon/flat_build/spinor/dragon-q6a/prog_firehose_ddr.elf"
 
-# TODO: remove --legacy flag once the mainline kernel is stable
-LEGACY_KERNEL_URL="https://commadist.azureedge.net/agnosupdate/boot-d726315cf98a43e1090e5b49297404cf3d084cfbd42ad8bb7d8afb68136b9f51.img.xz"
+if [ ! -f "$ESP_IMG" ]; then
+  echo "ERROR: ESP image not found at $ESP_IMG"
+  echo "Run: ./vamos build disk"
+  exit 1
+fi
+if [ ! -f "$LOADER" ]; then
+  echo "ERROR: Firehose loader not found at $LOADER"
+  exit 1
+fi
 
-if [ "${1:-}" = "--legacy" ]; then
-  LEGACY_IMG="$BUILD_DIR/boot-legacy.img"
-  if [ ! -f "$LEGACY_IMG" ]; then
-    echo "Downloading legacy kernel image..."
-    mkdir -p "$BUILD_DIR"
-    curl -fSL "$LEGACY_KERNEL_URL" | xz -d > "$LEGACY_IMG"
-  fi
-  tools/bin/qdl flash boot "$LEGACY_IMG"
-else
-  BOOT_IMG="$BUILD_DIR/boot.img"
-  if [ ! -f "$BOOT_IMG" ]; then
-    echo "boot.img not found, building kernel..."
-    "$DIR/vamos" build kernel
-  fi
-  tools/bin/qdl flash boot "$BOOT_IMG"
+if ! lsusb -d 05c6:9008 >/dev/null 2>&1; then
+  echo "WARN: Dragon is not in EDL mode (05c6:9008 not on USB)."
+  echo "Enter EDL via BIOS menu 'Reboot into EDL / 9008' or the EDL button, then retry."
+  exit 1
+fi
+
+echo "== Flashing ESP (kernel + dtb) to Dragon =="
+sudo edl-ng --memory=Sdcc --slot=0 write-part esp "$ESP_IMG" --loader="$LOADER"
+
+if [ "${VAMOS_NO_RESET:-}" != "1" ]; then
+  echo "== Resetting device =="
+  sudo edl-ng reset --loader="$LOADER"
 fi
