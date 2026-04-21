@@ -6,8 +6,8 @@ PASSWD=comma
 
 # Create identification files
 touch /TICI
-# TODO: rename once openpilot supports
 touch /AGNOS
+touch /ASIUS
 
 mkdir -p /etc/xbps.d
 cp /usr/share/xbps.d/*-repository-*.conf /etc/xbps.d/
