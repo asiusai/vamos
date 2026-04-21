@@ -74,18 +74,18 @@ RUN chown -R comma:comma /home/comma
 RUN printf '\nif [ -f ~/.bash_aliases ]; then\n    . ~/.bash_aliases\nfi\n' >> /home/$USERNAME/.bashrc
 RUN mkdir -p /root/.config
 
-# Enable runit services
+# Enable runit services (Dragon vamOS baseline)
+# Minimal: boot + ssh + serial + basic logging. Comma-era services
+# (power_drop_monitor, init-qcom, brightnessd, gpio, lte, modemmanager,
+# adsp/cdsp, rmtfs, magic, sound, screen_calibration, ipa_fws, varwatch,
+# fs_setup, comma, leprop, irsc_util, qrtr-ns/tqftpserv/pd-mapper,
+# cnss_daemon, ssh-param-watcher, ncm-param-watcher, avahi-ssh-publish,
+# serial-hostname, bluetoothd, dnsmasq, polkitd) are NOT enabled — they
+# assume comma hardware and spam the console with errors on Dragon.
+# Re-enable as Dragon support for those subsystems lands.
 RUN for svc in \
-  ipa_fws brightnessd fs_setup gpio init-qcom lte \
-  avahi-ssh-publish power_monitor power_drop_monitor \
-  screen_calibration serial-hostname \
-  sound varwatch busybox-ntpd \
-  irsc_util leprop adsp cdsp \
-  qrtr-ns rmtfs tqftpserv pd-mapper \
-  comma modemmanager bluetoothd magic \
-  ssh-param-watcher ncm-param-watcher dnsmasq \
-  rsyslogd iptables cnss_daemon polkitd \
-  sshd agetty-ttyMSM0 agetty-ttyAMA0; do \
+  sshd rsyslogd busybox-ntpd iptables \
+  agetty-ttyMSM0 agetty-ttyAMA0; do \
     ln -sf /etc/sv/$svc /etc/runit/runsvdir/default/; \
   done
 
