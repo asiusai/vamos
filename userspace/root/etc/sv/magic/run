@@ -1,10 +1,28 @@
 #!/bin/sh
 # magic - GPU display service (raylib on Adreno GPU)
+# On ASIUS the UI owns DRM directly — magic is not needed
 exec 2>&1
+
+if [ -f /ASIUS ]; then
+    echo "ASIUS: UI owns DRM directly, magic not needed"
+    exec pause
+fi
 
 if [ ! -e /dev/dri/card0 ]; then
     echo "Waiting for /dev/dri/card0..."
     exit 1
+fi
+
+# Dragon has no physical backlight — mount a tmpfs over sysfs so raylib's
+# turn_screen_on() finds /sys/class/backlight/*/bl_power etc.
+if [ ! -d /sys/class/backlight/panel0-backlight ]; then
+    mount -t tmpfs tmpfs /sys/class/backlight
+    mkdir -p /sys/class/backlight/panel0-backlight
+    echo 0 > /sys/class/backlight/panel0-backlight/bl_power
+    echo 255 > /sys/class/backlight/panel0-backlight/max_brightness
+    echo 128 > /sys/class/backlight/panel0-backlight/brightness
+    chmod 666 /sys/class/backlight/panel0-backlight/bl_power
+    chmod 666 /sys/class/backlight/panel0-backlight/brightness
 fi
 
 # Suppress Qualcomm display driver debug spam

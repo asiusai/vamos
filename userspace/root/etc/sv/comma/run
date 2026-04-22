@@ -2,6 +2,25 @@
 # comma - main openpilot launcher (runs as comma user in tmux)
 exec 2>&1
 
+# ASIUS: set up fake backlight and wait for GPU
+if [ -f /ASIUS ]; then
+  # Wait for DRM device
+  for i in $(seq 1 60); do
+    [ -e /dev/dri/card0 ] && break
+    sleep 0.5
+  done
+  # Fake backlight for raylib (Dragon has no physical backlight)
+  if [ ! -d /sys/class/backlight/panel0-backlight ]; then
+    mount -t tmpfs tmpfs /sys/class/backlight
+    mkdir -p /sys/class/backlight/panel0-backlight
+    echo 0 > /sys/class/backlight/panel0-backlight/bl_power
+    echo 255 > /sys/class/backlight/panel0-backlight/max_brightness
+    echo 128 > /sys/class/backlight/panel0-backlight/brightness
+    chmod 666 /sys/class/backlight/panel0-backlight/bl_power
+    chmod 666 /sys/class/backlight/panel0-backlight/brightness
+  fi
+fi
+
 # Wait for filesystem to be ready (skipped on ASIUS — no fs_setup service).
 if [ ! -f /ASIUS ]; then
   sv check fs_setup > /dev/null || exit 1

@@ -5,8 +5,6 @@ USERNAME=comma
 PASSWD=comma
 
 # Create identification files
-touch /TICI
-touch /AGNOS
 touch /ASIUS
 
 mkdir -p /etc/xbps.d

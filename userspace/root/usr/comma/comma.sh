@@ -56,17 +56,18 @@ handle_setup_keys () {
   fi
 }
 
-# factory reset handling
+# factory reset handling (ASIUS: /data lives on the rootfs, not a separate
+# mountpoint, so skip the mountpoint check that would falsely trigger recovery)
 if [ ! -f /tmp/booted ]; then
   touch /tmp/booted
   if [ -f "$RESET_TRIGGER" ]; then
     echo "launching system reset, reset trigger present"
     rm -f $RESET_TRIGGER
     $RESET
-  elif (( "$(cat /sys/class/input/input*/device/touch_count 2>/dev/null | head -1)" > 4 )); then
+  elif [ "$(cat /sys/class/input/input*/device/touch_count 2>/dev/null | head -1)" -gt 4 ] 2>/dev/null; then
     echo "launching system reset, got taps"
     $RESET --tap-reset
-  elif ! mountpoint -q /data; then
+  elif [ ! -f /ASIUS ] && ! mountpoint -q /data; then
     echo "userdata not mounted. loading system reset"
     $RESET --recover
   fi

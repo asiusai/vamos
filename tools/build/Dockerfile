@@ -65,6 +65,20 @@ COPY ./kernel/firmware/qcom/sdm845 /lib/firmware/qcom/sdm845
 COPY ./kernel/firmware/qca /lib/firmware/qca
 RUN ln -sf /lib/firmware/ath10k/WCN3990/hw1.0/wlanmdsp.mbn /lib/firmware/qcom/sdm845/wlanmdsp.mbn
 
+# AIC8800 USB WiFi/BT firmware (Dragon's AICsemi chip)
+COPY ./kernel/firmware/aic8800_fw/USB /lib/firmware/aic8800_fw/USB
+
+# AIC8800 kernel modules (out-of-tree, pre-built for vamOS kernel)
+ARG KVER
+COPY ./kernel/modules/*.ko /tmp/vamos/modules/
+RUN if [ -n "${KVER}" ]; then \
+      mkdir -p /lib/modules/${KVER}/extra && \
+      cp /tmp/vamos/modules/*.ko /lib/modules/${KVER}/extra/ && \
+      touch /lib/modules/${KVER}/modules.order /lib/modules/${KVER}/modules.builtin /lib/modules/${KVER}/modules.builtin.modinfo && \
+      depmod -a ${KVER} 2>/dev/null || true; \
+    fi && \
+    rm -rf /tmp/vamos/modules
+
 # Root filesystem overlay — all userspace files at their final paths
 COPY ./userspace/root/ /
 

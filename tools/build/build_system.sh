@@ -96,11 +96,18 @@ trap "exec_as_root umount -l $ROOTFS_DIR &> /dev/null || true; \
 echo \"Cleaning up containers:\"; \
 docker container rm -f $MOUNT_CONTAINER_ID" EXIT
 
+KVER=""
+if [ -f "$DIR/build/kernel-out/include/config/kernel.release" ]; then
+  KVER=$(cat "$DIR/build/kernel-out/include/config/kernel.release")
+  echo "Kernel version from build: $KVER"
+fi
+
 echo "Building and extracting vamos docker image"
 docker buildx build -f tools/build/Dockerfile --platform=linux/arm64 \
   --output "type=tar,dest=-" \
   --provenance=false \
   --build-arg VOID_ROOTFS="${VOID_ROOTFS_FILE#"$DIR/"}" \
+  --build-arg KVER="${KVER}" \
   "$DIR" | docker exec -i "$MOUNT_CONTAINER_ID" tar -xf - -C "$ROOTFS_DIR"
 echo "Build and extraction complete"
 

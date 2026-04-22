@@ -157,6 +157,9 @@ build_kernel() {
   echo "-- Building kernel with $(nproc) cores --"
   make CC="$CC_CMD" -j$(nproc) O="$KBUILD_OUT" Image Image.gz "$DTB_TARGET"
 
+  echo "-- Preparing for external module builds --"
+  make CC="$CC_CMD" -j$(nproc) O="$KBUILD_OUT" modules_prepare
+
   # Collect artifacts: EFI-stub Image + Dragon DTB
   mkdir -p "$OUT_DIR"
   cp "$KBUILD_OUT/arch/arm64/boot/Image" "$OUT_DIR/Image"
