@@ -5,3 +5,22 @@
 **/*.tar.xz
 
 __pycache__/
+
+# kernel module build artifacts
+kernel/modules/camera-overlay/*.o
+kernel/modules/camera-overlay/*.mod
+kernel/modules/camera-overlay/*.mod.c
+kernel/modules/camera-overlay/Module.symvers
+kernel/modules/camera-overlay/modules.order
+kernel/modules/camera-overlay/.*.cmd
+kernel/modules/camera-overlay/.module-common.*
+kernel/modules/camera-overlay/cam_test.*
+kernel/modules/camera-overlay/Makefile.bak
+kernel/modules/camera-overlay/Makefile.test
+
+# disabled/experimental patches
+kernel/patches/*.disabled
+kernel/patches/*.disabled2
+
+# debug configs
+kernel/configs/vamos_full.config
