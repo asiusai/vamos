@@ -75,12 +75,13 @@ xbps-install -y \
   logrotate \
   lz4 \
   mesa-dri \
+  mesa-opencl \
   nano \
   ncurses-devel \
   net-tools \
   NetworkManager \
   nload \
-  nftables \
+  ocl-icd \
   opencl-headers \
   portaudio-devel \
   ppp \

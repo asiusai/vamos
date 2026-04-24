@@ -148,12 +148,33 @@ for cand in "$DIR/../openpilot" "$(git -C "$DIR" rev-parse --show-superproject-w
 done
 if [ -n "$OP_SRC" ]; then
   echo "Baking openpilot from $OP_SRC into /data/openpilot"
+
+  # Generate build.json from git metadata before we strip .git
+  OP_COMMIT=$(git -C "$OP_SRC" rev-parse HEAD 2>/dev/null || echo "unknown")
+  OP_BRANCH=$(git -C "$OP_SRC" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+  OP_ORIGIN=$(git -C "$OP_SRC" remote get-url origin 2>/dev/null || echo "unknown")
+  OP_DATE=$(git -C "$OP_SRC" log -1 --format=%ci 2>/dev/null || echo "unknown")
+  OP_VERSION=$(cat "$OP_SRC/common/version.h" 2>/dev/null | grep COMMA_VERSION | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
+
   # All fs ops run inside the builder container — ROOTFS_DIR only exists there
   exec_as_root mkdir -p "$ROOTFS_DIR/data/openpilot"
   exec_as_root cp -a "$OP_SRC/." "$ROOTFS_DIR/data/openpilot/"
   exec_as_root sh -c "
+    cat > '$ROOTFS_DIR/data/openpilot/build.json' <<BUILDJSON
+{
+  \"channel\": \"$OP_BRANCH\",
+  \"openpilot\": {
+    \"version\": \"$OP_VERSION\",
+    \"release_notes\": \"\",
+    \"git_commit\": \"$OP_COMMIT\",
+    \"git_origin\": \"$OP_ORIGIN\",
+    \"git_commit_date\": \"$OP_DATE\",
+    \"build_style\": \"baked\"
+  }
+}
+BUILDJSON
     cd '$ROOTFS_DIR/data/openpilot' && \
-    rm -rf .git build scons_cache && \
+    rm -rf .git .gitattributes build scons_cache && \
     find . -name __pycache__ -type d -prune -exec rm -rf {} + ; \
     find . -name '*.o' -delete
     cat > '$ROOTFS_DIR/data/continue.sh' <<'CONT'
@@ -183,6 +204,7 @@ exec_as_root mkfs.erofs \
   -C65536 \
   -T0 \
   --all-root \
+  -x-1 \
   "$EROFS_IMAGE" "$ROOTFS_DIR"
 
 # Unmount image
