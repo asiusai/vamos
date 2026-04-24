@@ -1,0 +1,64 @@
+#!/bin/bash
+# vamOS A/B OS upgrade for Dragon Q6A
+# Usage: dragon_updater <system.img>
+# Writes a new rootfs image to the inactive slot and switches boot on reboot.
+set -e
+
+ESP="/mnt/sdcard"
+ACTIVE_SLOT_FILE="$ESP/active_slot"
+
+get_active_slot() {
+  if [ -f "$ACTIVE_SLOT_FILE" ]; then
+    cat "$ACTIVE_SLOT_FILE" | tr -d '[:space:]'
+  else
+    local root_dev
+    root_dev=$(findmnt -n -o SOURCE /)
+    case "$root_dev" in
+      */mmcblk0p3) echo "b" ;;
+      *)           echo "a" ;;
+    esac
+  fi
+}
+
+ACTIVE=$(get_active_slot)
+if [ "$ACTIVE" = "b" ]; then
+  INACTIVE="a"
+  INACTIVE_DEV="/dev/mmcblk0p2"
+else
+  INACTIVE="b"
+  INACTIVE_DEV="/dev/mmcblk0p3"
+fi
+
+IMAGE="$1"
+if [ -z "$IMAGE" ]; then
+  echo "Usage: dragon_updater <system.img>"
+  echo "Active slot: $ACTIVE"
+  exit 1
+fi
+
+if [ ! -f "$IMAGE" ]; then
+  echo "ERROR: image not found: $IMAGE"
+  exit 1
+fi
+
+if [ ! -b "$INACTIVE_DEV" ]; then
+  echo "ERROR: inactive partition $INACTIVE_DEV does not exist"
+  echo "This device may not have A/B partitioning. Reflash with a recent dragon.img."
+  exit 1
+fi
+
+INACTIVE_KERNEL="$ESP/kernel_$INACTIVE"
+if [ ! -f "$INACTIVE_KERNEL" ]; then
+  echo "ERROR: kernel for slot $INACTIVE not found at $INACTIVE_KERNEL"
+  exit 1
+fi
+
+echo "Active slot: $ACTIVE → upgrading slot $INACTIVE ($INACTIVE_DEV)"
+dd if="$IMAGE" of="$INACTIVE_DEV" bs=4M status=progress
+sync
+
+cp "$INACTIVE_KERNEL" "$ESP/EFI/BOOT/BOOTAA64.EFI"
+echo -n "$INACTIVE" > "$ACTIVE_SLOT_FILE"
+sync
+
+echo "Upgrade complete. Reboot to activate slot $INACTIVE."

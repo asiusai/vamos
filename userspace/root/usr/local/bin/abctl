@@ -1,0 +1,103 @@
+#!/bin/bash
+# A/B boot slot control for Dragon Q6A (edk2 UEFI, EFI stub kernel).
+# Compatible with TICI abctl CLI interface used by agnos.py.
+#
+# Slot A = /dev/mmcblk0p2 (system_a), Slot B = /dev/mmcblk0p3 (system_b).
+# Switching patches the embedded root= cmdline in BOOTAA64.EFI on the ESP.
+
+set -e
+
+ESP_DEV="/dev/mmcblk0p1"
+ESP_MNT="/mnt/esp"
+KERNEL_PATH="EFI/BOOT/BOOTAA64.EFI"
+ROOT_A="root=/dev/mmcblk0p2"
+ROOT_B="root=/dev/mmcblk0p3"
+
+get_boot_slot() {
+  local root
+  root=$(cat /proc/cmdline | grep -o 'root=/dev/mmcblk0p[23]')
+  case "$root" in
+    "$ROOT_A") echo "_a" ;;
+    "$ROOT_B") echo "_b" ;;
+    *) echo "_a" ;;  # default to A if unknown
+  esac
+}
+
+mount_esp() {
+  mkdir -p "$ESP_MNT"
+  if ! mountpoint -q "$ESP_MNT"; then
+    mount "$ESP_DEV" "$ESP_MNT"
+  fi
+}
+
+umount_esp() {
+  if mountpoint -q "$ESP_MNT"; then
+    sync
+    umount "$ESP_MNT"
+  fi
+}
+
+set_active() {
+  local slot=$1
+  local target_root
+  case "$slot" in
+    0) target_root="$ROOT_A" ;;
+    1) target_root="$ROOT_B" ;;
+    *) echo "Invalid slot: $slot" >&2; exit 1 ;;
+  esac
+
+  mount_esp
+  local kernel="$ESP_MNT/$KERNEL_PATH"
+
+  if [ ! -f "$kernel" ]; then
+    umount_esp
+    echo "Kernel not found at $kernel" >&2
+    exit 1
+  fi
+
+  # Binary-patch all root= occurrences in the kernel cmdline (same-length replacement)
+  python3 -c "
+import mmap
+with open('$kernel', 'r+b') as f:
+    mm = mmap.mmap(f.fileno(), 0)
+    old = b'$ROOT_A' if b'$target_root' == b'$ROOT_B' else b'$ROOT_B'
+    new = b'$target_root'
+    if old != new:
+        pos = 0
+        while True:
+            pos = mm.find(old, pos)
+            if pos < 0:
+                break
+            mm[pos:pos+len(new)] = new
+            pos += len(new)
+    mm.flush()
+    mm.close()
+"
+
+  umount_esp
+  echo "Set slot $slot as active, lun as boot lun"
+}
+
+set_unbootable() {
+  # No hardware slot verification on Dragon — this is a no-op.
+  echo "Slot $1 marked unbootable"
+}
+
+case "$1" in
+  --boot_slot)
+    get_boot_slot
+    ;;
+  --set_active)
+    set_active "$2"
+    ;;
+  --set_unbootable)
+    set_unbootable "$2"
+    ;;
+  --set_success)
+    echo "Slot $(get_boot_slot) marked successful"
+    ;;
+  *)
+    echo "Usage: abctl --boot_slot | --set_active N | --set_unbootable N | --set_success"
+    exit 1
+    ;;
+esac

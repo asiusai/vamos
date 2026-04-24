@@ -1,0 +1,66 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	/* Enable CAMSS ISP */
+	fragment@0 {
+		target-path = "/soc@0/isp@acb3000";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	/* Enable CCI1 */
+	fragment@1 {
+		target-path = "/soc@0/cci@ac4b000";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	/*
+	 * Root-level: fixed clocks + CMA reservation
+	 * Sensor clock + sensor node + CAMSS endpoint all in one fragment
+	 * to let dtc resolve labels internally.
+	 */
+	fragment@2 {
+		target-path = "/";
+		__overlay__ {
+			cam2_mclk: cam2-mclk {
+				compatible = "fixed-clock";
+				#clock-cells = <0>;
+				clock-frequency = <24000000>;
+			};
+		};
+	};
+
+	/* IMX219 on CCI1 i2c-bus@0 (CAM2) — in its own fragment */
+	fragment@3 {
+		target-path = "/soc@0/cci@ac4b000/i2c-bus@0";
+		__overlay__ {
+			camera@10 {
+				compatible = "sony,imx219";
+				reg = <0x10>;
+				clocks = <&cam2_mclk>;
+
+				port {
+					cam2_ep: endpoint {
+						data-lanes = <1 2>;
+						link-frequencies = /bits/ 64 <456000000>;
+					};
+				};
+			};
+		};
+	};
+
+	/* CAMSS port@2 endpoint — back-reference to cam2_ep */
+	fragment@4 {
+		target-path = "/soc@0/isp@acb3000/ports/port@2";
+		__overlay__ {
+			csiphy2_ep: endpoint {
+				data-lanes = <1 2>;
+				remote-endpoint = <&cam2_ep>;
+			};
+		};
+	};
+};

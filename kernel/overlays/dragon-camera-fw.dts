@@ -1,0 +1,47 @@
+/dts-v1/;
+/plugin/;
+
+/* CAM_CC_MCLK2_CLK = 96 from qcom,sc7280-camcc.h */
+/* GPIO_ACTIVE_HIGH = 0 */
+
+&camss {
+	status = "okay";
+
+	ports {
+		port@2 {
+			csiphy2_ep: endpoint {
+				clock-lanes = <7>;
+				data-lanes = <1 0>;
+				remote-endpoint = <&imx219_cam2_ep>;
+			};
+		};
+	};
+};
+
+&cci1 {
+	status = "okay";
+};
+
+&cci1_i2c0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	imx219_cam2: camera@10 {
+		compatible = "sony,imx219";
+		reg = <0x10>;
+		clocks = <&camcc 96>;
+		clock-names = "xclk";
+		assigned-clocks = <&camcc 96>;
+		assigned-clock-rates = <24000000>;
+		reset-gpios = <&tlmm 77 0>;
+
+		port {
+			imx219_cam2_ep: endpoint {
+				link-frequencies = /bits/ 64 <456000000>;
+				data-lanes = <1 2>;
+				remote-endpoint = <&csiphy2_ep>;
+			};
+		};
+	};
+};
