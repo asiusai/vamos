@@ -175,6 +175,7 @@ if [ -n "$OP_SRC" ]; then
 BUILDJSON
     cd '$ROOTFS_DIR/data/openpilot' && \
     rm -rf .git .gitattributes build scons_cache && \
+    find . -name .git -type d -prune -exec rm -rf {} + ; \
     find . -name __pycache__ -type d -prune -exec rm -rf {} + ; \
     find . -name '*.o' -delete
     cat > '$ROOTFS_DIR/data/continue.sh' <<'CONT'

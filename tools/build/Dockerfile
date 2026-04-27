@@ -68,6 +68,7 @@ RUN ln -sf /lib/firmware/ath10k/WCN3990/hw1.0/wlanmdsp.mbn /lib/firmware/qcom/sd
 
 # AIC8800 USB WiFi/BT firmware (Dragon's AICsemi chip)
 COPY ./kernel/firmware/aic8800_fw/USB /lib/firmware/aic8800_fw/USB
+RUN ln -sf aic8800_fw/USB/aic8800D80 /lib/firmware/aic8800D80
 
 # AIC8800 kernel modules (out-of-tree, pre-built for vamOS kernel)
 ARG KVER
