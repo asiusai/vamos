@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: vamos <vamos@vamos>
+Subject: usb: dwc3: allow runtime mode switching for host-mode controllers
+
+The DWC3 dual-role switching mechanism (__dwc3_set_mode) cleanly handles
+transitions between host and device modes, including xHCI teardown and
+gadget init. However, it's only available when dr_mode is OTG.
+
+On platforms where firmware forces dr_mode to "host" but the hardware
+supports peripheral mode (e.g., Qualcomm QCS6490 with UEFI-provided DTB),
+there's no way to enable USB gadget functions at runtime.
+
+Allow mode switching via debugfs for host-mode controllers by:
+1. Initializing the drd_work workqueue in host mode
+2. Removing the OTG-only guard in dwc3_set_mode()
+3. Removing the OTG-only guard in the debugfs mode write handler
+
+The __dwc3_set_mode worker already handles all transitions correctly
+(host_exit -> soft_reset -> gadget_init, and vice versa), so no
+additional logic is needed.
+
+---
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+index c2ce2f5e60a1..c0aee4216c08 100644
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -290,9 +290,6 @@ void dwc3_set_mode(struct dwc3 *dwc, u32 mode)
+ {
+ 	unsigned long flags;
+ 
+-	if (dwc->dr_mode != USB_DR_MODE_OTG)
+-		return;
+-
+ 	spin_lock_irqsave(&dwc->lock, flags);
+ 	dwc->desired_dr_role = mode;
+ 	spin_unlock_irqrestore(&dwc->lock, flags);
+@@ -1621,6 +1618,8 @@ static int dwc3_core_init_mode(struct dwc3 *dwc)
+ 	case USB_DR_MODE_HOST:
+ 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_HOST, false);
+ 
++		INIT_WORK(&dwc->drd_work, __dwc3_set_mode);
++
+ 		if (dwc->usb2_phy)
+ 			otg_set_vbus(dwc->usb2_phy->otg, true);
+ 		for (i = 0; i < dwc->num_usb2_ports; i++)
+diff --git a/drivers/usb/dwc3/debugfs.c b/drivers/usb/dwc3/debugfs.c
+index d18bf5e32cc8..0892ef8d810c 100644
+--- a/drivers/usb/dwc3/debugfs.c
++++ b/drivers/usb/dwc3/debugfs.c
+@@ -445,9 +445,6 @@ static ssize_t dwc3_mode_write(struct file *file,
+ 	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
+ 		return -EFAULT;
+ 
+-	if (dwc->dr_mode != USB_DR_MODE_OTG)
+-		return count;
+-
+ 	if (!strncmp(buf, "host", 4))
+ 		mode = DWC3_GCTL_PRTCAP_HOST;
+ 

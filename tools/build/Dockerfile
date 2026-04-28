@@ -70,16 +70,8 @@ RUN ln -sf /lib/firmware/ath10k/WCN3990/hw1.0/wlanmdsp.mbn /lib/firmware/qcom/sd
 COPY ./kernel/firmware/aic8800_fw/USB /lib/firmware/aic8800_fw/USB
 RUN ln -sf aic8800_fw/USB/aic8800D80 /lib/firmware/aic8800D80
 
-# AIC8800 kernel modules (out-of-tree, pre-built for vamOS kernel)
-ARG KVER
-COPY ./kernel/modules/*.ko /tmp/vamos/modules/
-RUN if [ -n "${KVER}" ]; then \
-      mkdir -p /lib/modules/${KVER}/extra && \
-      cp /tmp/vamos/modules/*.ko /lib/modules/${KVER}/extra/ && \
-      touch /lib/modules/${KVER}/modules.order /lib/modules/${KVER}/modules.builtin /lib/modules/${KVER}/modules.builtin.modinfo && \
-      depmod -a ${KVER} 2>/dev/null || true; \
-    fi && \
-    rm -rf /tmp/vamos/modules
+# Kernel modules are installed after Docker export in build_system.sh
+# (in-tree from build/modules_install + out-of-tree prebuilt from kernel/modules/)
 
 # Root filesystem overlay — all userspace files at their final paths
 COPY ./userspace/root/ /

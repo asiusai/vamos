@@ -11,11 +11,14 @@ get_value() {
   cat "$WATCH_FILE" 2>/dev/null || echo ""
 }
 
-# Run once at startup
-# TODO: remove the force on once productionized
-echo -n 1 > $WATCH_FILE
+# Default NCM to enabled on first boot
+if [ ! -f "$WATCH_FILE" ]; then
+  mkdir -p "$WATCH_DIR"
+  printf '1' > "$WATCH_FILE"
+fi
+
+# Run once at startup with current param value
 /usr/comma/set_ncm.sh
-exec sleep infinity
 
 get_value > "$STATE_FILE"
 
@@ -24,8 +27,10 @@ while [ ! -d "$WATCH_DIR" ]; do
   sleep 2
 done
 
-# Watch for modifications and run script only on value changes
-exec inotifywait -m -e modify,create,delete "$WATCH_FILE" 2>/dev/null | while read -r; do
+# Watch the directory for changes to the param file
+WATCH_FILENAME=$(basename "$WATCH_FILE")
+exec inotifywait -m -e modify,create,delete "$WATCH_DIR" 2>/dev/null | while read -r dir event file; do
+  [ "$file" = "$WATCH_FILENAME" ] || continue
   NEW_VALUE=$(get_value)
   LAST_VALUE=$(cat "$STATE_FILE" 2>/dev/null || echo "")
   if [ "$NEW_VALUE" != "$LAST_VALUE" ]; then

@@ -159,6 +159,8 @@ ln -sf /etc/sv/NetworkManager /etc/runit/runsvdir/default/
 ln -sf /etc/sv/sshd /etc/runit/runsvdir/default/
 ln -sf /etc/sv/avahi-daemon /etc/runit/runsvdir/default/
 ln -sf /etc/sv/cronie /etc/runit/runsvdir/default/
+ln -sf /etc/sv/ncm-param-watcher /etc/runit/runsvdir/default/
+ln -sf /etc/sv/dnsmasq /etc/runit/runsvdir/default/
 
 # Disable all virtual ttys (only serial console needed)
 rm -f /etc/runit/runsvdir/default/agetty-tty1

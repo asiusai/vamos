@@ -1,12 +1,21 @@
 #!/bin/bash
 # Enables/disables USB NCM networking based on UsbNcmEnabled param.
 # Called by ncm-param-watcher on param changes.
+#
+# On Dragon Q6A, the a600000.usb (USB-C) DWC3 controller is switched
+# from host to device mode via debugfs. WiFi on 8c00000.usb is unaffected.
 
 GADGET=/config/usb_gadget/g1
 USB_IF="usb0"
 USB_ADDR="192.168.42.2/24"
-UDC_NAME="a600000.usb"
 NCM_PARAM="/data/params/d/UsbNcmEnabled"
+
+# Dragon: debugfs mode switch on USB-C controller
+DWC3_MODE="/sys/kernel/debug/usb/a600000.usb/mode"
+
+get_udc() {
+  ls /sys/class/udc/ 2>/dev/null | head -1
+}
 
 ensure_configfs() {
   if ! mountpoint -q /config; then
@@ -15,6 +24,7 @@ ensure_configfs() {
 }
 
 ensure_gadget_base() {
+  local udc="$1"
   ensure_configfs
 
   mkdir -p "$GADGET"
@@ -44,8 +54,9 @@ unbind_gadget() {
 }
 
 bind_gadget() {
+  local udc="$1"
   cd "$GADGET" || return 1
-  echo "$UDC_NAME" > UDC
+  echo "$udc" > UDC
 }
 
 wait_for_usb_if() {
@@ -67,8 +78,38 @@ configure_usb_if() {
   fi
 }
 
+enable_udc() {
+  [ -n "$(get_udc)" ] && return 0
+
+  if [ -f "$DWC3_MODE" ]; then
+    echo device > "$DWC3_MODE"
+    for i in $(seq 1 20); do
+      [ -n "$(get_udc)" ] && return 0
+      sleep 0.2
+    done
+    echo "ERROR: UDC did not appear after mode switch"
+    return 1
+  fi
+
+  echo "ERROR: debugfs mode interface not available"
+  return 1
+}
+
+disable_udc() {
+  if [ -f "$DWC3_MODE" ]; then
+    echo host > "$DWC3_MODE"
+  fi
+}
+
 enable_ncm() {
-  ensure_gadget_base
+  if ! enable_udc; then
+    echo "ERROR: failed to enable USB device controller"
+    return 1
+  fi
+
+  local udc
+  udc="$(get_udc)"
+  ensure_gadget_base "$udc"
   cd "$GADGET" || exit 1
 
   unbind_gadget
@@ -76,7 +117,7 @@ enable_ncm() {
   ln -s functions/ncm.0 configs/c.1/f1 2>/dev/null || true
   echo "NCM" > configs/c.1/strings/0x409/configuration
 
-  bind_gadget
+  bind_gadget "$udc"
 
   if wait_for_usb_if; then
     configure_usb_if
@@ -88,17 +129,21 @@ enable_ncm() {
 }
 
 disable_ncm() {
-  ensure_gadget_base
-  cd "$GADGET" || exit 1
+  ensure_configfs
 
   sv down dnsmasq
 
-  unbind_gadget
-  rm -f configs/c.1/f1 2>/dev/null || true
+  if [ -d "$GADGET" ]; then
+    cd "$GADGET" || return
+    unbind_gadget
+    rm -f configs/c.1/f1 2>/dev/null || true
+  fi
 
   if ip link show "$USB_IF" >/dev/null 2>&1; then
     ip link set "$USB_IF" down 2>/dev/null || true
   fi
+
+  disable_udc
 }
 
 if [ -f "$NCM_PARAM" ] && [ "$(< "$NCM_PARAM")" = "1" ]; then

@@ -139,6 +139,26 @@ exec_as_root sh -c "
   printf '%s\n%s\n' '$GIT_HASH' '$DATETIME' > BUILD
 "
 
+# Install kernel modules (in-tree + out-of-tree prebuilt)
+if [ -n "$KVER" ]; then
+  echo "Installing kernel modules for $KVER"
+  KMOD_SRC="$DIR/build/modules_install/lib/modules/$KVER"
+  exec_as_root mkdir -p "$ROOTFS_DIR/lib/modules"
+  if [ -d "$KMOD_SRC" ]; then
+    exec_as_root cp -a "$KMOD_SRC" "$ROOTFS_DIR/lib/modules/$KVER"
+  else
+    exec_as_root mkdir -p "$ROOTFS_DIR/lib/modules/$KVER"
+    exec_as_root sh -c "touch '$ROOTFS_DIR/lib/modules/$KVER/modules.order' '$ROOTFS_DIR/lib/modules/$KVER/modules.builtin' '$ROOTFS_DIR/lib/modules/$KVER/modules.builtin.modinfo'"
+  fi
+  exec_as_root mkdir -p "$ROOTFS_DIR/lib/modules/$KVER/extra"
+  for ko in aic_load_fw.ko aic8800_fdrv.ko aic_btusb.ko camera_overlay.ko; do
+    if [ -f "$DIR/kernel/modules/$ko" ]; then
+      exec_as_root cp "$DIR/kernel/modules/$ko" "$ROOTFS_DIR/lib/modules/$KVER/extra/"
+    fi
+  done
+  exec_as_root depmod -b "$ROOTFS_DIR" -a "$KVER" 2>/dev/null || true
+fi
+
 # Bake openpilot into /data/openpilot so first boot works offline.
 # Path resolution: vamos may be a submodule; the outer asius repo contains
 # openpilot/ alongside vamos/. Fall back to not baking if not found.

@@ -134,8 +134,7 @@ build_kernel() {
   export KBUILD_BUILD_HOST="vamos"
   export KCFLAGS="-w"
 
-  GIT_REV="$(git -C $DIR rev-parse --short HEAD)"
-  export LOCALVERSION="-vamos-$GIT_REV"
+  export LOCALVERSION="-vamos"
 
   # Build kernel
   cd "$KERNEL_DIR"
@@ -157,8 +156,10 @@ build_kernel() {
   echo "-- Building kernel with $(nproc) cores --"
   make CC="$CC_CMD" -j$(nproc) O="$KBUILD_OUT" Image Image.gz "$DTB_TARGET"
 
-  echo "-- Preparing for external module builds --"
-  make CC="$CC_CMD" -j$(nproc) O="$KBUILD_OUT" modules_prepare
+  echo "-- Building and installing kernel modules --"
+  make CC="$CC_CMD" -j$(nproc) O="$KBUILD_OUT" modules
+  rm -rf "$OUT_DIR/modules_install"
+  make CC="$CC_CMD" O="$KBUILD_OUT" INSTALL_MOD_PATH="$OUT_DIR/modules_install" modules_install
 
   # Collect artifacts: EFI-stub Image + Dragon DTB
   mkdir -p "$OUT_DIR"
