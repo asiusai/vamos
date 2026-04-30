@@ -43,7 +43,7 @@ mcopy -i "$ESP_IMG" "$DTB_FILE" ::/qcs6490-radxa-dragon-q6a.dtb
 mcopy -i "$ESP_IMG" "$KERNEL_IMAGE" ::/Image
 
 echo "== Flashing ESP (kernel + dtb) to Dragon =="
-sudo edl-ng --memory=Sdcc --slot=0 write-part esp "$ESP_IMG" --loader="$LOADER"
+sudo edl-ng --memory=nvme write-part esp "$ESP_IMG" --loader="$LOADER"
 
 if [ "${VAMOS_NO_RESET:-}" != "1" ]; then
   echo "== Resetting device =="
