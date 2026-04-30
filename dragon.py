@@ -11,6 +11,7 @@ Usage:
   dragon.py edl                       Cold cycle + navigate BIOS menu to EDL
   dragon.py edl --no-cycle            Skip power cycle, just navigate
   dragon.py ssh [cmd...]               SSH to Dragon over USB NCM (run cmd if given)
+  dragon.py status                     Show power, NCM, SSH, UART status
   dragon.py uart read [SECONDS]       Read UART for N seconds (default 3)
   dragon.py uart send 'string'        Send string (supports \\n/\\r/\\t)
   dragon.py uart exec 'cmd' [SECONDS] Send cmd, collect output
@@ -19,8 +20,23 @@ Usage:
 """
 import argparse, codecs, os, re, subprocess, sys, time
 
-HWMON_PWM = "/sys/class/hwmon/hwmon5/pwm1"
-HWMON_PWM_EN = "/sys/class/hwmon/hwmon5/pwm1_enable"
+def find_hwmon(name="nct6799"):
+    for h in os.listdir("/sys/class/hwmon"):
+        try:
+            with open(f"/sys/class/hwmon/{h}/name") as f:
+                if f.read().strip() == name:
+                    return f"/sys/class/hwmon/{h}"
+        except FileNotFoundError:
+            continue
+    subprocess.run(["sudo", "modprobe", "nct6775"], capture_output=True)
+    for h in os.listdir("/sys/class/hwmon"):
+        try:
+            with open(f"/sys/class/hwmon/{h}/name") as f:
+                if f.read().strip() == name:
+                    return f"/sys/class/hwmon/{h}"
+        except FileNotFoundError:
+            continue
+    return None
 PORT = os.environ.get("DRAGON_UART", "/dev/ttyUSB0")
 BAUD = 115200
 NCM_IP = "192.168.42.2"
@@ -34,8 +50,11 @@ ENTER = b"\r"
 # -- power --
 
 def power(state):
+    hwmon = find_hwmon()
+    if not hwmon:
+        sys.exit("nct6799 hwmon not found — is the module loaded?")
     subprocess.run(["sudo", "sh", "-c",
-        f"echo 1 > {HWMON_PWM_EN} && echo {state} > {HWMON_PWM}"], check=True)
+        f"echo 1 > {hwmon}/pwm1_enable && echo {state} > {hwmon}/pwm1"], check=True)
 
 def cmd_on(_args):
     power(255)
@@ -70,16 +89,93 @@ def find_ncm_interface():
     return None
 
 def ensure_ncm():
-    r = subprocess.run(["ip", "-4", "-o", "addr", "show"], capture_output=True, text=True)
-    if "192.168.42." in r.stdout:
+    iface, host_ip = check_ncm()
+    if host_ip:
         return
-    iface = find_ncm_interface()
     if not iface:
         sys.exit("No Dragon NCM interface found — is the USB cable connected?")
     print(f"[ncm] bringing up {iface}")
     subprocess.run(["sudo", "ip", "link", "set", iface, "up"], check=True)
-    subprocess.run(["sudo", "dhcpcd", "-1", iface], check=True,
-                   capture_output=True, text=True)
+    r = subprocess.run(["sudo", "dhcpcd", "-1", iface],
+                       capture_output=True, text=True)
+    _, host_ip = check_ncm()
+    if not host_ip:
+        sys.exit(f"[ncm] DHCP failed on {iface} — Dragon may not have NCM enabled")
+
+# -- status --
+
+def check_power():
+    hwmon = find_hwmon()
+    if not hwmon:
+        return None
+    try:
+        with open(f"{hwmon}/pwm1") as f:
+            return int(f.read().strip()) > 0
+    except (FileNotFoundError, PermissionError):
+        return None
+
+def check_ncm():
+    iface = find_ncm_interface()
+    if not iface:
+        return None, None
+    r = subprocess.run(["ip", "-4", "-o", "addr", "show", iface], capture_output=True, text=True)
+    for m in re.finditer(r'inet ([\d.]+)', r.stdout):
+        if m.group(1).startswith("192.168.42."):
+            return iface, m.group(1)
+    return iface, None
+
+def check_ssh_cmd(cmd):
+    r = subprocess.run(["ssh", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no",
+                        "-o", "ConnectTimeout=2", "-o", "BatchMode=yes",
+                        f"comma@{NCM_IP}", cmd],
+                       capture_output=True, text=True, timeout=8)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+def check_uart():
+    try:
+        import serial
+        s = serial.Serial(PORT, BAUD, timeout=0.3)
+        s.close()
+        return True
+    except Exception:
+        return False
+
+def check_edl():
+    r = subprocess.run(["lsusb", "-d", "05c6:9008"], capture_output=True, text=True)
+    return r.returncode == 0
+
+def cmd_status(_args):
+    pwr = check_power()
+    if pwr is None:
+        print(f"  power:    ? (can't read {HWMON_PWM})")
+    else:
+        print(f"  power:    {'on' if pwr else 'off'}")
+
+    uart = check_uart()
+    print(f"  uart:     {PORT} {'ok' if uart else 'not available'}")
+
+    edl = check_edl()
+    print(f"  edl:      {'yes (05c6:9008)' if edl else 'no'}")
+
+    iface, host_ip = check_ncm()
+    if iface and not host_ip:
+        try:
+            subprocess.run(["sudo", "ip", "link", "set", iface, "up"], check=True, capture_output=True)
+            subprocess.run(["sudo", "dhcpcd", "-1", iface], check=True, capture_output=True, timeout=10)
+            _, host_ip = check_ncm()
+        except Exception:
+            pass
+
+    print(f"  ncm:      {NCM_IP}" if host_ip else "  ncm:      no")
+
+    if host_ip:
+        try:
+            inet_addrs = check_ssh_cmd("ip -4 addr show | awk '/inet 192\\.168\\./ && !/usb/ {split($2,a,\"/\"); split($NF,d,\" \"); printf \"%s(%s) \", a[1], $NF}'")
+        except Exception:
+            inet_addrs = None
+        print(f"  internet: {inet_addrs.strip()}" if inet_addrs else "  internet: no")
+    else:
+        print("  internet: -")
 
 # -- ssh --
 
@@ -235,6 +331,7 @@ def main():
     sub.add_parser("on", help="Power on")
     sub.add_parser("off", help="Power off")
     sub.add_parser("reboot", help="Power cycle")
+    sub.add_parser("status", help="Show Dragon status")
     ssh_p = sub.add_parser("ssh", help="SSH over USB NCM")
     ssh_p.add_argument("ssh_args", nargs="*")
 
@@ -253,7 +350,7 @@ def main():
         ap.print_help()
         sys.exit(1)
 
-    dispatch = {"on": cmd_on, "off": cmd_off, "reboot": cmd_reboot,
+    dispatch = {"on": cmd_on, "off": cmd_off, "reboot": cmd_reboot, "status": cmd_status,
                 "ssh": cmd_ssh, "edl": cmd_edl, "uart": cmd_uart}
     ret = dispatch[args.cmd](args)
     sys.exit(ret or 0)
