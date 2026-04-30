@@ -94,7 +94,7 @@ RUN mkdir -p /root/.config
 RUN for svc in \
   sshd rsyslogd busybox-ntpd iptables \
   bluetoothd \
-  comma \
+  comma init-qcom \
   agetty-ttyMSM0 agetty-ttyAMA0; do \
     ln -sf /etc/sv/$svc /etc/runit/runsvdir/default/; \
   done

@@ -206,6 +206,16 @@ CONT
     chmod +x '$ROOTFS_DIR/data/continue.sh'
     chown -R 1000:1000 '$ROOTFS_DIR/data/openpilot' '$ROOTFS_DIR/data/continue.sh'
   "
+
+  # Compile ASIUS native libraries (fast_parse.so, cl_dispatch.so)
+  echo "Compiling ASIUS native libraries"
+  exec_as_root chroot "$ROOTFS_DIR" sh -c '
+    cd /data/openpilot
+    gcc -shared -fPIC -O2 -o fast_parse.so fast_parse.c -lm 2>/dev/null && echo "  built fast_parse.so" || echo "  WARN: fast_parse.c not found"
+    cd /data/openpilot/tinygrad_repo
+    gcc -shared -fPIC -O2 -o cl_dispatch.so cl_dispatch.c -lOpenCL 2>/dev/null && echo "  built cl_dispatch.so" || echo "  WARN: cl_dispatch.c not found"
+    chown 1000:1000 /data/openpilot/fast_parse.so /data/openpilot/tinygrad_repo/cl_dispatch.so 2>/dev/null
+  '
 else
   echo "WARN: openpilot not found next to vamos; /data/openpilot will be empty on first boot"
 fi
