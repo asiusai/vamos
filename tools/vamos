@@ -37,7 +37,8 @@ case "${1:-}" in
     case "${2:-}" in
       kernel) exec "$DIR/tools/flash/kernel.sh" ;;
       system) exec "$DIR/tools/flash/system.sh" ;;
-      *)      echo "Usage: vamos flash <kernel|system>"; exit 1 ;;
+      all)    VAMOS_NO_RESET=1 "$DIR/tools/flash/system.sh" && "$DIR/tools/flash/kernel.sh" ;;
+      *)      echo "Usage: vamos flash <kernel|system|all>"; exit 1 ;;
     esac ;;
   profile)
     shift
@@ -51,7 +52,8 @@ case "${1:-}" in
     echo "  build disk         Assemble full disk image → build/dragon.img (GPT+ESP+rootfs)"
     echo "  build all          Do all three in order"
     echo "  flash system       Flash build/dragon.img to Dragon NVMe via EDL"
-    echo "  flash kernel       Flash just the ESP partition to Dragon eMMC via EDL (fast iter)"
+    echo "  flash kernel       Flash just the ESP partition via EDL (fast iter)"
+    echo "  flash all          Flash system + kernel in one EDL session"
     echo "  profile [diff]     Profile rootfs or diff two profiles"
     exit 1 ;;
 esac

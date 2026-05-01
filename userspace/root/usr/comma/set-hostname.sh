@@ -1,12 +1,14 @@
 #!/bin/sh
 set -e
 
-SERIAL="$(/usr/comma/get-serial.sh)"
-HOSTNAME="comma"
-
-if [ -n "$SERIAL" ] && [ "$SERIAL" != "(none)" ]; then
-  HOSTNAME="comma-$SERIAL"
+DONGLE_ID=""
+if [ -f /data/params/d/DongleId ]; then
+  DONGLE_ID="$(cat /data/params/d/DongleId)"
 fi
 
-echo "hostname: '$HOSTNAME'"
-hostname "$HOSTNAME"
+if [ -n "$DONGLE_ID" ]; then
+  sysctl kernel.hostname="comma-$DONGLE_ID"
+else
+  SERIAL="$(/usr/comma/get-serial.sh)"
+  sysctl kernel.hostname="comma-${SERIAL:-unknown}"
+fi

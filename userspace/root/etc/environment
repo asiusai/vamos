@@ -1,2 +1,5 @@
 PATH="/usr/local/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 PYTHONPATH="/data/openpilot"
+RUSTICL_ENABLE=freedreno
+DISABLE_FAST_IDIV=1
+EMULATED_DTYPES=long
