@@ -42,6 +42,9 @@ BAUD = 115200
 NCM_IP = "192.168.42.2"
 SSH_KEY = os.path.expanduser("~/.ssh/comma_setup")
 OFF_SETTLE_SECS = 5
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+HEALTH_SCRIPT = os.path.join(SCRIPT_DIR, "dragon_health.py")
+REMOTE_HEALTH_SCRIPT = "/tmp/dragon_health.py"
 SSH_OPTS = [
     "-i", SSH_KEY,
     "-o", "StrictHostKeyChecking=no",
@@ -154,7 +157,7 @@ def check_edl():
 def cmd_status(_args):
     pwr = check_power()
     if pwr is None:
-        print(f"  power:    ? (can't read {HWMON_PWM})")
+        print("  power:    ? (can't read nct6799 pwm1)")
     else:
         print(f"  power:    {'on' if pwr else 'off'}")
 
@@ -333,12 +336,20 @@ def cmd_uart(args):
 
 def cmd_health(_args):
     ensure_ncm()
+    if not os.path.isfile(HEALTH_SCRIPT):
+        sys.exit(f"health script not found: {HEALTH_SCRIPT}")
+
+    print(f"[health] copying {HEALTH_SCRIPT} to comma@{NCM_IP}:{REMOTE_HEALTH_SCRIPT}", flush=True)
+    subprocess.run(["scp", *SSH_OPTS, HEALTH_SCRIPT,
+                    f"comma@{NCM_IP}:{REMOTE_HEALTH_SCRIPT}"], check=True)
+
     ssh_cmd = ["ssh", *SSH_OPTS, f"comma@{NCM_IP}",
-               "python3", "-u", "/data/openpilot/selfdrive/test/test_dragon_health.py"]
+               f"cd /data/openpilot && PYTHONPATH=/data/openpilot OPENPILOT_ROOT=/data/openpilot "
+               f"python3 -u {REMOTE_HEALTH_SCRIPT}"]
     ret = subprocess.run(ssh_cmd).returncode
     local_dir = "/tmp/dragon_health_local"
     os.makedirs(local_dir, exist_ok=True)
-    print(f"\n[health] pulling snapshots to {local_dir}")
+    print(f"\n[health] pulling snapshots to {local_dir}", flush=True)
     subprocess.run(["scp", *SSH_OPTS,
                     f"comma@{NCM_IP}:/tmp/dragon_health/*.jpg", local_dir])
     return ret
