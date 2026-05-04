@@ -42,6 +42,13 @@ BAUD = 115200
 NCM_IP = "192.168.42.2"
 SSH_KEY = os.path.expanduser("~/.ssh/comma_setup")
 OFF_SETTLE_SECS = 5
+SSH_OPTS = [
+    "-i", SSH_KEY,
+    "-o", "StrictHostKeyChecking=no",
+    "-o", "UserKnownHostsFile=/dev/null",
+    "-o", "GlobalKnownHostsFile=/dev/null",
+    "-o", "LogLevel=ERROR",
+]
 
 F2 = b"\x1bOQ"
 DOWN = b"\x1b[B"
@@ -125,7 +132,7 @@ def check_ncm():
     return iface, None
 
 def check_ssh_cmd(cmd):
-    r = subprocess.run(["ssh", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no",
+    r = subprocess.run(["ssh", *SSH_OPTS,
                         "-o", "ConnectTimeout=2", "-o", "BatchMode=yes",
                         f"comma@{NCM_IP}", cmd],
                        capture_output=True, text=True, timeout=8)
@@ -181,7 +188,7 @@ def cmd_status(_args):
 
 def cmd_ssh(args):
     ensure_ncm()
-    ssh_cmd = ["ssh", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no", f"comma@{NCM_IP}"]
+    ssh_cmd = ["ssh", *SSH_OPTS, f"comma@{NCM_IP}"]
     if args.ssh_args:
         ssh_cmd.extend(args.ssh_args)
     os.execvp("ssh", ssh_cmd)
@@ -326,13 +333,13 @@ def cmd_uart(args):
 
 def cmd_health(_args):
     ensure_ncm()
-    ssh_cmd = ["ssh", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no",
-               f"comma@{NCM_IP}", "python3", "/data/openpilot/selfdrive/test/test_dragon_health.py"]
+    ssh_cmd = ["ssh", *SSH_OPTS, f"comma@{NCM_IP}",
+               "python3", "-u", "/data/openpilot/selfdrive/test/test_dragon_health.py"]
     ret = subprocess.run(ssh_cmd).returncode
     local_dir = "/tmp/dragon_health_local"
     os.makedirs(local_dir, exist_ok=True)
     print(f"\n[health] pulling snapshots to {local_dir}")
-    subprocess.run(["scp", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no",
+    subprocess.run(["scp", *SSH_OPTS,
                     f"comma@{NCM_IP}:/tmp/dragon_health/*.jpg", local_dir])
     return ret
 
