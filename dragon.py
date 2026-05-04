@@ -322,6 +322,20 @@ def cmd_uart(args):
     else:
         sys.exit(f"uart: unknown subcommand '{sub}'")
 
+# -- health --
+
+def cmd_health(_args):
+    ensure_ncm()
+    ssh_cmd = ["ssh", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no",
+               f"comma@{NCM_IP}", "python3", "/data/openpilot/selfdrive/test/test_dragon_health.py"]
+    ret = subprocess.run(ssh_cmd).returncode
+    local_dir = "/tmp/dragon_health_local"
+    os.makedirs(local_dir, exist_ok=True)
+    print(f"\n[health] pulling snapshots to {local_dir}")
+    subprocess.run(["scp", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no",
+                    f"comma@{NCM_IP}:/tmp/dragon_health/*.jpg", local_dir])
+    return ret
+
 # -- main --
 
 def main():
@@ -345,13 +359,15 @@ def main():
     uart_p.add_argument("uart_cmd", choices=["read", "send", "exec", "login", "wake"])
     uart_p.add_argument("uart_args", nargs="*")
 
+    sub.add_parser("health", help="Run system health check on Dragon")
+
     args = ap.parse_args()
     if not args.cmd:
         ap.print_help()
         sys.exit(1)
 
     dispatch = {"on": cmd_on, "off": cmd_off, "reboot": cmd_reboot, "status": cmd_status,
-                "ssh": cmd_ssh, "edl": cmd_edl, "uart": cmd_uart}
+                "ssh": cmd_ssh, "edl": cmd_edl, "uart": cmd_uart, "health": cmd_health}
     ret = dispatch[args.cmd](args)
     sys.exit(ret or 0)
 
