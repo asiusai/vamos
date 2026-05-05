@@ -59,14 +59,7 @@ RUN cd /tmp/vamos/uv && \
     MAKEFLAGS="-j$(nproc)" UV_CONCURRENT_BUILDS=4 UV_NO_CACHE=1 UV_PROJECT_ENVIRONMENT=$XDG_DATA_HOME/venv \
     uv sync --frozen --inexact
 
-# Install firmware from upstream linux-firmware (ath10k WiFi + modem + Bluetooth)
-COPY ./kernel/firmware/ath10k/WCN3990/hw1.0 /lib/firmware/ath10k/WCN3990/hw1.0
-COPY ./kernel/firmware/qcom/sdm845 /lib/firmware/qcom/sdm845
-COPY ./kernel/firmware/qcom/qcs6490 /lib/firmware/qcom/qcs6490
-COPY ./kernel/firmware/qca /lib/firmware/qca
-RUN ln -sf /lib/firmware/ath10k/WCN3990/hw1.0/wlanmdsp.mbn /lib/firmware/qcom/sdm845/wlanmdsp.mbn
-
-# AIC8800 USB WiFi/BT firmware (Dragon's AICsemi chip)
+# Install AIC8800 USB WiFi/BT firmware.
 COPY ./kernel/firmware/aic8800_fw/USB /lib/firmware/aic8800_fw/USB
 RUN ln -sf aic8800_fw/USB/aic8800D80 /lib/firmware/aic8800D80
 
@@ -84,8 +77,8 @@ RUN mkdir -p /root/.config
 
 # Enable runit services (Dragon vamOS baseline)
 # Minimal: boot + ssh + serial + basic logging. Comma-era services
-# (power_drop_monitor, init-qcom, brightnessd, gpio, lte, modemmanager,
-# adsp/cdsp, rmtfs, magic, sound, screen_calibration, ipa_fws, varwatch,
+# (gpio, lte, modemmanager,
+# adsp/cdsp, rmtfs, sound, ipa_fws, varwatch,
 # fs_setup, comma, leprop, irsc_util, qrtr-ns/tqftpserv/pd-mapper,
 # cnss_daemon, ssh-param-watcher, ncm-param-watcher, avahi-ssh-publish,
 # serial-hostname, bluetoothd, dnsmasq, polkitd) are NOT enabled — they
@@ -142,8 +135,6 @@ RUN echo "precedence ::ffff:0:0/96 100" >> /etc/gai.conf
 # Compatibility symlinks
 # pdmappersvc needs libjson-c.so.2 but Void has libjson-c.so.5
 RUN ln -sf /usr/lib/libjson-c.so.5 /usr/lib/libjson-c.so.2
-# raylib wheel needs libffi.so.6 but Void has newer version
-RUN ln -sf $(ls /usr/lib/libffi.so.* 2>/dev/null | grep -v '.so.6' | head -1) /usr/lib/libffi.so.6
 # TODO: remove once no more openpilot libraries build against the _adreno names
 RUN ln -sf /usr/lib/libGLESv2.so.2 /usr/lib/libGLESv2_adreno.so && \
     ln -sf /usr/lib/libEGL.so.1 /usr/lib/libEGL_adreno.so

@@ -2,14 +2,14 @@
 # comma - main openpilot launcher (runs as comma user in tmux)
 exec 2>&1
 
-# ASIUS: set up fake backlight and wait for GPU
+# ASIUS has no physical display, but the mainline DRM/GPU stack still behaves
+# better when the backlight class exists before openpilot starts.
 if [ -f /ASIUS ]; then
-  # Wait for DRM device
   for i in $(seq 1 60); do
     [ -e /dev/dri/card0 ] && break
     sleep 0.5
   done
-  # Fake backlight for raylib (Dragon has no physical backlight)
+
   if [ ! -d /sys/class/backlight/panel0-backlight ]; then
     mount -t tmpfs tmpfs /sys/class/backlight
     mkdir -p /sys/class/backlight/panel0-backlight
@@ -33,16 +33,9 @@ if [ ! -f /ASIUS ]; then
     sleep 0.5
   done
 
-  # Wait for magic/graphics to be ready before launching tmux/setup
-  for i in $(seq 1 300); do
-    if sv check magic >/dev/null 2>&1 && [ -S /tmp/drmfd.sock ]; then
-      break
-    fi
-    sleep 0.1
-  done
 fi
 
-# Create cgroup so power_drop_monitor can kill all openpilot processes at once
+# Create cgroup for the openpilot process tree.
 mkdir -p /sys/fs/cgroup/comma
 echo $$ > /sys/fs/cgroup/comma/cgroup.procs
 

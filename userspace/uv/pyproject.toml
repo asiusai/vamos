@@ -24,9 +24,6 @@ dependencies = [
   "py-spy",
   "spidev2",
   "flaky",
-
-  # GUIs
-  "raylib @ https://github.com/andiradulescu/raylib-python-cffi/releases/download/liberation-c5e9308f032eee990af18aefb6f55a6e0c71d0e7/raylib-5.5.0.2-cp312-cp312-linux_aarch64.whl",
 ]
 
 [tool.uv]
