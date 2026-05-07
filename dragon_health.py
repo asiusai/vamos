@@ -300,7 +300,8 @@ def run_model_replay():
     env["PYTHONPATH"] = OPENPILOT_ROOT
     env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
     env["COMMA_CACHE"] = "/data/comma_download_cache"
-    env["MODEL_REUSE_INTERVAL"] = "2"
+    env["MODEL_EVAL_INTERVAL"] = "2"
+    env["MODEL_EXTRA_REUSE_PERIOD"] = "6"
     build_openpilot_for_replay(env)
     restore_prebuilt_model_pickles()
 
