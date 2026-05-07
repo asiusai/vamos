@@ -7,7 +7,6 @@ captures sample images, and runs model replay.
 Invoked from the host via:  dragon.py health
 """
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -301,7 +300,6 @@ def run_model_replay():
     env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
     env["COMMA_CACHE"] = "/data/comma_download_cache"
     build_openpilot_for_replay(env)
-    restore_prebuilt_model_pickles()
 
     print("  Running model_replay.py (this may take a while)...")
     try:
@@ -370,19 +368,13 @@ def chunked_or_plain_file_exists(path):
 
 def missing_replay_model_artifacts():
     models_dir = Path(OPENPILOT_ROOT) / "selfdrive/modeld/models"
-    required = ("dmonitoring_model_tinygrad", "dm_warp_1928x1208_tinygrad")
+    required = (
+        "driving_1928x1208_tinygrad",
+        "driving_warp_1928x1208_tinygrad",
+        "dmonitoring_model_tinygrad",
+        "dm_warp_1928x1208_tinygrad",
+    )
     return [name for name in required if not chunked_or_plain_file_exists(models_dir / f"{name}.pkl")]
-
-
-def restore_prebuilt_model_pickles():
-    models_dir = Path(OPENPILOT_ROOT) / "selfdrive/modeld/models"
-    for name in ("driving_1928x1208_tinygrad", "driving_warp_1928x1208_tinygrad"):
-        prebuilt = models_dir / f"{name}.prebuilt.pkl"
-        model = models_dir / f"{name}.pkl"
-        if prebuilt.exists():
-            for path in models_dir.glob(f"{name}.pkl.chunk*"):
-                path.unlink()
-            shutil.copy2(prebuilt, model)
 
 
 def system_info():
