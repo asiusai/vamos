@@ -7,6 +7,9 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null && pwd)"
 cd "$DIR"
 
 DISK_IMG="$DIR/build/dragon.img"
+ROOTFS_IMG="$DIR/build/system.img"
+KERNEL_IMAGE="$DIR/build/Image"
+DTB_FILE="$DIR/build/qcs6490-radxa-dragon-q6a.dtb"
 LOADER="$DIR/firmware-dragon/flat_build/spinor/dragon-q6a/prog_firehose_ddr.elf"
 
 if [ ! -f "$DISK_IMG" ]; then
@@ -14,6 +17,13 @@ if [ ! -f "$DISK_IMG" ]; then
   echo "Run: ./vamos build disk"
   exit 1
 fi
+for input in "$ROOTFS_IMG" "$KERNEL_IMAGE" "$DTB_FILE"; do
+  if [ -f "$input" ] && [ "$input" -nt "$DISK_IMG" ]; then
+    echo "ERROR: $DISK_IMG is older than $input"
+    echo "Run: ./vamos build disk"
+    exit 1
+  fi
+done
 if [ ! -f "$LOADER" ]; then
   echo "ERROR: Firehose loader not found at $LOADER"
   echo "Re-download firmware-dragon/ from dl.radxa.com (see tools/flash/README)."

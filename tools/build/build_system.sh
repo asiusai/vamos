@@ -177,6 +177,7 @@ if [ -n "$OP_SRC" ]; then
   OP_VERSION=$(cat "$OP_SRC/common/version.h" 2>/dev/null | grep COMMA_VERSION | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
 
   # All fs ops run inside the builder container — ROOTFS_DIR only exists there
+  exec_as_root rm -rf "$ROOTFS_DIR/data/openpilot"
   exec_as_root mkdir -p "$ROOTFS_DIR/data/openpilot"
   exec_as_root cp -a "$OP_SRC/." "$ROOTFS_DIR/data/openpilot/"
   exec_as_root sh -c "
@@ -198,6 +199,13 @@ BUILDJSON
     find . -name .git -type d -prune -exec rm -rf {} + ; \
     find . -name __pycache__ -type d -prune -exec rm -rf {} + ; \
     find . -name '*.o' -delete
+    find selfdrive/modeld/models -type f \( \
+      -name '*_tinygrad.pkl' -o \
+      -name '*_tinygrad.pkl.chunk*' -o \
+      -name '*_metadata.pkl' -o \
+      -name '*.prebuilt.pkl' -o \
+      -name 'tg_compiled_flags.json' \
+    \) -delete
     cat > '$ROOTFS_DIR/data/continue.sh' <<'CONT'
 #!/usr/bin/env bash
 cd /data/openpilot
