@@ -250,7 +250,7 @@ def wait_for_replay_idle():
     run(["sudo", "sv", "down", "comma"], timeout=15)
     run(["tmux", "kill-session", "-t", "comma"], timeout=5)
 
-    process_pattern = "manager.py|launch_chffrplus|camerad|selfdrive\\.|dmonitoringmodeld"
+    process_pattern = "manager.py|launch_chffrplus|camerad|selfdrive\\.|dmonitoringmodeld|scons|system/manager/build.py"
     for _ in range(20):
         code, out, _ = run(["bash", "-lc",
                             f"pgrep -af '{process_pattern}' | grep -v dragon_health.py | grep -v pgrep || true"],
@@ -322,11 +322,13 @@ def run_model_replay():
 
 
 def build_openpilot_for_replay(env):
+    missing_artifacts = missing_replay_model_artifacts()
     try:
         subprocess.run([sys.executable, "-c", "import msgq.ipc_pyx; import msgq.visionipc.visionipc_pyx"],
                        cwd=OPENPILOT_ROOT, env=env, check=True,
                        capture_output=True, text=True, timeout=10)
-        return
+        if not missing_artifacts:
+            return
     except Exception:
         pass
 
@@ -339,11 +341,37 @@ def build_openpilot_for_replay(env):
         warn(f"build.py missing at {build_py}")
         return
 
-    print("  Building openpilot native modules for replay...")
+    if missing_artifacts:
+        print(f"  Building replay model artifacts: {', '.join(missing_artifacts)}")
+    else:
+        print("  Building openpilot native modules for replay...")
     proc = subprocess.run([sys.executable, str(build_py)], cwd=OPENPILOT_ROOT,
                           env=env, text=True, timeout=900)
     if proc.returncode != 0:
         warn(f"build.py exited {proc.returncode}; replay will report the failure")
+
+
+def chunked_or_plain_file_exists(path):
+    path = Path(path)
+    if path.exists():
+        return True
+
+    manifest = Path(str(path) + ".chunkmanifest")
+    if not manifest.exists():
+        return False
+
+    try:
+        num_chunks = int(manifest.read_text().strip())
+    except ValueError:
+        return False
+
+    return all(Path(f"{path}.chunk{i + 1:02d}of{num_chunks:02d}").exists() for i in range(num_chunks))
+
+
+def missing_replay_model_artifacts():
+    models_dir = Path(OPENPILOT_ROOT) / "selfdrive/modeld/models"
+    required = ("dmonitoring_model_tinygrad", "dm_warp_1928x1208_tinygrad")
+    return [name for name in required if not chunked_or_plain_file_exists(models_dir / f"{name}.pkl")]
 
 
 def restore_prebuilt_model_pickles():
