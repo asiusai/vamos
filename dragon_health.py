@@ -7,6 +7,7 @@ captures sample images, and runs model replay.
 Invoked from the host via:  dragon.py health
 """
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -235,6 +236,46 @@ def capture_snapshots():
     return all_ok
 
 
+def max_thermal_c():
+    temps = []
+    for path in Path("/sys/class/thermal").glob("thermal_zone*/temp"):
+        try:
+            temps.append(int(path.read_text().strip()) / 1000)
+        except Exception:
+            continue
+    return max(temps) if temps else None
+
+
+def wait_for_replay_idle():
+    run(["sudo", "sv", "down", "comma"], timeout=15)
+    run(["tmux", "kill-session", "-t", "comma"], timeout=5)
+
+    process_pattern = "manager.py|launch_chffrplus|camerad|selfdrive\\.|dmonitoringmodeld"
+    for _ in range(20):
+        code, out, _ = run(["bash", "-lc",
+                            f"pgrep -af '{process_pattern}' | grep -v dragon_health.py | grep -v pgrep || true"],
+                           timeout=5)
+        if code == 0 and not out:
+            break
+        run(["bash", "-lc", f"pkill -TERM -f '{process_pattern}' || true"], timeout=5)
+        time.sleep(0.5)
+    else:
+        run(["bash", "-lc", f"pkill -KILL -f '{process_pattern}' || true"], timeout=5)
+
+    start = time.monotonic()
+    last_print = 0.0
+    while time.monotonic() - start < 90:
+        temp = max_thermal_c()
+        if temp is None or temp <= 64:
+            break
+        now = time.monotonic()
+        if now - last_print >= 10:
+            print(f"  Waiting for replay idle/cooldown: max thermal {temp:.0f}C")
+            last_print = now
+        time.sleep(3.0)
+    time.sleep(3.0)
+
+
 def run_model_replay():
     section("Model Replay")
     try:
@@ -254,21 +295,67 @@ def run_model_replay():
         fail(f"model_replay.py not found at {replay_script}")
         return False
 
-    print("  Running model_replay.py (this may take a while)...")
+    wait_for_replay_idle()
     env = os.environ.copy()
+    env["PYTHONPATH"] = OPENPILOT_ROOT
+    env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
     env["COMMA_CACHE"] = "/data/comma_download_cache"
-    proc = subprocess.Popen([sys.executable, replay_script],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, env=env)
-    for line in proc.stdout:
-        print(f"  {line.rstrip()}")
-    proc.wait()
+    env["MODEL_REUSE_INTERVAL"] = "2"
+    build_openpilot_for_replay(env)
+    restore_prebuilt_model_pickles()
+
+    print("  Running model_replay.py (this may take a while)...")
+    try:
+        proc = subprocess.Popen([sys.executable, replay_script],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, env=env)
+        for line in proc.stdout:
+            print(f"  {line.rstrip()}")
+        proc.wait()
+    finally:
+        run(["sudo", "sv", "up", "comma"], timeout=15)
 
     if proc.returncode == 0:
         ok("Model replay passed")
         return True
     fail(f"Model replay failed (exit={proc.returncode})")
     return False
+
+
+def build_openpilot_for_replay(env):
+    try:
+        subprocess.run([sys.executable, "-c", "import msgq.ipc_pyx"],
+                       cwd=OPENPILOT_ROOT, env=env, check=True,
+                       capture_output=True, text=True, timeout=10)
+        return
+    except Exception:
+        pass
+
+    cache_config = Path("/data/scons_cache/config")
+    if cache_config.exists() and cache_config.stat().st_size == 0:
+        cache_config.unlink()
+
+    build_py = Path(OPENPILOT_ROOT) / "system/manager/build.py"
+    if not build_py.exists():
+        warn(f"build.py missing at {build_py}")
+        return
+
+    print("  Building openpilot native modules for replay...")
+    proc = subprocess.run([sys.executable, str(build_py)], cwd=OPENPILOT_ROOT,
+                          env=env, text=True, timeout=900)
+    if proc.returncode != 0:
+        warn(f"build.py exited {proc.returncode}; replay will report the failure")
+
+
+def restore_prebuilt_model_pickles():
+    models_dir = Path(OPENPILOT_ROOT) / "selfdrive/modeld/models"
+    for name in ("driving_1928x1208_tinygrad", "driving_warp_1928x1208_tinygrad"):
+        prebuilt = models_dir / f"{name}.prebuilt.pkl"
+        model = models_dir / f"{name}.pkl"
+        if prebuilt.exists():
+            for path in models_dir.glob(f"{name}.pkl.chunk*"):
+                path.unlink()
+            shutil.copy2(prebuilt, model)
 
 
 def system_info():
@@ -310,6 +397,7 @@ def system_info():
 
 def wait_for_openpilot(timeout=600):
     section("Waiting for openpilot")
+    run(["sudo", "sv", "up", "comma"], timeout=15)
     try:
         import cereal.messaging as messaging
     except ImportError:
@@ -337,6 +425,7 @@ def main():
     print(f"Dragon Q6A Health Check — {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     system_info()
+    model_replay_ok = run_model_replay()
     ready = wait_for_openpilot()
     if not ready:
         print("\n  Proceeding with checks anyway...\n")
@@ -348,7 +437,7 @@ def main():
         'processes':    check_processes(),
         'fps':          measure_fps(),
         'snapshots':    capture_snapshots(),
-        'model_replay': run_model_replay(),
+        'model_replay': model_replay_ok,
     }
 
     section("Summary")

@@ -181,10 +181,9 @@ RUN echo '#!/bin/sh' > /etc/sv/sshd/run && \
     echo 'exec 2>&1' >> /etc/sv/sshd/run && \
     echo '# Create ssh host keys if needed (on first boot)' >> /etc/sv/sshd/run && \
     echo 'mkdir -p /data/etc/ssh' >> /etc/sv/sshd/run && \
-    echo 'if [ ! -f /data/etc/ssh/ssh_host_ed25519_key ]; then' >> /etc/sv/sshd/run && \
-    echo '  ssh-keygen -t ed25519 -f /data/etc/ssh/ssh_host_ed25519_key -N ""' >> /etc/sv/sshd/run && \
-    echo '  ssh-keygen -t rsa -b 4096 -f /data/etc/ssh/ssh_host_rsa_key -N ""' >> /etc/sv/sshd/run && \
-    echo '  ssh-keygen -t ecdsa -f /data/etc/ssh/ssh_host_ecdsa_key -N ""' >> /etc/sv/sshd/run && \
+    echo 'if [ ! -s /data/etc/ssh/ssh_host_ed25519_key ] || [ ! -s /data/etc/ssh/ssh_host_rsa_key ] || [ ! -s /data/etc/ssh/ssh_host_ecdsa_key ]; then' >> /etc/sv/sshd/run && \
+    echo '  rm -f /data/etc/ssh/ssh_host_*' >> /etc/sv/sshd/run && \
+    echo '  ssh-keygen -A -f /data' >> /etc/sv/sshd/run && \
     echo 'fi' >> /etc/sv/sshd/run && \
     echo 'exec /usr/bin/sshd -D' >> /etc/sv/sshd/run
 

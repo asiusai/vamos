@@ -11,8 +11,9 @@ get_value() {
   cat "$WATCH_FILE" 2>/dev/null || echo ""
 }
 
-# Default NCM to enabled on first boot
-if [ ! -f "$WATCH_FILE" ]; then
+# Default NCM to enabled on first boot. Params can create the file before
+# writing a value, so treat an empty file as unset rather than disabled.
+if [ ! -s "$WATCH_FILE" ]; then
   mkdir -p "$WATCH_DIR"
   printf '1' > "$WATCH_FILE"
 fi

@@ -146,7 +146,13 @@ disable_ncm() {
   disable_udc
 }
 
-if [ -f "$NCM_PARAM" ] && [ "$(< "$NCM_PARAM")" = "1" ]; then
+if [ -f "$NCM_PARAM" ]; then
+  NCM_VALUE="$(cat "$NCM_PARAM" 2>/dev/null || true)"
+else
+  NCM_VALUE="1"
+fi
+
+if [ "$NCM_VALUE" != "0" ]; then
   echo "Enabling USB NCM"
   enable_ncm
 else
