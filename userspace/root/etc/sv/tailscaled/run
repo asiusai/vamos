@@ -1,0 +1,31 @@
+#!/bin/sh
+exec 2>&1
+
+export PATH=/usr/bin:/usr/sbin:/bin:/sbin
+
+STATE_DIR=/data/tailscale
+SOCKET_DIR=/var/run/tailscale
+
+mkdir -p "$STATE_DIR" "$SOCKET_DIR"
+chmod 700 "$STATE_DIR"
+
+# The Dragon has no battery-backed RTC. Avoid starting tailscaled while the
+# clock is still at 1970, since TLS validation against the control plane fails.
+for _ in $(seq 1 120); do
+  [ "$(date +%Y)" -ge 2026 ] && break
+  sleep 1
+done
+
+# Wait briefly for a default route. tailscaled can recover later, but this keeps
+# boot logs clean and makes first-run "tailscale up" deterministic.
+for _ in $(seq 1 60); do
+  ip route show default | grep -q . && break
+  sleep 1
+done
+
+exec /usr/bin/tailscaled \
+  --state="$STATE_DIR/tailscaled.state" \
+  --statedir="$STATE_DIR" \
+  --socket="$SOCKET_DIR/tailscaled.sock" \
+  --port "${PORT:-41641}" \
+  "$@"

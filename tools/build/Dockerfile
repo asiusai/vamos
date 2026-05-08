@@ -44,6 +44,7 @@ RUN xbps-install -y \
   nfs-utils \
   socat \
   stress-ng \
+  tailscale \
   tree \
   wavemon \
   android-tools \
@@ -86,6 +87,7 @@ RUN mkdir -p /root/.config
 # Re-enable as Dragon support for those subsystems lands.
 RUN for svc in \
   sshd rsyslogd busybox-ntpd iptables \
+  tailscaled \
   bluetoothd \
   comma init-qcom \
   agetty-ttyMSM0 agetty-ttyAMA0; do \
@@ -99,7 +101,7 @@ RUN rm -f /etc/runit/runsvdir/default/udevd
 RUN sed -i 's/FileCreateMode 0640/FileCreateMode 0644/' /etc/rsyslog.conf
 
 # Set executable permissions
-RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/get-bt-address.sh /usr/comma/set-bt-address.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/comma/fs_setup.sh /usr/bin/journalctl /etc/sv/bluetoothd/run
+RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/get-bt-address.sh /usr/comma/set-bt-address.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/comma/fs_setup.sh /usr/bin/journalctl /etc/sv/bluetoothd/run /etc/sv/tailscaled/run
 RUN chmod +x /etc/runit/1 /etc/runit/2 /etc/runit/3
 
 # Shutdown wrappers - send wall broadcast like systemd does on Ubuntu
