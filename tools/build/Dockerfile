@@ -64,6 +64,9 @@ RUN cd /tmp/vamos/uv && \
 COPY ./kernel/firmware/aic8800_fw/USB /lib/firmware/aic8800_fw/USB
 RUN ln -sf aic8800_fw/USB/aic8800D80 /lib/firmware/aic8800D80
 
+# Qualcomm GENI firmware for I2C/SPI/UART serial engines.
+COPY ./kernel/firmware/qcom/qcm6490/qupv3fw.elf /lib/firmware/qcom/qcm6490/qupv3fw.elf
+
 # Kernel modules are installed after Docker export in build_system.sh
 # (in-tree from build/modules_install + out-of-tree prebuilt from kernel/modules/)
 

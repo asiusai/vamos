@@ -12,13 +12,14 @@ diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/
 index 111111111111..222222222222 100644
 --- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
 +++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
-@@ -41,6 +41,8 @@ / {
+@@ -41,6 +41,9 @@ / {
  	chassis-type = "embedded";
  
  	aliases {
 +		mmc0 = &sdhc_1;
 +		mmc1 = &sdhc_2;
  		serial0 = &uart5;
++		spi0 = &spi12;
  	};
  
 @@ -446,7 +448,10 @@ vreg_l19b_1p8: ldo19 {
@@ -133,4 +134,3 @@ index 111111111111..222222222222 100644
 -};
 -- 
 Armbian
-

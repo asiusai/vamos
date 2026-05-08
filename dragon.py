@@ -12,6 +12,7 @@ Usage:
   dragon.py edl --no-cycle            Skip power cycle, just navigate
   dragon.py ssh [cmd...]               SSH to Dragon over USB NCM (run cmd if given)
   dragon.py status                     Show power, NCM, SSH, UART status
+  dragon.py health [--target USER@HOST] Run health check
   dragon.py uart read [SECONDS]       Read UART for N seconds (default 3)
   dragon.py uart send 'string'        Send string (supports \\n/\\r/\\t)
   dragon.py uart exec 'cmd' [SECONDS] Send cmd, collect output
@@ -45,13 +46,13 @@ OFF_SETTLE_SECS = 5
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HEALTH_SCRIPT = os.path.join(SCRIPT_DIR, "dragon_health.py")
 REMOTE_HEALTH_SCRIPT = "/tmp/dragon_health.py"
-SSH_OPTS = [
-    "-i", SSH_KEY,
+SSH_HOSTKEY_OPTS = [
     "-o", "StrictHostKeyChecking=no",
     "-o", "UserKnownHostsFile=/dev/null",
     "-o", "GlobalKnownHostsFile=/dev/null",
     "-o", "LogLevel=ERROR",
 ]
+SSH_OPTS = ["-i", SSH_KEY, *SSH_HOSTKEY_OPTS]
 
 F2 = b"\x1bOQ"
 DOWN = b"\x1b[B"
@@ -334,24 +335,29 @@ def cmd_uart(args):
 
 # -- health --
 
-def cmd_health(_args):
-    ensure_ncm()
+def cmd_health(args):
+    target = args.target or f"comma@{NCM_IP}"
+    ssh_opts = list(SSH_HOSTKEY_OPTS) if args.target else list(SSH_OPTS)
+    if args.identity:
+        ssh_opts = ["-i", os.path.expanduser(args.identity), *SSH_HOSTKEY_OPTS]
+    if not args.target:
+        ensure_ncm()
     if not os.path.isfile(HEALTH_SCRIPT):
         sys.exit(f"health script not found: {HEALTH_SCRIPT}")
 
-    print(f"[health] copying {HEALTH_SCRIPT} to comma@{NCM_IP}:{REMOTE_HEALTH_SCRIPT}", flush=True)
-    subprocess.run(["scp", *SSH_OPTS, HEALTH_SCRIPT,
-                    f"comma@{NCM_IP}:{REMOTE_HEALTH_SCRIPT}"], check=True)
+    print(f"[health] copying {HEALTH_SCRIPT} to {target}:{REMOTE_HEALTH_SCRIPT}", flush=True)
+    subprocess.run(["scp", *ssh_opts, HEALTH_SCRIPT,
+                    f"{target}:{REMOTE_HEALTH_SCRIPT}"], check=True)
 
-    ssh_cmd = ["ssh", *SSH_OPTS, f"comma@{NCM_IP}",
+    ssh_cmd = ["ssh", *ssh_opts, target,
                f"cd /data/openpilot && PYTHONPATH=/data/openpilot OPENPILOT_ROOT=/data/openpilot "
                f"python3 -u {REMOTE_HEALTH_SCRIPT}"]
     ret = subprocess.run(ssh_cmd).returncode
     local_dir = "/tmp/dragon_health_local"
     os.makedirs(local_dir, exist_ok=True)
     print(f"\n[health] pulling snapshots to {local_dir}", flush=True)
-    subprocess.run(["scp", *SSH_OPTS,
-                    f"comma@{NCM_IP}:/tmp/dragon_health/*.jpg", local_dir])
+    subprocess.run(["scp", *ssh_opts,
+                    f"{target}:/tmp/dragon_health/*.jpg", local_dir])
     return ret
 
 # -- main --
@@ -377,7 +383,9 @@ def main():
     uart_p.add_argument("uart_cmd", choices=["read", "send", "exec", "login", "wake"])
     uart_p.add_argument("uart_args", nargs="*")
 
-    sub.add_parser("health", help="Run system health check on Dragon")
+    health_p = sub.add_parser("health", help="Run system health check on Dragon")
+    health_p.add_argument("--target", help="SSH target, e.g. comma@asius1. Defaults to USB NCM.")
+    health_p.add_argument("--identity", help="SSH identity file for health target.")
 
     args = ap.parse_args()
     if not args.cmd:

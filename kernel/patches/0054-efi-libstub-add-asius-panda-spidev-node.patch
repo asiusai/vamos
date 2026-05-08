@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Asius <dev@asius.io>
+Date: Fri, 8 May 2026 12:05:00 +0000
+Subject: efi: libstub: Add Asius panda SPI node on Dragon Q6A
+
+The Dragon Q6A firmware supplies the DTB used at boot. Keep that
+firmware-provided tree, but add the panda SPI child and alias before the
+kernel scans the device tree.
+---
+ drivers/firmware/efi/libstub/fdt.c | 58 ++++++++++++++++++++++++++++++
+ 1 file changed, 58 insertions(+)
+
+diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
+index 111111111111..222222222222 100644
+--- a/drivers/firmware/efi/libstub/fdt.c
++++ b/drivers/firmware/efi/libstub/fdt.c
+@@ -27,6 +27,62 @@ static void fdt_update_cell_size(void *fdt)
+ 	fdt_setprop_u32(fdt, offset, "#size-cells",    EFI_DT_SIZE_CELLS_DEFAULT);
+ }
+ 
++static void asius_enable_panda_spi(void *fdt)
++{
++	static const char spi12_path[] = "/soc@0/geniqup@ac0000/spi@a90000";
++	fdt32_t max_frequency = cpu_to_fdt32(50000000);
++	fdt32_t reg = cpu_to_fdt32(0);
++	int aliases, panda, spi, status;
++
++	spi = fdt_path_offset(fdt, spi12_path);
++	if (spi < 0)
++		return;
++
++	/*
++	 * panda's Python SPI backend opens /dev/spidev0.0. The firmware DTB
++	 * aliases this controller as spi12, so replace spi0 before aliases are
++	 * scanned by the kernel.
++	 */
++	aliases = fdt_path_offset(fdt, "/aliases");
++	if (aliases >= 0) {
++		status = fdt_setprop_string(fdt, aliases, "spi0", spi12_path);
++		if (status)
++			efi_warn("Failed to alias Asius panda SPI controller: %d\n",
++				 status);
++	}
++
++	status = fdt_setprop_string(fdt, spi, "status", "okay");
++	if (status)
++		efi_warn("Failed to enable Asius panda SPI controller: %d\n",
++			 status);
++
++	status = fdt_setprop_u32(fdt, spi, "#address-cells", 1);
++	if (status)
++		efi_warn("Failed to set Asius panda SPI address cells: %d\n",
++			 status);
++
++	status = fdt_setprop_u32(fdt, spi, "#size-cells", 0);
++	if (status)
++		efi_warn("Failed to set Asius panda SPI size cells: %d\n",
++			 status);
++
++	panda = fdt_subnode_offset(fdt, spi, "panda@0");
++	if (panda == -FDT_ERR_NOTFOUND)
++		panda = fdt_add_subnode(fdt, spi, "panda@0");
++	if (panda < 0) {
++		efi_warn("Failed to add Asius panda SPI node: %d\n", panda);
++		return;
++	}
++
++	status = fdt_setprop_string(fdt, panda, "compatible", "rohm,dh2228fv") ?:
++		 fdt_setprop(fdt, panda, "reg", &reg, sizeof(reg)) ?:
++		 fdt_setprop(fdt, panda, "spi-max-frequency", &max_frequency,
++			     sizeof(max_frequency));
++	if (status)
++		efi_warn("Failed to configure Asius panda SPI node: %d\n",
++			 status);
++}
++
+ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+ 			       void *fdt, int new_fdt_size, char *cmdline_ptr)
+ {
+@@ -92,6 +148,8 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+ 			goto fdt_set_fail;
+ 	}
+ 
++	asius_enable_panda_spi(fdt);
++
+ 	/* Add FDT entries for EFI runtime services in chosen node. */
+ 	node = fdt_subnode_offset(fdt, 0, "chosen");
+ 	fdt_val64 = cpu_to_fdt64((u64)(unsigned long)efi_system_table);
+-- 
+2.43.0
