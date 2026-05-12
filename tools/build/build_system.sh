@@ -197,6 +197,7 @@ BUILDJSON
     cd '$ROOTFS_DIR/data/openpilot' && \
     rm -rf .git .gitattributes build scons_cache && \
     find . -name .git -type d -prune -exec rm -rf {} + ; \
+    find . -name .git -type f -delete
     find . -name __pycache__ -type d -prune -exec rm -rf {} + ; \
     find . -name '*.o' -delete
     find selfdrive/modeld/models -type f \( \

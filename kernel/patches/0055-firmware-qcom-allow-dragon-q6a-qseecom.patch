@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Asius <dev@asius.io>
+Date: Tue, 12 May 2026 17:20:00 +0300
+Subject: firmware: qcom: allow QSEECOM on Radxa Dragon Q6A
+
+Dragon Q6A firmware exposes Qualcomm QSEECOM and the UEFI secure app. The
+UEFI variable backend is already enabled in the kernel config, but SCM skips
+creating the qseecom device on machines not present in its validated allowlist.
+
+Allow the Radxa Dragon Q6A compatible so qcom_qseecom_uefisecapp can register
+efivar operations and expose UEFI variables through efivarfs.
+---
+ drivers/firmware/qcom/qcom_scm.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index 111111111111..222222222222 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -2013,6 +2013,7 @@ static const struct of_device_id qcom_scm_qseecom_allowlist[] __maybe_unused = {
+ 	{ .compatible = "microsoft,romulus15", },
+ 	{ .compatible = "qcom,hamoa-iot-evk" },
+ 	{ .compatible = "qcom,sc8180x-primus" },
++	{ .compatible = "radxa,dragon-q6a" },
+ 	{ .compatible = "qcom,x1e001de-devkit" },
+ 	{ .compatible = "qcom,x1e80100-crd" },
+ 	{ .compatible = "qcom,x1e80100-qcp" },
+-- 
+2.43.0

@@ -19,6 +19,18 @@ touch /run/motd && chmod 666 /run/motd
 
 mountpoint -q /dev/pts || mount -t devpts devpts /dev/pts -o mode=0620,gid=5,nosuid,noexec
 mountpoint -q /dev/shm || mount -t tmpfs shm /dev/shm -o mode=1777,nosuid,nodev
+if [ -d /sys/firmware/efi ]; then
+    mkdir -p /sys/firmware/efi/efivars
+    if mountpoint -q /sys/firmware/efi/efivars || mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null; then
+        if command -v efibootmgr >/dev/null 2>&1; then
+            efibootmgr -t 0 >/dev/null 2>&1 || echo "WARN: failed to set EFI boot timeout"
+        else
+            echo "WARN: efibootmgr not installed"
+        fi
+    else
+        echo "WARN: efivarfs not available"
+    fi
+fi
 
 # Mount /var, /tmp, /rwtmp as tmpfs early (from fstab, but we need it before services start)
 mountpoint -q /var || mount -t tmpfs tmpfs /var -o rw,nosuid,nodev,size=128M,mode=755

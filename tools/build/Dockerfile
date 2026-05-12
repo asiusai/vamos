@@ -36,6 +36,7 @@ RUN cd /tmp/vamos/irsc_util && \
 RUN xbps-install -y \
   bash-completion \
   btop \
+  efibootmgr \
   hyperfine \
   iperf \
   iperf3 \

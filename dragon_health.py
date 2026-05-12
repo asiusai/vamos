@@ -17,6 +17,22 @@ EXPECTED_FRAME_INTERVAL_MS = 50.0
 FRAME_INTERVAL_TOLERANCE_MS = 1.0
 SNAPSHOT_DIR = "/tmp/dragon_health"
 OPENPILOT_ROOT = os.environ.get("OPENPILOT_ROOT", "/data/openpilot")
+GENERATED_NATIVE_OUTPUTS = (
+    "common/libcommon.a",
+    "common/params_pyx.so",
+    "cereal/libcereal.a",
+    "cereal/libsocketmaster.a",
+    "cereal/messaging/bridge",
+    "msgq/ipc_pyx.so",
+    "msgq/visionipc/visionipc_pyx.so",
+    "msgq_repo/libmsgq.a",
+    "msgq_repo/libvisionipc.a",
+    "msgq_repo/msgq/ipc_pyx.so",
+    "msgq_repo/msgq/visionipc/visionipc_pyx.so",
+    "rednose_repo/rednose/helpers/libekf_sym.a",
+    "third_party/libjson11.a",
+)
+MIN_GENERATED_OUTPUT_SIZE = 4096
 
 
 def section(title):
@@ -245,21 +261,43 @@ def max_thermal_c():
     return max(temps) if temps else None
 
 
+def remove_partial_build_outputs(force=False):
+    removed = []
+    for relpath in GENERATED_NATIVE_OUTPUTS:
+        path = Path(OPENPILOT_ROOT) / relpath
+        try:
+            if not path.exists() or path.is_dir():
+                continue
+            if force or path.stat().st_size < MIN_GENERATED_OUTPUT_SIZE:
+                path.unlink()
+                removed.append(relpath)
+        except OSError as e:
+            warn(f"Could not remove {relpath}: {e}")
+
+    if removed:
+        print(f"  Removed partial native build outputs: {', '.join(removed)}")
+
+
 def wait_for_replay_idle():
     run(["sudo", "sv", "down", "comma"], timeout=15)
     run(["tmux", "kill-session", "-t", "comma"], timeout=5)
 
     process_pattern = "manager.py|launch_chffrplus|camerad|selfdrive\\.|dmonitoringmodeld|scons|system/manager/build.py"
+    interrupted_build = False
     for _ in range(20):
         code, out, _ = run(["bash", "-lc",
                             f"pgrep -af '{process_pattern}' | grep -v dragon_health.py | grep -v pgrep || true"],
                            timeout=5)
         if code == 0 and not out:
             break
+        interrupted_build = interrupted_build or "scons" in out or "system/manager/build.py" in out
         run(["bash", "-lc", f"pkill -TERM -f '{process_pattern}' || true"], timeout=5)
         time.sleep(0.5)
     else:
         run(["bash", "-lc", f"pkill -KILL -f '{process_pattern}' || true"], timeout=5)
+        interrupted_build = True
+
+    remove_partial_build_outputs(force=interrupted_build)
 
     start = time.monotonic()
     last_print = 0.0
@@ -320,6 +358,7 @@ def run_model_replay():
 
 
 def build_openpilot_for_replay(env):
+    remove_partial_build_outputs()
     missing_artifacts = missing_replay_model_artifacts()
     try:
         subprocess.run([sys.executable, "-c", "import msgq.ipc_pyx; import msgq.visionipc.visionipc_pyx"],
