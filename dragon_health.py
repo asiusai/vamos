@@ -279,8 +279,8 @@ def remove_partial_build_outputs(force=False):
 
 
 def wait_for_replay_idle():
-    run(["sudo", "sv", "down", "comma"], timeout=15)
-    run(["tmux", "kill-session", "-t", "comma"], timeout=5)
+    run(["sudo", "sv", "down", "openpilot"], timeout=15)
+    run(["tmux", "kill-session", "-t", "openpilot"], timeout=5)
 
     process_pattern = "manager.py|launch_chffrplus|camerad|selfdrive\\.|dmonitoringmodeld|scons|system/manager/build.py"
     interrupted_build = False
@@ -348,7 +348,7 @@ def run_model_replay():
             print(f"  {line.rstrip()}")
         proc.wait()
     finally:
-        run(["sudo", "sv", "up", "comma"], timeout=15)
+        run(["sudo", "sv", "up", "openpilot"], timeout=15)
 
     if proc.returncode == 0:
         ok("Model replay passed")
@@ -455,7 +455,7 @@ def system_info():
 
 def wait_for_openpilot(timeout=600):
     section("Waiting for openpilot")
-    run(["sudo", "sv", "up", "comma"], timeout=15)
+    run(["sudo", "sv", "up", "openpilot"], timeout=15)
     try:
         import cereal.messaging as messaging
     except ImportError:

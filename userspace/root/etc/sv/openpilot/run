@@ -1,5 +1,5 @@
 #!/bin/sh
-# comma - main openpilot launcher (runs as comma user in tmux)
+# openpilot - main openpilot launcher (runs as comma user in tmux)
 exec 2>&1
 
 # ASIUS has no physical display, but the mainline DRM/GPU stack still behaves
@@ -36,17 +36,17 @@ if [ ! -f /ASIUS ]; then
 fi
 
 # Create cgroup for the openpilot process tree.
-mkdir -p /sys/fs/cgroup/comma
-echo $$ > /sys/fs/cgroup/comma/cgroup.procs
+mkdir -p /sys/fs/cgroup/openpilot
+echo $$ > /sys/fs/cgroup/openpilot/cgroup.procs
 
 # Run as comma user with proper groups and PAM limits
 # sudo -u properly inherits groups and applies /etc/security/limits.conf
 exec sudo -u comma /usr/bin/bash -l -c '
   # Start tmux session in background (no exec - we need to keep running)
-  /usr/bin/tmux new-session -s comma -d /usr/comma/comma.sh
+  /usr/bin/tmux new-session -s openpilot -d /usr/comma/comma.sh
 
   # Keep running while tmux session exists
-  while tmux has-session -t comma 2>/dev/null; do
+  while tmux has-session -t openpilot 2>/dev/null; do
     sleep 5
   done
 '

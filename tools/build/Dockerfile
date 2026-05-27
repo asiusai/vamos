@@ -84,7 +84,7 @@ RUN mkdir -p /root/.config
 # Minimal: boot + ssh + serial + basic logging. Comma-era services
 # (gpio, lte, modemmanager,
 # adsp/cdsp, rmtfs, sound, ipa_fws, varwatch,
-# fs_setup, comma, leprop, irsc_util, qrtr-ns/tqftpserv/pd-mapper,
+# fs_setup, openpilot, leprop, irsc_util, qrtr-ns/tqftpserv/pd-mapper,
 # cnss_daemon, ssh-param-watcher, ncm-param-watcher, avahi-ssh-publish,
 # serial-hostname, bluetoothd, dnsmasq, polkitd) are NOT enabled — they
 # assume comma hardware and spam the console with errors on Dragon.
@@ -94,7 +94,7 @@ RUN for svc in \
   tailscaled \
   keygen \
   bluetoothd \
-  comma init-qcom \
+  openpilot init-qcom \
   agetty-ttyMSM0 agetty-ttyAMA0; do \
     ln -sf /etc/sv/$svc /etc/runit/runsvdir/default/; \
   done
