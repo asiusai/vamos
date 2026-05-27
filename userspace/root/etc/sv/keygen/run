@@ -1,0 +1,15 @@
+#!/bin/sh
+exec 2>&1
+
+mkdir -p /persist/comma
+chown comma:comma /persist/comma
+
+if [ ! -s /persist/comma/id_ecdsa ]; then
+  openssl ecparam -name prime256v1 -genkey -noout -out /persist/comma/id_ecdsa
+  openssl ec -in /persist/comma/id_ecdsa -pubout -out /persist/comma/id_ecdsa.pub
+  chmod 600 /persist/comma/id_ecdsa
+  chmod 644 /persist/comma/id_ecdsa.pub
+  chown comma:comma /persist/comma/id_ecdsa /persist/comma/id_ecdsa.pub
+fi
+
+exec sleep infinity
