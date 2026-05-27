@@ -8,10 +8,7 @@ Here are some useful commands:
     └── tmux a -t openpilot
 
   Manage the openpilot service
-    ├── sudo sv status openpilot
-    ├── sudo sv restart openpilot
-    ├── sudo sv down openpilot
-    └── sudo sv up openpilot
+    └── sudo sv status/restart/down/up openpilot
 
   Install packages
     └── sudo xbps-install -S <pkg>
