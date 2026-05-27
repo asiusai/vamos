@@ -7,6 +7,12 @@ Here are some useful commands:
   (note: tmux prefix key has been configured to backtick)
     └── tmux a -t openpilot
 
+  Manage the openpilot service
+    ├── sudo sv status openpilot
+    ├── sudo sv restart openpilot
+    ├── sudo sv down openpilot
+    └── sudo sv up openpilot
+
   Install packages
     └── sudo xbps-install -S <pkg>
 

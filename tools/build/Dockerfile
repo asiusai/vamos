@@ -86,7 +86,7 @@ RUN mkdir -p /root/.config
 # adsp/cdsp, rmtfs, sound, ipa_fws, varwatch,
 # fs_setup, openpilot, leprop, irsc_util, qrtr-ns/tqftpserv/pd-mapper,
 # cnss_daemon, ssh-param-watcher, ncm-param-watcher, avahi-ssh-publish,
-# serial-hostname, bluetoothd, dnsmasq, polkitd) are NOT enabled — they
+# set-hostname, bluetoothd, dnsmasq, polkitd) are NOT enabled — they
 # assume comma hardware and spam the console with errors on Dragon.
 # Re-enable as Dragon support for those subsystems lands.
 RUN for svc in \
@@ -94,6 +94,7 @@ RUN for svc in \
   tailscaled \
   keygen \
   bluetoothd \
+  set-hostname \
   openpilot init-qcom \
   agetty-ttyMSM0 agetty-ttyAMA0; do \
     ln -sf /etc/sv/$svc /etc/runit/runsvdir/default/; \
