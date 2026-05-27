@@ -3,9 +3,9 @@
 cat << 'EOF'
 
 Here are some useful commands:
-  Enter the tmux session where the comma service runs
+  Enter the tmux session where the openpilot service runs
   (note: tmux prefix key has been configured to backtick)
-    └── tmux a
+    └── tmux a -t openpilot
 
   Install packages
     └── sudo xbps-install -S <pkg>
