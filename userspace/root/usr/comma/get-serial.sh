@@ -1,3 +1,3 @@
 #!/bin/sh
 
-sed -n 's/.*androidboot.serialno=\([^ ]*\).*/\1/p' /proc/cmdline
+tr -d '[:space:]' < /sys/devices/soc0/serial_number
