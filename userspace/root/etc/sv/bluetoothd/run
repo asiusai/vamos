@@ -6,7 +6,6 @@ sv check dbus >/dev/null || exit 1
 
 mkdir -p /var/lib/bluetooth
 rfkill unblock bluetooth >/dev/null 2>&1 || true
-/usr/comma/set-bt-address.sh
 
 if command -v bluetoothd >/dev/null 2>&1; then
   exec bluetoothd --nodetach
