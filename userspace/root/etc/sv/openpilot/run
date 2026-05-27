@@ -35,18 +35,40 @@ if [ ! -f /ASIUS ]; then
 
 fi
 
-# Create cgroup for the openpilot process tree.
 mkdir -p /sys/fs/cgroup/openpilot
-echo $$ > /sys/fs/cgroup/openpilot/cgroup.procs
+
+kill_openpilot() {
+  echo 1 > /sys/fs/cgroup/openpilot/cgroup.kill
+}
+
+kill_openpilot
+
+cleanup() {
+  kill_openpilot
+  exit 0
+}
+
+trap cleanup TERM INT HUP
 
 # Run as comma user with proper groups and PAM limits
 # sudo -u properly inherits groups and applies /etc/security/limits.conf
-exec sudo -u comma /usr/bin/bash -l -c '
-  # Start tmux session in background (no exec - we need to keep running)
-  /usr/bin/tmux new-session -s openpilot -d /usr/comma/comma.sh
+PANE_CMD="sudo -n /bin/sh -c 'mkdir -p /sys/fs/cgroup/openpilot; echo \$\$ > /sys/fs/cgroup/openpilot/cgroup.procs; exec sudo -u comma /usr/bin/bash -l -c /usr/comma/comma.sh'; exec /usr/bin/bash -l"
 
-  # Keep running while tmux session exists
-  while tmux has-session -t openpilot 2>/dev/null; do
-    sleep 5
-  done
-'
+if sudo -u comma /usr/bin/tmux has-session -t openpilot 2>/dev/null; then
+  sudo -u comma /usr/bin/tmux respawn-pane -k -t openpilot:0.0 "$PANE_CMD"
+else
+  sudo -u comma /usr/bin/tmux new-session -s openpilot -d "$PANE_CMD"
+fi
+
+for i in $(seq 1 10); do
+  [ -s /sys/fs/cgroup/openpilot/cgroup.procs ] && break
+  sleep 0.2
+done
+
+# Keep the runit service alive as the control wrapper. openpilot itself may
+# briefly exit during build/startup, and runit must not interpret that as a
+# reason to restart and kill the tmux command it just launched.
+while true; do
+  sleep 3600 &
+  wait $!
+done
