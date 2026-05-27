@@ -1,0 +1,8 @@
+#!/bin/sh
+# One-shot service - run once then sleep forever
+set -e
+
+SERIAL="$(/usr/comma/get-serial.sh)"
+sysctl kernel.hostname="asius-$SERIAL"
+
+exec sleep infinity
