@@ -3,7 +3,7 @@
 
 # Comma
 StrictModes no
-AuthorizedKeysFile /usr/comma/setup_keys /data/params/d/GithubSshKeys /tmp/authorized_keys
+AuthorizedKeysFile /data/params/d/GithubSshKeys
 PermitRootLogin no
 
 # What ports, IPs and protocols we listen for
@@ -90,4 +90,3 @@ Subsystem sftp /usr/libexec/sftp-server
 # PAM authentication, then enable this but set PasswordAuthentication
 # and ChallengeResponseAuthentication to 'no'.
 UsePAM yes
-
