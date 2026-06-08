@@ -123,7 +123,7 @@ exec_as_root sh -c "
   cd '$ROOTFS_DIR'
 
   # Add hostname and hosts
-  HOST=comma
+  HOST=asius-one
   ln -sf /proc/sys/kernel/hostname etc/hostname
   echo '127.0.0.1    localhost.localdomain localhost' > etc/hosts
   echo \"127.0.0.1    \$HOST\" >> etc/hosts
@@ -159,7 +159,7 @@ if [ -n "$KVER" ]; then
   exec_as_root depmod -b "$ROOTFS_DIR" -a "$KVER" 2>/dev/null || true
 fi
 
-# Bake openpilot into /data/openpilot so first boot works offline.
+# Copy openpilot into /data/openpilot so first boot works offline.
 # Path resolution: vamos may be a submodule; the outer asius repo contains
 # openpilot/ alongside vamos/. Fall back to not baking if not found.
 OP_SRC=""
@@ -167,9 +167,10 @@ for cand in "$DIR/../openpilot" "$(git -C "$DIR" rev-parse --show-superproject-w
   [ -d "$cand" ] && OP_SRC="$(cd "$cand" && pwd)" && break
 done
 if [ -n "$OP_SRC" ]; then
-  echo "Baking openpilot from $OP_SRC into /data/openpilot"
+  echo "Copying openpilot from $OP_SRC into /data/openpilot"
 
-  # Generate build.json from git metadata before we strip .git
+  # Generate build.json from git metadata before removing unusable submodule
+  # .git files from the copied tree. No openpilot build runs in this script.
   OP_COMMIT=$(git -C "$OP_SRC" rev-parse HEAD 2>/dev/null || echo "unknown")
   OP_BRANCH=$(git -C "$OP_SRC" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   OP_ORIGIN=$(git -C "$OP_SRC" remote get-url origin 2>/dev/null || echo "unknown")
@@ -190,7 +191,7 @@ if [ -n "$OP_SRC" ]; then
     \"git_commit\": \"$OP_COMMIT\",
     \"git_origin\": \"$OP_ORIGIN\",
     \"git_commit_date\": \"$OP_DATE\",
-    \"build_style\": \"baked\"
+    \"build_style\": \"source\"
   }
 }
 BUILDJSON
@@ -200,6 +201,8 @@ BUILDJSON
     find . -name .git -type f -delete
     find . -name __pycache__ -type d -prune -exec rm -rf {} + ; \
     find . -name '*.o' -delete
+    # Drop generated model artifacts from the copy so first launch builds them
+    # on the Dragon instead of using files produced on this host.
     find selfdrive/modeld/models -type f \( \
       -name '*_tinygrad.pkl' -o \
       -name '*_tinygrad.pkl.chunk*' -o \
@@ -216,13 +219,33 @@ CONT
     chown -R 1000:1000 '$ROOTFS_DIR/data/openpilot' '$ROOTFS_DIR/data/continue.sh'
   "
 
-  # Compile ASIUS native libraries
-  echo "Compiling ASIUS native libraries"
+  echo "Installing openpilot Python dependencies"
+  exec_as_root mkdir -p "$ROOTFS_DIR/dev" "$ROOTFS_DIR/proc" "$ROOTFS_DIR/sys" "$ROOTFS_DIR/run"
+  exec_as_root cp /etc/resolv.conf "$ROOTFS_DIR/run/resolv.conf"
+  exec_as_root mount --bind /dev "$ROOTFS_DIR/dev"
+  exec_as_root mount -t proc proc "$ROOTFS_DIR/proc"
+  exec_as_root mount --bind /sys "$ROOTFS_DIR/sys"
+  set +e
   exec_as_root chroot "$ROOTFS_DIR" sh -c '
-    cd /data/openpilot/tinygrad_repo
-    gcc -shared -fPIC -O2 -o cl_dispatch.so cl_dispatch.c -lOpenCL 2>/dev/null && echo "  built cl_dispatch.so" || echo "  WARN: cl_dispatch.c not found"
-    chown 1000:1000 /data/openpilot/tinygrad_repo/cl_dispatch.so 2>/dev/null
+    set -e
+    mkdir -p /data/tmp /data/uv-cache
+    chmod 1777 /data/tmp
+    cd /data/openpilot
+    XDG_DATA_HOME=/usr/local \
+    TMPDIR=/data/tmp \
+    UV_CACHE_DIR=/data/uv-cache \
+    UV_PROJECT_ENVIRONMENT=/usr/local/venv \
+      uv sync --frozen --inexact --no-install-project
+    rm -rf /data/tmp /data/uv-cache
+    chmod -R a+rX /usr/local/venv /usr/local/uv
   '
+  UV_STATUS=$?
+  set -e
+  exec_as_root umount -l "$ROOTFS_DIR/sys" || true
+  exec_as_root umount -l "$ROOTFS_DIR/proc" || true
+  exec_as_root umount -l "$ROOTFS_DIR/dev" || true
+  [ "$UV_STATUS" -eq 0 ] || exit "$UV_STATUS"
+
 else
   echo "WARN: openpilot not found next to vamos; /data/openpilot will be empty on first boot"
 fi
