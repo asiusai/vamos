@@ -3,8 +3,12 @@
 # Read the raw device model
 RAW_MODEL=$(tr -d '\0' < /sys/firmware/devicetree/base/model)
 
-# Extract the device model (e.g., tici, tizi, mici)
-MODEL=$(echo "$RAW_MODEL" | sed 's/comma //g' | awk '{print $1}')
+# Extract the short device type, preserving "one" while keeping legacy
+# models like "mici" and "tici" stable.
+MODEL="${RAW_MODEL#comma }"
+MODEL="${MODEL#Asius }"
+MODEL="${MODEL#asius }"
+MODEL=$(printf '%s\n' "$MODEL" | awk '{print tolower($1)}')
 
 [ -z "$MODEL" ] && MODEL="unknown"
 

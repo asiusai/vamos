@@ -140,7 +140,7 @@ index 000000000000..111111111111
 +/delete-node/ &xbl_mem;
 +
 +/ {
-+	model = "Radxa Dragon Q6A";
++	model = "asius one";
 +	compatible = "radxa,dragon-q6a", "qcom,qcm6490";
 +	chassis-type = "embedded";
 +
