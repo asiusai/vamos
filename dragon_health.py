@@ -337,6 +337,7 @@ def run_model_replay():
     env["PYTHONPATH"] = OPENPILOT_ROOT
     env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
     env["COMMA_CACHE"] = "/data/comma_download_cache"
+    env["DISABLE_DMON"] = "1"
     build_openpilot_for_replay(env)
 
     print("  Running model_replay.py (this may take a while)...")
@@ -410,8 +411,6 @@ def missing_replay_model_artifacts():
     required = (
         "driving_1928x1208_tinygrad",
         "driving_warp_1928x1208_tinygrad",
-        "dmonitoring_model_tinygrad",
-        "dm_warp_1928x1208_tinygrad",
     )
     return [name for name in required if not chunked_or_plain_file_exists(models_dir / f"{name}.pkl")]
 
