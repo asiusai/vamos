@@ -39,6 +39,7 @@ xbps-install -y \
   busybox \
   bluez \
   clang \
+  clinfo \
   cmake \
   czmq-devel \
   dbus-devel \

@@ -174,6 +174,10 @@ if [ -n "$OP_SRC" ]; then
   OP_COMMIT=$(git -C "$OP_SRC" rev-parse HEAD 2>/dev/null || echo "unknown")
   OP_BRANCH=$(git -C "$OP_SRC" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   OP_ORIGIN=$(git -C "$OP_SRC" remote get-url origin 2>/dev/null || echo "unknown")
+  OP_PULL_ORIGIN="$OP_ORIGIN"
+  case "$OP_PULL_ORIGIN" in
+    git@github.com:*) OP_PULL_ORIGIN="https://github.com/${OP_PULL_ORIGIN#git@github.com:}" ;;
+  esac
   OP_DATE=$(git -C "$OP_SRC" log -1 --format=%ci 2>/dev/null || echo "unknown")
   OP_VERSION=$(cat "$OP_SRC/common/version.h" 2>/dev/null | grep COMMA_VERSION | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
   OP_CLONE_BRANCH="$OP_BRANCH"
@@ -189,7 +193,7 @@ if [ -n "$OP_SRC" ]; then
     -c protocol.file.allow=always \
     clone --depth 1 --single-branch --branch "$OP_CLONE_BRANCH" \
     "file://$OP_SRC" "$ROOTFS_DIR/data/openpilot"
-  exec_as_root git -C "$ROOTFS_DIR/data/openpilot" remote set-url origin "$OP_ORIGIN"
+  exec_as_root git -C "$ROOTFS_DIR/data/openpilot" remote set-url origin "$OP_PULL_ORIGIN"
   exec_as_root git -C "$ROOTFS_DIR/data/openpilot" config branch.one.remote origin
   exec_as_root git -C "$ROOTFS_DIR/data/openpilot" config branch.one.merge refs/heads/one
   exec_as_root git -C "$ROOTFS_DIR/data/openpilot" submodule init
@@ -229,7 +233,7 @@ if [ -n "$OP_SRC" ]; then
     \"version\": \"$OP_VERSION\",
     \"release_notes\": \"\",
     \"git_commit\": \"$OP_COMMIT\",
-    \"git_origin\": \"$OP_ORIGIN\",
+    \"git_origin\": \"$OP_PULL_ORIGIN\",
     \"git_commit_date\": \"$OP_DATE\",
     \"build_style\": \"source\"
   }
