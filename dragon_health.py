@@ -339,6 +339,7 @@ def run_model_replay():
     env.setdefault("MODEL_PRELOAD_FRAMES", "1")
     env.setdefault("MODEL_PREWARP_FRAMES", "1")
     env.setdefault("MODEL_FLUSH_PRELOAD", "1")
+    env.setdefault("MODEL_REPLAY_MODELV2_AVG_MAX", "0.033")
     env.setdefault("POLICY_FUSE_LN9", "1")
     env.setdefault("POLICY_FUSE_LN64", "1")
     env.setdefault("POLICY_FUSE_ADJACENT_PAIRS", "1")
