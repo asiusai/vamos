@@ -139,48 +139,6 @@ def check_processes():
     return all_ok
 
 
-def set_driver_view(enabled):
-    try:
-        from openpilot.common.params import Params
-        params = Params()
-        previous = params.get_bool("IsDriverViewEnabled")
-        params.put_bool("IsDriverViewEnabled", enabled)
-        return previous
-    except Exception as e:
-        warn(f"Cannot set IsDriverViewEnabled={enabled}: {e}")
-        return None
-
-
-def wait_for_camerad(timeout=45):
-    section("Camera Startup")
-    try:
-        import cereal.messaging as messaging
-    except ImportError:
-        warn("cereal.messaging not available")
-        return False
-
-    sm = messaging.SubMaster(['managerState'])
-    start = time.monotonic()
-    while time.monotonic() - start < timeout:
-        sm.update(500)
-        if sm.updated['managerState']:
-            for proc in sm['managerState'].processes:
-                if proc.name == "camerad" and proc.running:
-                    ok(f"camerad is up ({time.monotonic() - start:.0f}s)")
-                    return True
-        time.sleep(0.5)
-
-    warn(f"camerad did not start within {timeout}s")
-    return False
-
-
-def camera_checks_enabled():
-    val = os.environ.get("DRAGON_HEALTH_CAMERA")
-    if val is not None:
-        return val == "1"
-    return not os.path.exists("/ASIUS")
-
-
 def measure_fps(duration=5):
     section(f"Camera FPS ({duration}s sample)")
     try:
@@ -357,9 +315,10 @@ def wait_for_replay_idle():
 
 def run_model_replay():
     section("Model Replay")
-    replay_script = os.path.join(OPENPILOT_ROOT, "replay.sh")
+    replay_script = os.path.join(OPENPILOT_ROOT, "selfdrive", "test",
+                                 "process_replay", "model_replay.py")
     if not os.path.isfile(replay_script):
-        fail(f"replay.sh not found at {replay_script}")
+        fail(f"model_replay.py not found at {replay_script}")
         return False
 
     wait_for_replay_idle()
@@ -368,31 +327,44 @@ def run_model_replay():
     env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
     env["COMMA_CACHE"] = "/data/comma_download_cache"
     env["DISABLE_DMON"] = "1"
-    env.setdefault("MODEL_REPLAY_REPEATS", "1")
+    qcom_adreno_lib = "/opt/qcom-adreno/lib"
+    if os.path.isdir(qcom_adreno_lib):
+        env["LD_LIBRARY_PATH"] = qcom_adreno_lib + (
+            f":{env['LD_LIBRARY_PATH']}" if env.get("LD_LIBRARY_PATH") else ""
+        )
+    build_openpilot_for_replay(env)
 
-    print("  Running replay.sh...")
+    repeats = int(env.get("MODEL_REPLAY_REPEATS", "1"))
+    print("  Running model_replay.py (this may take a while)...")
     timing_failed = False
-    try:
-        proc = subprocess.Popen([replay_script],
-                                cwd=OPENPILOT_ROOT,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, env=env)
-        for line in proc.stdout:
-            line = line.rstrip()
-            if "FAILED MAX TIMING CHECK" in line or "FAILED AVG TIMING CHECK" in line:
-                timing_failed = True
-            print(f"  {line}")
-        proc.wait()
-    finally:
-        run(["sudo", "sv", "up", "openpilot"], timeout=15)
+    returncode = 0
+    for i in range(repeats):
+        if repeats > 1:
+            print(f"  model replay {i + 1}/{repeats}")
+        try:
+            proc = subprocess.Popen([sys.executable, replay_script],
+                                    cwd=OPENPILOT_ROOT,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, env=env)
+            for line in proc.stdout:
+                line = line.rstrip()
+                if "FAILED MAX TIMING CHECK" in line or "FAILED AVG TIMING CHECK" in line:
+                    timing_failed = True
+                print(f"  {line}")
+            proc.wait()
+            returncode = proc.returncode
+            if returncode != 0:
+                break
+        finally:
+            run(["sudo", "sv", "up", "openpilot"], timeout=15)
 
-    if proc.returncode == 0 and not timing_failed:
+    if returncode == 0 and not timing_failed:
         ok("Model replay passed")
         return True
     if timing_failed:
         fail("Model replay failed timing checks")
         return False
-    fail(f"Model replay failed (exit={proc.returncode})")
+    fail(f"Model replay failed (exit={returncode})")
     return False
 
 
@@ -447,8 +419,7 @@ def chunked_or_plain_file_exists(path):
 def missing_replay_model_artifacts():
     models_dir = Path(OPENPILOT_ROOT) / "selfdrive/modeld/models"
     required = (
-        "driving_1928x1208_tinygrad",
-        "driving_warp_1928x1208_tinygrad",
+        "driving_tinygrad",
     )
     return [name for name in required if not chunked_or_plain_file_exists(models_dir / f"{name}.pkl")]
 
@@ -525,34 +496,19 @@ def main():
     if not ready:
         print("\n  Proceeding with checks anyway...\n")
 
-    check_cameras = camera_checks_enabled()
-    previous_driver_view = None
-    if check_cameras:
-        previous_driver_view = set_driver_view(True)
-        wait_for_camerad()
-    else:
-        section("Camera Checks")
-        warn("Camera FPS/snapshots skipped on ASIUS; set DRAGON_HEALTH_CAMERA=1 to force")
-
-    try:
-        results = {
-            'ncm':             check_ncm(),
-            'wifi':            check_wifi(),
-            'bluetooth':       check_bluetooth(),
-            'processes':       check_processes(),
-            'fps':             measure_fps() if check_cameras else {},
-            'snapshots':       capture_snapshots() if check_cameras else True,
-            'model_replay':    model_replay_ok,
-            'camera_required': check_cameras,
-        }
-    finally:
-        if previous_driver_view is not None:
-            set_driver_view(previous_driver_view)
+    results = {
+        'ncm':          check_ncm(),
+        'wifi':         check_wifi(),
+        'bluetooth':    check_bluetooth(),
+        'processes':    check_processes(),
+        'fps':          measure_fps(),
+        'snapshots':    capture_snapshots(),
+        'model_replay': model_replay_ok,
+    }
 
     section("Summary")
     fps = results.get('fps', {})
-    camera_required = results.get('camera_required', True)
-    fps_ok = all(v['ok'] for v in fps.values()) if fps else not camera_required
+    fps_ok = all(v['ok'] for v in fps.values()) if fps else False
     checks = [
         ("NCM",          results['ncm']),
         ("WiFi",         results['wifi']),
@@ -571,8 +527,6 @@ def main():
     if fps:
         fps_str = ", ".join(f"{c.replace('CameraState','')}={v['fps']:.2f}fps/{v['mean_ms']:.2f}ms" for c, v in fps.items())
         print(f"\n  FPS: {fps_str}")
-    elif not camera_required:
-        print("\n  FPS: skipped")
     print(f"  Snapshots: {SNAPSHOT_DIR}")
     print()
     print("  ALL CHECKS PASSED" if all_pass else "  SOME CHECKS FAILED")
