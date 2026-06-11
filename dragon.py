@@ -350,8 +350,9 @@ def cmd_health(args):
                     f"{target}:{REMOTE_HEALTH_SCRIPT}"], check=True)
 
     ssh_cmd = ["ssh", *ssh_opts, target,
-               f"cd /data/openpilot && PYTHONPATH=/data/openpilot OPENPILOT_ROOT=/data/openpilot "
-               f"python3 -u {REMOTE_HEALTH_SCRIPT}"]
+               f"cd /data/openpilot && PYTHONPATH=/data/openpilot:/data/openpilot/tinygrad_repo "
+               f"OPENPILOT_ROOT=/data/openpilot LD_LIBRARY_PATH=/opt/qcom-adreno/lib "
+               f"VISIONBUF_USE_DMA_HEAP=1 python3 -u {REMOTE_HEALTH_SCRIPT}"]
     ret = subprocess.run(ssh_cmd).returncode
     local_dir = "/tmp/dragon_health_local"
     os.makedirs(local_dir, exist_ok=True)
