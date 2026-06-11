@@ -139,6 +139,48 @@ def check_processes():
     return all_ok
 
 
+def set_driver_view(enabled):
+    try:
+        from openpilot.common.params import Params
+        params = Params()
+        previous = params.get_bool("IsDriverViewEnabled")
+        params.put_bool("IsDriverViewEnabled", enabled)
+        return previous
+    except Exception as e:
+        warn(f"Cannot set IsDriverViewEnabled={enabled}: {e}")
+        return None
+
+
+def wait_for_camerad(timeout=45):
+    section("Camera Startup")
+    try:
+        import cereal.messaging as messaging
+    except ImportError:
+        warn("cereal.messaging not available")
+        return False
+
+    sm = messaging.SubMaster(['managerState'])
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        sm.update(500)
+        if sm.updated['managerState']:
+            for proc in sm['managerState'].processes:
+                if proc.name == "camerad" and proc.running:
+                    ok(f"camerad is up ({time.monotonic() - start:.0f}s)")
+                    return True
+        time.sleep(0.5)
+
+    warn(f"camerad did not start within {timeout}s")
+    return False
+
+
+def camera_checks_enabled():
+    val = os.environ.get("DRAGON_HEALTH_CAMERA")
+    if val is not None:
+        return val == "1"
+    return not os.path.exists("/ASIUS")
+
+
 def measure_fps(duration=5):
     section(f"Camera FPS ({duration}s sample)")
     try:
@@ -315,21 +357,9 @@ def wait_for_replay_idle():
 
 def run_model_replay():
     section("Model Replay")
-    try:
-        import matplotlib
-    except ImportError:
-        print("  Installing matplotlib...")
-        code, _, err = run(["sudo", sys.executable, "-m", "pip", "install",
-                            "--break-system-packages", "matplotlib"], timeout=120)
-        if code != 0:
-            fail(f"pip install matplotlib failed: {err}")
-            return False
-        ok("matplotlib installed")
-
-    replay_script = os.path.join(OPENPILOT_ROOT, "selfdrive", "test",
-                                 "process_replay", "model_replay.py")
+    replay_script = os.path.join(OPENPILOT_ROOT, "replay.sh")
     if not os.path.isfile(replay_script):
-        fail(f"model_replay.py not found at {replay_script}")
+        fail(f"replay.sh not found at {replay_script}")
         return False
 
     wait_for_replay_idle()
@@ -338,22 +368,30 @@ def run_model_replay():
     env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
     env["COMMA_CACHE"] = "/data/comma_download_cache"
     env["DISABLE_DMON"] = "1"
-    build_openpilot_for_replay(env)
+    env.setdefault("MODEL_REPLAY_REPEATS", "1")
 
-    print("  Running model_replay.py (this may take a while)...")
+    print("  Running replay.sh...")
+    timing_failed = False
     try:
-        proc = subprocess.Popen([sys.executable, replay_script],
+        proc = subprocess.Popen([replay_script],
+                                cwd=OPENPILOT_ROOT,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, env=env)
         for line in proc.stdout:
-            print(f"  {line.rstrip()}")
+            line = line.rstrip()
+            if "FAILED MAX TIMING CHECK" in line or "FAILED AVG TIMING CHECK" in line:
+                timing_failed = True
+            print(f"  {line}")
         proc.wait()
     finally:
         run(["sudo", "sv", "up", "openpilot"], timeout=15)
 
-    if proc.returncode == 0:
+    if proc.returncode == 0 and not timing_failed:
         ok("Model replay passed")
         return True
+    if timing_failed:
+        fail("Model replay failed timing checks")
+        return False
     fail(f"Model replay failed (exit={proc.returncode})")
     return False
 
@@ -487,19 +525,34 @@ def main():
     if not ready:
         print("\n  Proceeding with checks anyway...\n")
 
-    results = {
-        'ncm':          check_ncm(),
-        'wifi':         check_wifi(),
-        'bluetooth':    check_bluetooth(),
-        'processes':    check_processes(),
-        'fps':          measure_fps(),
-        'snapshots':    capture_snapshots(),
-        'model_replay': model_replay_ok,
-    }
+    check_cameras = camera_checks_enabled()
+    previous_driver_view = None
+    if check_cameras:
+        previous_driver_view = set_driver_view(True)
+        wait_for_camerad()
+    else:
+        section("Camera Checks")
+        warn("Camera FPS/snapshots skipped on ASIUS; set DRAGON_HEALTH_CAMERA=1 to force")
+
+    try:
+        results = {
+            'ncm':             check_ncm(),
+            'wifi':            check_wifi(),
+            'bluetooth':       check_bluetooth(),
+            'processes':       check_processes(),
+            'fps':             measure_fps() if check_cameras else {},
+            'snapshots':       capture_snapshots() if check_cameras else True,
+            'model_replay':    model_replay_ok,
+            'camera_required': check_cameras,
+        }
+    finally:
+        if previous_driver_view is not None:
+            set_driver_view(previous_driver_view)
 
     section("Summary")
     fps = results.get('fps', {})
-    fps_ok = all(v['ok'] for v in fps.values()) if fps else False
+    camera_required = results.get('camera_required', True)
+    fps_ok = all(v['ok'] for v in fps.values()) if fps else not camera_required
     checks = [
         ("NCM",          results['ncm']),
         ("WiFi",         results['wifi']),
@@ -518,6 +571,8 @@ def main():
     if fps:
         fps_str = ", ".join(f"{c.replace('CameraState','')}={v['fps']:.2f}fps/{v['mean_ms']:.2f}ms" for c, v in fps.items())
         print(f"\n  FPS: {fps_str}")
+    elif not camera_required:
+        print("\n  FPS: skipped")
     print(f"  Snapshots: {SNAPSHOT_DIR}")
     print()
     print("  ALL CHECKS PASSED" if all_pass else "  SOME CHECKS FAILED")
