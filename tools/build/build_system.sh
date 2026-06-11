@@ -170,18 +170,57 @@ done
 if [ -n "$OP_SRC" ]; then
   echo "Copying openpilot from $OP_SRC into /data/openpilot"
 
-  # Generate build.json from git metadata before removing unusable submodule
-  # .git files from the copied tree. No openpilot build runs in this script.
+  # Generate build.json from git metadata. No openpilot build runs in this script.
   OP_COMMIT=$(git -C "$OP_SRC" rev-parse HEAD 2>/dev/null || echo "unknown")
   OP_BRANCH=$(git -C "$OP_SRC" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   OP_ORIGIN=$(git -C "$OP_SRC" remote get-url origin 2>/dev/null || echo "unknown")
   OP_DATE=$(git -C "$OP_SRC" log -1 --format=%ci 2>/dev/null || echo "unknown")
   OP_VERSION=$(cat "$OP_SRC/common/version.h" 2>/dev/null | grep COMMA_VERSION | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
+  OP_CLONE_BRANCH="$OP_BRANCH"
+  if [ "$OP_CLONE_BRANCH" = "HEAD" ] || [ "$OP_CLONE_BRANCH" = "unknown" ]; then
+    OP_CLONE_BRANCH="one"
+  fi
 
   # All fs ops run inside the builder container — ROOTFS_DIR only exists there
   exec_as_root rm -rf "$ROOTFS_DIR/data/openpilot"
-  exec_as_root mkdir -p "$ROOTFS_DIR/data/openpilot"
-  exec_as_root cp -a "$OP_SRC/." "$ROOTFS_DIR/data/openpilot/"
+  exec_as_root mkdir -p "$ROOTFS_DIR/data"
+  exec_as_root git \
+    -c safe.directory="$OP_SRC" \
+    -c protocol.file.allow=always \
+    clone --depth 1 --single-branch --branch "$OP_CLONE_BRANCH" \
+    "file://$OP_SRC" "$ROOTFS_DIR/data/openpilot"
+  exec_as_root git -C "$ROOTFS_DIR/data/openpilot" remote set-url origin "$OP_ORIGIN"
+  exec_as_root git -C "$ROOTFS_DIR/data/openpilot" config branch.one.remote origin
+  exec_as_root git -C "$ROOTFS_DIR/data/openpilot" config branch.one.merge refs/heads/one
+  exec_as_root git -C "$ROOTFS_DIR/data/openpilot" submodule init
+
+  for spec in \
+    msgq_repo:msgq \
+    opendbc_repo:opendbc \
+    panda:panda \
+    rednose_repo:rednose_repo \
+    teleoprtc_repo:teleoprtc_repo \
+    tinygrad_repo:tinygrad
+  do
+    sub_path=${spec%%:*}
+    sub_name=${spec#*:}
+    sub_src="$OP_SRC/$sub_path"
+    sub_git_dir=$(git -C "$sub_src" rev-parse --absolute-git-dir 2>/dev/null || true)
+    [ -d "$sub_src" ] || continue
+
+    exec_as_root rm -rf "$ROOTFS_DIR/data/openpilot/$sub_path"
+    exec_as_root cp -a "$sub_src" "$ROOTFS_DIR/data/openpilot/$sub_path"
+    if [ -n "$sub_git_dir" ] && [ -d "$sub_git_dir" ]; then
+      exec_as_root mkdir -p "$ROOTFS_DIR/data/openpilot/.git/modules"
+      exec_as_root rm -rf "$ROOTFS_DIR/data/openpilot/.git/modules/$sub_name"
+      exec_as_root cp -a "$sub_git_dir" "$ROOTFS_DIR/data/openpilot/.git/modules/$sub_name"
+      exec_as_root sh -c "
+        printf 'gitdir: ../.git/modules/%s\n' '$sub_name' > '$ROOTFS_DIR/data/openpilot/$sub_path/.git'
+        git config --file '$ROOTFS_DIR/data/openpilot/.git/modules/$sub_name/config' core.worktree '../../../$sub_path'
+      "
+    fi
+  done
+
   exec_as_root sh -c "
     cat > '$ROOTFS_DIR/data/openpilot/build.json' <<BUILDJSON
 {
@@ -196,10 +235,17 @@ if [ -n "$OP_SRC" ]; then
   }
 }
 BUILDJSON
+    cat >> '$ROOTFS_DIR/data/openpilot/.git/info/exclude' <<'GITEXCLUDE'
+/build.json
+/scons_cache/
+/selfdrive/modeld/models/*_tinygrad.pkl
+/selfdrive/modeld/models/*_tinygrad.pkl.chunk*
+/selfdrive/modeld/models/*_metadata.pkl
+/selfdrive/modeld/models/*.prebuilt.pkl
+/selfdrive/modeld/models/tg_compiled_flags.json
+GITEXCLUDE
     cd '$ROOTFS_DIR/data/openpilot' && \
-    rm -rf .git .gitattributes build scons_cache && \
-    find . -name .git -type d -prune -exec rm -rf {} + ; \
-    find . -name .git -type f -delete
+    rm -rf build scons_cache && \
     find . -name __pycache__ -type d -prune -exec rm -rf {} + ; \
     find . -name '*.o' -delete
     # Drop generated model artifacts from the copy so first launch builds them
