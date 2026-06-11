@@ -323,10 +323,27 @@ def run_model_replay():
 
     wait_for_replay_idle()
     env = os.environ.copy()
-    env["PYTHONPATH"] = OPENPILOT_ROOT
+    env["PYTHONPATH"] = f"{OPENPILOT_ROOT}:{OPENPILOT_ROOT}/tinygrad_repo"
     env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
     env["COMMA_CACHE"] = "/data/comma_download_cache"
     env["DISABLE_DMON"] = "1"
+    env.setdefault("DEV", "CL")
+    env.setdefault("GMMU", "0")
+    env.setdefault("NOLOCALS", "1")
+    env.setdefault("RUSTICL_ENABLE", "freedreno")
+    env.setdefault("CL_QCOM_PRIORITY_HINT", "high")
+    env.setdefault("CL_BRANCH_SKIP_OUTPUT_HEADS", "1")
+    env.setdefault("VISIONBUF_USE_DMA_HEAP", "1")
+    env.setdefault("MODEL_CL_FRAME_VIPC_DMABUF", "1")
+    env.setdefault("MODEL_CUSTOM_WARP", "1")
+    env.setdefault("MODEL_PRELOAD_FRAMES", "1")
+    env.setdefault("MODEL_PREWARP_FRAMES", "1")
+    env.setdefault("MODEL_FLUSH_PRELOAD", "1")
+    env.setdefault("POLICY_FUSE_LN9", "1")
+    env.setdefault("POLICY_FUSE_LN64", "1")
+    env.setdefault("POLICY_FUSE_ADJACENT_PAIRS", "1")
+    env.setdefault("POLICY_FUSE_QKV_INPUT_LOCAL", "1")
+    env.setdefault("MODEL_REQD_WORKGROUP_ATTR_KERNELS", "r_16_64_32_4_4_24_3_3")
     qcom_adreno_lib = "/opt/qcom-adreno/lib"
     if os.path.isdir(qcom_adreno_lib):
         env["LD_LIBRARY_PATH"] = qcom_adreno_lib + (
