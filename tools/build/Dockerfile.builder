@@ -17,6 +17,7 @@ RUN apk add --no-cache \
     findutils \
     flex \
     git \
+    git-lfs \
     libcap \
     linux-headers \
     lz4-dev \
@@ -26,6 +27,8 @@ RUN apk add --no-cache \
     python3 \
     util-linux-dev \
     xz-dev
+
+RUN git lfs install --system
 
 # Build erofs-utils from source (not packaged in Alpine)
 RUN git clone https://git.kernel.org/pub/scm/linux/kernel/git/xiang/erofs-utils.git /tmp/erofs-utils \
