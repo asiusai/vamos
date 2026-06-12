@@ -150,6 +150,11 @@ for d in /data/scons_cache /data/media/0/realdata /data/log /data/params/d /data
 done
 chown -R comma:comma /data/scons_cache /data/media /data/log /data/params /data/stats /data/safe_staging 2>/dev/null || true
 
+if [ -x /usr/comma/setup_qcom_adreno.sh ]; then
+  echo "=> Setting up Qualcomm Adreno OpenCL loader"
+  /usr/comma/setup_qcom_adreno.sh || echo "WARN: Qualcomm Adreno OpenCL loader setup failed"
+fi
+
 echo "=> Setting hostname..."
 if [ -f /etc/hostname ]; then
     hostname "$(cat /etc/hostname)"

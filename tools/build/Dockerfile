@@ -107,7 +107,7 @@ RUN rm -f /etc/runit/runsvdir/default/udevd
 RUN sed -i 's/FileCreateMode 0640/FileCreateMode 0644/' /etc/rsyslog.conf
 
 # Set executable permissions
-RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/comma/fs_setup.sh /usr/bin/journalctl /etc/sv/keygen/run /etc/sv/bluetoothd/run /etc/sv/tailscaled/run
+RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/comma/fs_setup.sh /usr/comma/setup_qcom_adreno.sh /usr/bin/journalctl /etc/sv/keygen/run /etc/sv/bluetoothd/run /etc/sv/tailscaled/run
 RUN chmod +x /etc/runit/1 /etc/runit/2 /etc/runit/3
 
 # Shutdown wrappers - send wall broadcast like systemd does on Ubuntu
@@ -149,6 +149,7 @@ RUN ln -sf /usr/lib/libjson-c.so.5 /usr/lib/libjson-c.so.2
 # TODO: remove once no more openpilot libraries build against the _adreno names
 RUN ln -sf /usr/lib/libGLESv2.so.2 /usr/lib/libGLESv2_adreno.so && \
     ln -sf /usr/lib/libEGL.so.1 /usr/lib/libEGL_adreno.so
+RUN /usr/comma/setup_qcom_adreno.sh
 
 # ldconfig
 RUN ldconfig
