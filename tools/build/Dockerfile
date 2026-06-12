@@ -73,6 +73,7 @@ COPY ./kernel/firmware/qcom/qcm6490/qupv3fw.elf /lib/firmware/qcom/qcm6490/qupv3
 
 # Root filesystem overlay — all userspace files at their final paths
 COPY ./userspace/root/ /
+RUN ldconfig
 
 # Fix ownership on home directory (overlay COPY runs as root)
 RUN chown -R comma:comma /home/comma

@@ -1,0 +1,6 @@
+Qualcomm Adreno userspace payload from qcom-adreno1 1.838.5~1+repack3-0ubuntu1.
+Source device used for this snapshot: radxa@192.168.88.165.
+
+This payload provides the Qualcomm OpenCL loader/ICD path needed by modeld on
+Dragon Q6A. The OpenCL device string reports QUALCOMM Adreno(TM) 635, but the
+board is Dragon Q6A with Adreno 643; this is the upstream Qualcomm ICD string.

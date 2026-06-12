@@ -17,6 +17,9 @@ EXPECTED_FRAME_INTERVAL_MS = 50.0
 FRAME_INTERVAL_TOLERANCE_MS = 1.0
 SNAPSHOT_DIR = "/tmp/dragon_health"
 OPENPILOT_ROOT = os.environ.get("OPENPILOT_ROOT", "/data/openpilot")
+QCOM_ADRENO_LIB = "/opt/qcom-adreno/lib"
+MODEL_REPLAY_MODELV2_AVG_MAX = "0.035"
+REPLAY_REQUIRED_MODEL_ARTIFACTS = ("driving_tinygrad",)
 GENERATED_NATIVE_OUTPUTS = (
     "common/libcommon.a",
     "common/params_pyx.so",
@@ -139,6 +142,30 @@ def check_processes():
     return all_ok
 
 
+def set_driver_view_enabled(enabled):
+    try:
+        from openpilot.common.params import Params
+        params = Params()
+        previous = params.get_bool("IsDriverViewEnabled")
+        params.put_bool("IsDriverViewEnabled", enabled, block=True)
+        return previous
+    except Exception as e:
+        warn(f"Could not set IsDriverViewEnabled={enabled}: {e}")
+        return None
+
+
+def wait_for_camerad(timeout=30):
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        code, _, _ = run(["pgrep", "-f", "system/camerad/camerad|./camerad"], timeout=2)
+        if code == 0:
+            ok("camerad is running for camera checks")
+            return True
+        time.sleep(0.5)
+    warn("camerad did not start before camera checks")
+    return False
+
+
 def measure_fps(duration=5):
     section(f"Camera FPS ({duration}s sample)")
     try:
@@ -228,11 +255,18 @@ def capture_snapshots():
     for name, stream_type in streams.items():
         try:
             client = VisionIpcClient("camerad", stream_type, True)
-            if not client.connect(True):
+            connect_start = time.monotonic()
+            connected = False
+            while time.monotonic() - connect_start < 5:
+                if client.connect(False):
+                    connected = True
+                    break
+                time.sleep(0.1)
+            if not connected:
                 fail(f"{name}: could not connect to VisionIPC")
                 all_ok = False
                 continue
-            buf = client.recv()
+            buf = client.recv(timeout_ms=1000)
             if buf is None or len(buf.data) == 0:
                 fail(f"{name}: empty frame")
                 all_ok = False
@@ -337,6 +371,9 @@ def run_model_replay():
     env["PYTHONPATH"] = OPENPILOT_ROOT
     env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
     env["COMMA_CACHE"] = "/data/comma_download_cache"
+    env.setdefault("DISABLE_DMON", "1")
+    env.setdefault("MODEL_REPLAY_MODELV2_AVG_MAX", MODEL_REPLAY_MODELV2_AVG_MAX)
+    prepend_env_path(env, "LD_LIBRARY_PATH", QCOM_ADRENO_LIB)
     build_openpilot_for_replay(env)
 
     print("  Running model_replay.py (this may take a while)...")
@@ -355,6 +392,15 @@ def run_model_replay():
         return True
     fail(f"Model replay failed (exit={proc.returncode})")
     return False
+
+
+def prepend_env_path(env, key, path):
+    if not Path(path).is_dir():
+        return
+
+    existing = [p for p in env.get(key, "").split(":") if p]
+    if path not in existing:
+        env[key] = ":".join([path, *existing])
 
 
 def build_openpilot_for_replay(env):
@@ -407,13 +453,8 @@ def chunked_or_plain_file_exists(path):
 
 def missing_replay_model_artifacts():
     models_dir = Path(OPENPILOT_ROOT) / "selfdrive/modeld/models"
-    required = (
-        "driving_1928x1208_tinygrad",
-        "driving_warp_1928x1208_tinygrad",
-        "dmonitoring_model_tinygrad",
-        "dm_warp_1928x1208_tinygrad",
-    )
-    return [name for name in required if not chunked_or_plain_file_exists(models_dir / f"{name}.pkl")]
+    return [name for name in REPLAY_REQUIRED_MODEL_ARTIFACTS
+            if not chunked_or_plain_file_exists(models_dir / f"{name}.pkl")]
 
 
 def system_info():
@@ -488,13 +529,20 @@ def main():
     if not ready:
         print("\n  Proceeding with checks anyway...\n")
 
+    previous_driver_view = set_driver_view_enabled(True)
+    wait_for_camerad()
+    fps = measure_fps()
+    snapshots = capture_snapshots()
+    if previous_driver_view is not None:
+        set_driver_view_enabled(previous_driver_view)
+
     results = {
         'ncm':          check_ncm(),
         'wifi':         check_wifi(),
         'bluetooth':    check_bluetooth(),
         'processes':    check_processes(),
-        'fps':          measure_fps(),
-        'snapshots':    capture_snapshots(),
+        'fps':          fps,
+        'snapshots':    snapshots,
         'model_replay': model_replay_ok,
     }
 
