@@ -32,6 +32,12 @@ LOCAL_IMAGES = {
   "cam2": "latest-camerad-road.jpg",
   "cam3": "latest-camerad-wide.jpg",
 }
+HOST_IMAGES = {
+  "cam1": Path("/tmp/asius-cam1-latest.jpg"),
+  "cam2": Path("/tmp/asius-cam2-latest.jpg"),
+  "cam3": Path("/tmp/asius-cam3-latest.jpg"),
+}
+HOST_MONTAGE = Path("/tmp/asius-cams-latest.jpg")
 REMOTE_LOG = "/tmp/camerad_dual_latest.log"
 LOCAL_LOG = "latest-camerad-dual.log"
 
@@ -152,6 +158,34 @@ def summarize_fps(log_path: Path) -> None:
     print(f"{labels.get(cam, 'cam ' + cam)}: {len(times)} frames, median {1000.0 / median_ms:.2f} FPS, slow_gaps={slow_gaps}")
 
 
+def refresh_host_images(cameras: list[str], out_dir: Path) -> None:
+  from PIL import Image, ImageDraw
+
+  labels = {
+    "cam1": "CAM1 driver",
+    "cam2": "CAM2 road",
+    "cam3": "CAM3 wide",
+  }
+  images: list[tuple[str, Image.Image]] = []
+  for cam in cameras:
+    local = out_dir / LOCAL_IMAGES[cam]
+    host = HOST_IMAGES[cam]
+    host.write_bytes(local.read_bytes())
+    images.append((labels[cam], Image.open(local).convert("RGB")))
+
+  width = max(image.width for _, image in images)
+  height = sum(image.height + 40 for _, image in images)
+  montage = Image.new("RGB", (width, height), "black")
+  draw = ImageDraw.Draw(montage)
+  y = 0
+  for label, image in images:
+    draw.text((8, y + 8), label, fill=(255, 255, 255))
+    y += 40
+    montage.paste(image, (0, y))
+    y += image.height
+  montage.save(HOST_MONTAGE, "JPEG", quality=95)
+
+
 def main() -> int:
   parser = argparse.ArgumentParser()
   parser.add_argument("--cam", choices=("cam1", "cam2", "cam3", "both", "all"), default="both")
@@ -164,10 +198,14 @@ def main() -> int:
   script = remote_script(args.cam, args.settle, args.exposure_lines)
   run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "bash", "-s"], input=script, text=True)
 
-  for cam in camera_list(args.cam):
+  cameras = camera_list(args.cam)
+  for cam in cameras:
     local = out_dir / LOCAL_IMAGES[cam]
     pull_file(REMOTE_IMAGES[cam], local)
     print(f"{cam}: remote={REMOTE_IMAGES[cam]} local={local} bytes={local.stat().st_size}")
+
+  refresh_host_images(cameras, out_dir)
+  print(f"host_montage={HOST_MONTAGE} bytes={HOST_MONTAGE.stat().st_size}")
 
   local_log = out_dir / LOCAL_LOG
   pull_file(REMOTE_LOG, local_log)
