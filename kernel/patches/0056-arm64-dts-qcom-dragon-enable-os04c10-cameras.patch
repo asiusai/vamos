@@ -1,0 +1,1383 @@
+diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+index 1e793de87..f07c711ab 100644
+--- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
++++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+@@ -1571,3 +1571,169 @@ user_led: user-led-state {
+ 		bias-pull-up;
+ 	};
+ };
++
++&camss {
++	status = "okay";
++
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@0 {
++			reg = <0>;
++
++			csiphy0_ep: endpoint {
++				clock-lanes = <7>;
++				data-lanes = <0 1>;
++				remote-endpoint = <&os04c10_cam1_ep>;
++			};
++		};
++
++		port@2 {
++			reg = <2>;
++
++			csiphy2_ep: endpoint {
++				clock-lanes = <7>;
++				data-lanes = <0 1>;
++				remote-endpoint = <&os04c10_cam2_ep>;
++			};
++		};
++
++		port@3 {
++			reg = <3>;
++
++			csiphy3_ep: endpoint {
++				clock-lanes = <7>;
++				data-lanes = <0 1>;
++				remote-endpoint = <&os04c10_cam3_ep>;
++			};
++		};
++	};
++};
++
++&cci0 {
++	status = "okay";
++};
++
++&cci0_i2c0 {
++	#address-cells = <1>;
++	#size-cells = <0>;
++	status = "okay";
++
++	os04c10_cam1: camera@36 {
++		compatible = "ovti,os04c10";
++		reg = <0x36>;
++		reset-gpios = <&tlmm 20 0>;
++		enable-gpios = <&tlmm 36 0>;
++
++		port {
++			os04c10_cam1_ep: endpoint {
++				link-frequencies = /bits/ 64 <360000000>;
++				data-lanes = <1 2>;
++				remote-endpoint = <&csiphy0_ep>;
++			};
++		};
++	};
++};
++
++&cci1 {
++	status = "okay";
++};
++
++&cci1_i2c0 {
++	#address-cells = <1>;
++	#size-cells = <0>;
++	status = "okay";
++
++	os04c10_cam2: camera@36 {
++		compatible = "ovti,os04c10";
++		reg = <0x36>;
++		reset-gpios = <&tlmm 77 0>;
++
++		port {
++			os04c10_cam2_ep: endpoint {
++				link-frequencies = /bits/ 64 <360000000>;
++				data-lanes = <1 2>;
++				remote-endpoint = <&csiphy2_ep>;
++			};
++		};
++	};
++};
++
++&cci1_i2c1 {
++	#address-cells = <1>;
++	#size-cells = <0>;
++	status = "okay";
++
++	os04c10_cam3: camera@36 {
++		compatible = "ovti,os04c10";
++		reg = <0x36>;
++		reset-gpios = <&tlmm 78 0>;
++
++		port {
++			os04c10_cam3_ep: endpoint {
++				link-frequencies = /bits/ 64 <360000000>;
++				data-lanes = <1 2>;
++				remote-endpoint = <&csiphy3_ep>;
++			};
++		};
++	};
++};
++
++&tlmm {
++	cam1_mclk_default: cam1-mclk-default-state {
++		pins = "gpio64";
++		function = "cam_mclk";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	cam1_mclk_suspend: cam1-mclk-suspend-state {
++		pins = "gpio64";
++		function = "cam_mclk";
++		drive-strength = <2>;
++		bias-pull-down;
++	};
++
++	cam2_mclk_default: cam2-mclk-default-state {
++		pins = "gpio66";
++		function = "cam_mclk";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	cam2_mclk_suspend: cam2-mclk-suspend-state {
++		pins = "gpio66";
++		function = "cam_mclk";
++		drive-strength = <2>;
++		bias-pull-down;
++	};
++
++	cam3_mclk_default: cam3-mclk-default-state {
++		pins = "gpio67";
++		function = "cam_mclk";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	cam3_mclk_suspend: cam3-mclk-suspend-state {
++		pins = "gpio67";
++		function = "cam_mclk";
++		drive-strength = <2>;
++		bias-pull-down;
++	};
++
++	cam_pwdn_gpio_0: cam-pwdn-gpio-0-state {
++		pins = "gpio77";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-pull-up;
++	};
++
++	cam_pwdn_gpio_1: cam-pwdn-gpio-1-state {
++		pins = "gpio78";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-pull-up;
++	};
++};
+diff --git a/drivers/clk/qcom/camcc-sc7280.c b/drivers/clk/qcom/camcc-sc7280.c
+index 55545f5fd..69e01fa0c 100644
+--- a/drivers/clk/qcom/camcc-sc7280.c
++++ b/drivers/clk/qcom/camcc-sc7280.c
+@@ -2122,7 +2122,7 @@ static struct clk_branch cam_cc_lrme_clk = {
+ 
+ static struct clk_branch cam_cc_mclk0_clk = {
+ 	.halt_reg = 0xe018,
+-	.halt_check = BRANCH_HALT,
++	.halt_check = BRANCH_HALT_DELAY,
+ 	.clkr = {
+ 		.enable_reg = 0xe018,
+ 		.enable_mask = BIT(0),
+@@ -2158,7 +2158,7 @@ static struct clk_branch cam_cc_mclk1_clk = {
+ 
+ static struct clk_branch cam_cc_mclk2_clk = {
+ 	.halt_reg = 0xe050,
+-	.halt_check = BRANCH_HALT,
++	.halt_check = BRANCH_HALT_DELAY,
+ 	.clkr = {
+ 		.enable_reg = 0xe050,
+ 		.enable_mask = BIT(0),
+@@ -2176,7 +2176,7 @@ static struct clk_branch cam_cc_mclk2_clk = {
+ 
+ static struct clk_branch cam_cc_mclk3_clk = {
+ 	.halt_reg = 0xe06c,
+-	.halt_check = BRANCH_HALT,
++	.halt_check = BRANCH_HALT_DELAY,
+ 	.clkr = {
+ 		.enable_reg = 0xe06c,
+ 		.enable_mask = BIT(0),
+diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
+index 702a520d4..89b2c10b7 100644
+--- a/drivers/firmware/efi/libstub/fdt.c
++++ b/drivers/firmware/efi/libstub/fdt.c
+@@ -83,6 +83,495 @@ static void asius_enable_panda_spi(void *fdt)
+ 			 status);
+ }
+ 
++#define ASIUS_CAMCC_PATH		"/soc@0/clock-controller@ad00000"
++#define ASIUS_CAMSS_PATH		"/soc@0/isp@acb3000"
++#define ASIUS_CAMSS_PORTS_PATH		ASIUS_CAMSS_PATH "/ports"
++#define ASIUS_CAMSS_PORT0_PATH		ASIUS_CAMSS_PORTS_PATH "/port@0"
++#define ASIUS_CAMSS_PORT2_PATH		ASIUS_CAMSS_PORTS_PATH "/port@2"
++#define ASIUS_CAMSS_PORT3_PATH		ASIUS_CAMSS_PORTS_PATH "/port@3"
++#define ASIUS_CAMSS_PORT0_EP_PATH	ASIUS_CAMSS_PORT0_PATH "/endpoint"
++#define ASIUS_CAMSS_PORT2_EP_PATH	ASIUS_CAMSS_PORT2_PATH "/endpoint"
++#define ASIUS_CAMSS_PORT3_EP_PATH	ASIUS_CAMSS_PORT3_PATH "/endpoint"
++#define ASIUS_CCI0_PATH			"/soc@0/cci@ac4a000"
++#define ASIUS_CCI0_BUS0_PATH		ASIUS_CCI0_PATH "/i2c-bus@0"
++#define ASIUS_CCI1_PATH			"/soc@0/cci@ac4b000"
++#define ASIUS_CCI1_BUS0_PATH		ASIUS_CCI1_PATH "/i2c-bus@0"
++#define ASIUS_CCI1_BUS1_PATH		ASIUS_CCI1_PATH "/i2c-bus@1"
++#define ASIUS_CAM1_PATH			ASIUS_CCI0_BUS0_PATH "/camera@36"
++#define ASIUS_CAM2_PATH			ASIUS_CCI1_BUS0_PATH "/camera@36"
++#define ASIUS_CAM3_PATH			ASIUS_CCI1_BUS1_PATH "/camera@36"
++#define ASIUS_CAM1_PORT_PATH		ASIUS_CAM1_PATH "/port"
++#define ASIUS_CAM2_PORT_PATH		ASIUS_CAM2_PATH "/port"
++#define ASIUS_CAM3_PORT_PATH		ASIUS_CAM3_PATH "/port"
++#define ASIUS_CAM1_EP_PATH		ASIUS_CAM1_PORT_PATH "/endpoint"
++#define ASIUS_CAM2_EP_PATH		ASIUS_CAM2_PORT_PATH "/endpoint"
++#define ASIUS_CAM3_EP_PATH		ASIUS_CAM3_PORT_PATH "/endpoint"
++#define ASIUS_TLMM_PATH			"/soc@0/pinctrl@f100000"
++#define ASIUS_CAM1_MCLK_DEFAULT_PATH	ASIUS_TLMM_PATH "/cam1-mclk-default-state"
++#define ASIUS_CAM1_MCLK_SUSPEND_PATH	ASIUS_TLMM_PATH "/cam1-mclk-suspend-state"
++#define ASIUS_CAM2_MCLK_DEFAULT_PATH	ASIUS_TLMM_PATH "/cam2-mclk-default-state"
++#define ASIUS_CAM2_MCLK_SUSPEND_PATH	ASIUS_TLMM_PATH "/cam2-mclk-suspend-state"
++#define ASIUS_CAM3_MCLK_DEFAULT_PATH	ASIUS_TLMM_PATH "/cam3-mclk-default-state"
++#define ASIUS_CAM3_MCLK_SUSPEND_PATH	ASIUS_TLMM_PATH "/cam3-mclk-suspend-state"
++
++#define ASIUS_CAM_CC_MCLK0_CLK		92
++#define ASIUS_CAM_CC_MCLK2_CLK		96
++#define ASIUS_CAM_CC_MCLK3_CLK		98
++
++#define ASIUS_MAX_FDT_CELLS		4
++
++static int asius_fdt_subnode(void *fdt, int parent, const char *name)
++{
++	int node;
++
++	node = fdt_subnode_offset(fdt, parent, name);
++	if (node == -FDT_ERR_NOTFOUND)
++		node = fdt_add_subnode(fdt, parent, name);
++
++	return node;
++}
++
++static int asius_fdt_ensure_child(void *fdt, const char *parent_path,
++				  const char *child_name, const char *path)
++{
++	int parent;
++	int child;
++
++	child = fdt_path_offset(fdt, path);
++	if (child >= 0)
++		return child;
++
++	parent = fdt_path_offset(fdt, parent_path);
++	if (parent < 0)
++		return parent;
++
++	child = asius_fdt_subnode(fdt, parent, child_name);
++	if (child < 0)
++		return child;
++
++	return fdt_path_offset(fdt, path);
++}
++
++static int asius_fdt_node_phandle(void *fdt, const char *path, u32 *phandle)
++{
++	int node;
++	int status;
++
++	node = fdt_path_offset(fdt, path);
++	if (node < 0)
++		return node;
++
++	*phandle = fdt_get_phandle(fdt, node);
++	if (*phandle)
++		return 0;
++
++	status = fdt_generate_phandle(fdt, phandle);
++	if (status)
++		return status;
++
++	node = fdt_path_offset(fdt, path);
++	if (node < 0)
++		return node;
++
++	return fdt_setprop_u32(fdt, node, "phandle", *phandle);
++}
++
++static int asius_fdt_assign_phandle(void *fdt, const char *path,
++				    u32 *phandle)
++{
++	int node;
++	int status;
++
++	status = fdt_generate_phandle(fdt, phandle);
++	if (status)
++		return status;
++
++	node = fdt_path_offset(fdt, path);
++	if (node < 0)
++		return node;
++
++	return fdt_setprop_u32(fdt, node, "phandle", *phandle);
++}
++
++static int asius_fdt_setprop_u32_array(void *fdt, int node,
++				       const char *name, const u32 *values,
++				       int count)
++{
++	fdt32_t cells[ASIUS_MAX_FDT_CELLS];
++	int i;
++
++	if (count > ASIUS_MAX_FDT_CELLS)
++		return -FDT_ERR_BADVALUE;
++
++	for (i = 0; i < count; i++)
++		cells[i] = cpu_to_fdt32(values[i]);
++
++	return fdt_setprop(fdt, node, name, cells, sizeof(cells[0]) * count);
++}
++
++static int asius_fdt_setprop_string_path(void *fdt, const char *path,
++					 const char *name, const char *value)
++{
++	int node;
++
++	node = fdt_path_offset(fdt, path);
++	if (node < 0)
++		return node;
++
++	return fdt_setprop_string(fdt, node, name, value);
++}
++
++static int asius_fdt_setprop_u32_path(void *fdt, const char *path,
++				      const char *name, u32 value)
++{
++	int node;
++
++	node = fdt_path_offset(fdt, path);
++	if (node < 0)
++		return node;
++
++	return fdt_setprop_u32(fdt, node, name, value);
++}
++
++static int asius_configure_cci_bus(void *fdt, const char *path)
++{
++	int bus;
++
++	bus = fdt_path_offset(fdt, path);
++	if (bus < 0)
++		return bus;
++
++	return fdt_setprop_string(fdt, bus, "status", "okay") ?:
++	       fdt_setprop_u32(fdt, bus, "clock-frequency", 1000000) ?:
++	       fdt_setprop_u32(fdt, bus, "#address-cells", 1) ?:
++	       fdt_setprop_u32(fdt, bus, "#size-cells", 0);
++}
++
++static int asius_configure_cam_mclk_pinctrl(void *fdt, const char *path,
++					    const char *pin, const char *bias)
++{
++	int node;
++
++	node = fdt_path_offset(fdt, path);
++	if (node < 0)
++		return node;
++
++	return fdt_setprop_string(fdt, node, "pins", pin) ?:
++	       fdt_setprop_string(fdt, node, "function", "cam_mclk") ?:
++	       fdt_setprop_u32(fdt, node, "drive-strength", 2) ?:
++	       fdt_setprop(fdt, node, bias, NULL, 0);
++}
++
++static int asius_configure_camss_port(void *fdt, int index,
++				      const char *port_path,
++				      const char *endpoint_path,
++				      u32 *endpoint_phandle)
++{
++	const u32 data_lanes[] = { 0, 1 };
++	const u32 lane_polarities[] = { 0, 0, 0 };
++	int endpoint;
++	int port;
++	int status;
++
++	port = fdt_path_offset(fdt, port_path);
++	if (port < 0)
++		return port;
++
++	status = fdt_setprop_u32(fdt, port, "reg", index);
++	if (status)
++		return status;
++
++	endpoint = asius_fdt_ensure_child(fdt, port_path, "endpoint",
++					  endpoint_path);
++	if (endpoint < 0)
++		return endpoint;
++
++	status = fdt_setprop_u32(fdt, endpoint, "clock-lanes", 7) ?:
++		 asius_fdt_setprop_u32_array(fdt, endpoint, "data-lanes",
++					     data_lanes, ARRAY_SIZE(data_lanes)) ?:
++		 asius_fdt_setprop_u32_array(fdt, endpoint, "lane-polarities",
++					     lane_polarities,
++					     ARRAY_SIZE(lane_polarities)) ?:
++		 asius_fdt_assign_phandle(fdt, endpoint_path,
++					  endpoint_phandle);
++
++	return status;
++}
++
++static int asius_configure_camera_sensor(void *fdt, const char *sensor_path,
++					 const char *sensor_port_path,
++					 const char *sensor_endpoint_path,
++					 const char *compatible, u32 i2c_addr,
++					 u32 camcc_phandle, u32 mclk,
++					 u32 mclk_default_phandle,
++					 u32 mclk_suspend_phandle,
++					 u32 reset_phandle, u32 reset_gpio,
++					 u32 enable_gpio,
++					 u64 link_frequency,
++					 u32 *endpoint_phandle)
++{
++	const u32 data_lanes[] = { 1, 2 };
++	u32 reset_cells[] = { reset_phandle, reset_gpio, 0 };
++	u32 enable_cells[] = { reset_phandle, enable_gpio, 0 };
++	int endpoint;
++	int sensor;
++	int status;
++
++	sensor = fdt_path_offset(fdt, sensor_path);
++	if (sensor < 0)
++		return sensor;
++
++	/* cam-v2 boards use their local 24 MHz oscillator; do not drive Dragon MCLK. */
++	fdt_delprop(fdt, sensor, "clocks");
++	fdt_delprop(fdt, sensor, "clock-names");
++	fdt_delprop(fdt, sensor, "assigned-clocks");
++	fdt_delprop(fdt, sensor, "assigned-clock-rates");
++	fdt_delprop(fdt, sensor, "pinctrl-names");
++	fdt_delprop(fdt, sensor, "pinctrl-0");
++	fdt_delprop(fdt, sensor, "pinctrl-1");
++
++	status = fdt_setprop_string(fdt, sensor, "compatible", compatible) ?:
++		 fdt_setprop_u32(fdt, sensor, "reg", i2c_addr) ?:
++		 asius_fdt_setprop_u32_array(fdt, sensor, "reset-gpios",
++					     reset_cells, ARRAY_SIZE(reset_cells));
++	if (status)
++		return status;
++
++	if (enable_gpio) {
++		status = asius_fdt_setprop_u32_array(fdt, sensor,
++						     "enable-gpios",
++						     enable_cells,
++						     ARRAY_SIZE(enable_cells));
++		if (status)
++			return status;
++	}
++
++	if (asius_fdt_ensure_child(fdt, sensor_path, "port",
++				   sensor_port_path) < 0)
++		return fdt_path_offset(fdt, sensor_port_path);
++
++	endpoint = asius_fdt_ensure_child(fdt, sensor_port_path, "endpoint",
++					  sensor_endpoint_path);
++	if (endpoint < 0)
++		return endpoint;
++
++	status = fdt_setprop_u64(fdt, endpoint, "link-frequencies",
++				 link_frequency) ?:
++		 asius_fdt_setprop_u32_array(fdt, endpoint, "data-lanes",
++					     data_lanes, ARRAY_SIZE(data_lanes)) ?:
++		 asius_fdt_assign_phandle(fdt, sensor_endpoint_path,
++					  endpoint_phandle);
++
++	return status;
++}
++
++static void asius_enable_dragon_cameras(void *fdt)
++{
++	u32 cam1_csi_phandle, cam1_sensor_phandle;
++	u32 cam2_csi_phandle, cam2_sensor_phandle;
++	u32 cam3_csi_phandle, cam3_sensor_phandle;
++	u32 cam1_mclk_default_phandle, cam1_mclk_suspend_phandle;
++	u32 cam2_mclk_default_phandle, cam2_mclk_suspend_phandle;
++	u32 cam3_mclk_default_phandle, cam3_mclk_suspend_phandle;
++	u32 camcc_phandle, tlmm_phandle;
++	int camss, cci0, cci1;
++	int status;
++
++	camss = fdt_path_offset(fdt, ASIUS_CAMSS_PATH);
++	cci0 = fdt_path_offset(fdt, ASIUS_CCI0_PATH);
++	cci1 = fdt_path_offset(fdt, ASIUS_CCI1_PATH);
++	if (camss < 0 || cci0 < 0 || cci1 < 0)
++		return;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_CAMSS_PATH, "ports",
++					ASIUS_CAMSS_PORTS_PATH);
++	if (status < 0) {
++		efi_warn("Failed to add Asius camera ports node: %d\n", status);
++		return;
++	}
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_CAMSS_PORTS_PATH, "port@0",
++				       ASIUS_CAMSS_PORT0_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_CAMSS_PORTS_PATH, "port@2",
++				       ASIUS_CAMSS_PORT2_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_CAMSS_PORTS_PATH, "port@3",
++				       ASIUS_CAMSS_PORT3_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_CCI0_BUS0_PATH, "camera@36",
++				       ASIUS_CAM1_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_CCI1_BUS0_PATH, "camera@36",
++				       ASIUS_CAM2_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_CCI1_BUS1_PATH, "camera@36",
++				       ASIUS_CAM3_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_TLMM_PATH,
++				       "cam1-mclk-default-state",
++				       ASIUS_CAM1_MCLK_DEFAULT_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_TLMM_PATH,
++				       "cam1-mclk-suspend-state",
++				       ASIUS_CAM1_MCLK_SUSPEND_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_TLMM_PATH,
++				       "cam2-mclk-default-state",
++				       ASIUS_CAM2_MCLK_DEFAULT_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_TLMM_PATH,
++				       "cam2-mclk-suspend-state",
++				       ASIUS_CAM2_MCLK_SUSPEND_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_TLMM_PATH,
++				       "cam3-mclk-default-state",
++				       ASIUS_CAM3_MCLK_DEFAULT_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_TLMM_PATH,
++				       "cam3-mclk-suspend-state",
++				       ASIUS_CAM3_MCLK_SUSPEND_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_node_phandle(fdt, ASIUS_CAMCC_PATH,
++					&camcc_phandle) ?:
++		 asius_fdt_node_phandle(fdt, ASIUS_TLMM_PATH,
++					&tlmm_phandle) ?:
++		 asius_configure_cam_mclk_pinctrl(fdt,
++						  ASIUS_CAM1_MCLK_DEFAULT_PATH,
++						  "gpio64", "bias-disable") ?:
++		 asius_configure_cam_mclk_pinctrl(fdt,
++						  ASIUS_CAM1_MCLK_SUSPEND_PATH,
++						  "gpio64", "bias-pull-down") ?:
++		 asius_configure_cam_mclk_pinctrl(fdt,
++						  ASIUS_CAM2_MCLK_DEFAULT_PATH,
++						  "gpio66", "bias-disable") ?:
++		 asius_configure_cam_mclk_pinctrl(fdt,
++						  ASIUS_CAM2_MCLK_SUSPEND_PATH,
++						  "gpio66", "bias-pull-down") ?:
++		 asius_configure_cam_mclk_pinctrl(fdt,
++						  ASIUS_CAM3_MCLK_DEFAULT_PATH,
++						  "gpio67", "bias-disable") ?:
++		 asius_configure_cam_mclk_pinctrl(fdt,
++						  ASIUS_CAM3_MCLK_SUSPEND_PATH,
++						  "gpio67", "bias-pull-down") ?:
++		 asius_fdt_node_phandle(fdt, ASIUS_CAM1_MCLK_DEFAULT_PATH,
++					&cam1_mclk_default_phandle) ?:
++		 asius_fdt_node_phandle(fdt, ASIUS_CAM1_MCLK_SUSPEND_PATH,
++					&cam1_mclk_suspend_phandle) ?:
++		 asius_fdt_node_phandle(fdt, ASIUS_CAM2_MCLK_DEFAULT_PATH,
++					&cam2_mclk_default_phandle) ?:
++		 asius_fdt_node_phandle(fdt, ASIUS_CAM2_MCLK_SUSPEND_PATH,
++					&cam2_mclk_suspend_phandle) ?:
++		 asius_fdt_node_phandle(fdt, ASIUS_CAM3_MCLK_DEFAULT_PATH,
++					&cam3_mclk_default_phandle) ?:
++		 asius_fdt_node_phandle(fdt, ASIUS_CAM3_MCLK_SUSPEND_PATH,
++					&cam3_mclk_suspend_phandle) ?:
++		 asius_fdt_setprop_string_path(fdt, ASIUS_CAMSS_PATH,
++					       "status", "okay") ?:
++		 asius_fdt_setprop_string_path(fdt, ASIUS_CCI0_PATH,
++					       "status", "okay") ?:
++		 asius_fdt_setprop_string_path(fdt, ASIUS_CCI1_PATH,
++					       "status", "okay") ?:
++		 asius_fdt_setprop_u32_path(fdt, ASIUS_CAMSS_PORTS_PATH,
++					    "#address-cells", 1) ?:
++		 asius_fdt_setprop_u32_path(fdt, ASIUS_CAMSS_PORTS_PATH,
++					    "#size-cells", 0) ?:
++		 asius_configure_cci_bus(fdt, ASIUS_CCI0_BUS0_PATH) ?:
++		 asius_configure_cci_bus(fdt, ASIUS_CCI1_BUS0_PATH) ?:
++		 asius_configure_cci_bus(fdt, ASIUS_CCI1_BUS1_PATH) ?:
++		 asius_configure_camss_port(fdt, 0, ASIUS_CAMSS_PORT0_PATH,
++					    ASIUS_CAMSS_PORT0_EP_PATH,
++					    &cam1_csi_phandle) ?:
++		 asius_configure_camss_port(fdt, 2, ASIUS_CAMSS_PORT2_PATH,
++					    ASIUS_CAMSS_PORT2_EP_PATH,
++					    &cam2_csi_phandle) ?:
++		 asius_configure_camss_port(fdt, 3, ASIUS_CAMSS_PORT3_PATH,
++					    ASIUS_CAMSS_PORT3_EP_PATH,
++					    &cam3_csi_phandle) ?:
++		 asius_configure_camera_sensor(fdt, ASIUS_CAM1_PATH,
++					       ASIUS_CAM1_PORT_PATH,
++					       ASIUS_CAM1_EP_PATH,
++					       "ovti,os04c10", 0x36,
++					       camcc_phandle,
++					       ASIUS_CAM_CC_MCLK0_CLK,
++					       cam1_mclk_default_phandle,
++					       cam1_mclk_suspend_phandle,
++					       tlmm_phandle, 20, 36,
++					       360000000ULL,
++					       &cam1_sensor_phandle) ?:
++		 asius_configure_camera_sensor(fdt, ASIUS_CAM2_PATH,
++					       ASIUS_CAM2_PORT_PATH,
++					       ASIUS_CAM2_EP_PATH,
++					       "ovti,os04c10", 0x36,
++					       camcc_phandle,
++					       ASIUS_CAM_CC_MCLK2_CLK,
++					       cam2_mclk_default_phandle,
++					       cam2_mclk_suspend_phandle,
++					       tlmm_phandle, 77, 0,
++					       360000000ULL,
++					       &cam2_sensor_phandle) ?:
++		 asius_configure_camera_sensor(fdt, ASIUS_CAM3_PATH,
++					       ASIUS_CAM3_PORT_PATH,
++					       ASIUS_CAM3_EP_PATH,
++					       "ovti,os04c10", 0x36,
++					       camcc_phandle,
++					       ASIUS_CAM_CC_MCLK3_CLK,
++					       cam3_mclk_default_phandle,
++					       cam3_mclk_suspend_phandle,
++					       tlmm_phandle, 78, 0,
++					       360000000ULL,
++					       &cam3_sensor_phandle) ?:
++		 fdt_setprop_u32(fdt, fdt_path_offset(fdt,
++				 ASIUS_CAMSS_PORT0_EP_PATH), "remote-endpoint",
++				 cam1_sensor_phandle) ?:
++		 fdt_setprop_u32(fdt, fdt_path_offset(fdt,
++				 ASIUS_CAM1_EP_PATH), "remote-endpoint",
++				 cam1_csi_phandle) ?:
++		 fdt_setprop_u32(fdt, fdt_path_offset(fdt,
++				 ASIUS_CAMSS_PORT2_EP_PATH), "remote-endpoint",
++				 cam2_sensor_phandle) ?:
++		 fdt_setprop_u32(fdt, fdt_path_offset(fdt,
++				 ASIUS_CAM2_EP_PATH), "remote-endpoint",
++				 cam2_csi_phandle) ?:
++		 fdt_setprop_u32(fdt, fdt_path_offset(fdt,
++				 ASIUS_CAMSS_PORT3_EP_PATH), "remote-endpoint",
++				 cam3_sensor_phandle) ?:
++		 fdt_setprop_u32(fdt, fdt_path_offset(fdt,
++				 ASIUS_CAM3_EP_PATH), "remote-endpoint",
++				 cam3_csi_phandle);
++	if (status)
++		goto fail;
++
++	return;
++
++fail:
++	efi_warn("Failed to configure Asius Dragon cameras: %d\n", status);
++}
++
+ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+ 			       void *fdt, int new_fdt_size, char *cmdline_ptr)
+ {
+@@ -149,6 +634,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+ 	}
+ 
+ 	asius_enable_panda_spi(fdt);
++	asius_enable_dragon_cameras(fdt);
+ 
+ 	/* Add FDT entries for EFI runtime services in chosen node. */
+ 	node = fdt_subnode_offset(fdt, 0, "chosen");
+diff --git a/drivers/media/i2c/Kconfig b/drivers/media/i2c/Kconfig
+index cdd7ba5da..516952953 100644
+--- a/drivers/media/i2c/Kconfig
++++ b/drivers/media/i2c/Kconfig
+@@ -169,6 +169,20 @@ config VIDEO_IMX219
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called imx219.
+ 
++config VIDEO_OS04C10
++	tristate "OmniVision OS04C10 sensor support"
++	select V4L2_CCI_I2C
++	select V4L2_FWNODE
++	help
++	  This is a Video4Linux2 sensor driver for the OmniVision
++	  OS04C10 camera sensor.
++
++	  The driver exposes the sensor as a RAW12 V4L2 sub-device and
++	  accepts register writes from userspace through SENSOR_WRITE_REGS.
++
++	  To compile this driver as a module, choose M here: the module
++	  will be called os04c10.
++
+ config VIDEO_IMX258
+ 	tristate "Sony IMX258 sensor support"
+ 	select V4L2_CCI_I2C
+diff --git a/drivers/media/i2c/Makefile b/drivers/media/i2c/Makefile
+index 57cdd8dc9..8ac0a31c9 100644
+--- a/drivers/media/i2c/Makefile
++++ b/drivers/media/i2c/Makefile
+@@ -49,6 +49,7 @@ obj-$(CONFIG_VIDEO_I2C) += video-i2c.o
+ obj-$(CONFIG_VIDEO_IMX208) += imx208.o
+ obj-$(CONFIG_VIDEO_IMX214) += imx214.o
+ obj-$(CONFIG_VIDEO_IMX219) += imx219.o
++obj-$(CONFIG_VIDEO_OS04C10) += os04c10.o
+ obj-$(CONFIG_VIDEO_IMX258) += imx258.o
+ obj-$(CONFIG_VIDEO_IMX274) += imx274.o
+ obj-$(CONFIG_VIDEO_IMX283) += imx283.o
+diff --git a/drivers/media/i2c/os04c10.c b/drivers/media/i2c/os04c10.c
+new file mode 100644
+index 000000000..e8c61ac96
+--- /dev/null
++++ b/drivers/media/i2c/os04c10.c
+@@ -0,0 +1,570 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * OmniVision OS04C10 CMOS Image Sensor Driver
++ *
++ * This intentionally keeps the sensor register table in userspace. camerad
++ * writes comma's OS04C10 init/start/exposure arrays through SENSOR_WRITE_REGS.
++ */
++
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/pm_runtime.h>
++#include <linux/regulator/consumer.h>
++#include <linux/uaccess.h>
++#include <linux/vmalloc.h>
++
++#include <media/v4l2-cci.h>
++#include <media/v4l2-ctrls.h>
++#include <media/v4l2-device.h>
++#include <media/v4l2-event.h>
++#include <media/v4l2-fwnode.h>
++#include <media/v4l2-mediabus.h>
++
++#include <uapi/linux/qcom-camss-vfe.h>
++
++#define OS04C10_XCLK_FREQ		24000000
++#define OS04C10_LINK_FREQ		360000000ULL
++#define OS04C10_PIXEL_RATE		144000000ULL
++
++#define OS04C10_REG_CHIP_ID_H		CCI_REG8(0x300a)
++#define OS04C10_REG_CHIP_ID_L		CCI_REG8(0x300b)
++#define OS04C10_CHIP_ID_H		0x53
++#define OS04C10_CHIP_ID_L		0x04
++
++#define OS04C10_NATIVE_WIDTH		2688
++#define OS04C10_NATIVE_HEIGHT		1520
++
++#define to_os04c10(_sd) container_of(_sd, struct os04c10, sd)
++
++static const s64 os04c10_link_freq_menu[] = {
++	OS04C10_LINK_FREQ,
++};
++
++static const char * const os04c10_supply_name[] = {
++	"avdd",
++	"dovdd",
++	"dvdd",
++};
++
++struct os04c10 {
++	struct v4l2_subdev sd;
++	struct media_pad pad;
++	struct v4l2_ctrl_handler ctrl_handler;
++	struct v4l2_ctrl *link_freq;
++	struct v4l2_ctrl *pixel_rate;
++
++	struct device *dev;
++	struct regmap *cci;
++	struct clk *xclk;
++	struct gpio_desc *enable_gpio;
++	struct gpio_desc *reset_gpio;
++	struct regulator_bulk_data supplies[ARRAY_SIZE(os04c10_supply_name)];
++	unsigned long link_freq_bitmap;
++	bool powered;
++	u32 mbus_code;
++	u32 active_width;
++	u32 active_height;
++};
++
++static void os04c10_fill_format(struct v4l2_mbus_framefmt *fmt, u32 code)
++{
++	if (!fmt->width || fmt->width > OS04C10_NATIVE_WIDTH)
++		fmt->width = OS04C10_NATIVE_WIDTH;
++	if (!fmt->height || fmt->height > OS04C10_NATIVE_HEIGHT)
++		fmt->height = OS04C10_NATIVE_HEIGHT;
++	if (code != MEDIA_BUS_FMT_SBGGR10_1X10)
++		code = MEDIA_BUS_FMT_SBGGR12_1X12;
++	fmt->code = code;
++	fmt->field = V4L2_FIELD_NONE;
++	fmt->colorspace = V4L2_COLORSPACE_RAW;
++	fmt->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
++	fmt->quantization = V4L2_QUANTIZATION_FULL_RANGE;
++	fmt->xfer_func = V4L2_XFER_FUNC_NONE;
++}
++
++static int os04c10_power_on(struct device *dev);
++
++static long os04c10_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
++{
++	struct os04c10 *sensor = to_os04c10(sd);
++	struct sensor_write_regs_cmd *wcmd = arg;
++	struct sensor_reg_write *regs;
++	unsigned int i;
++	int ret = 0;
++
++	if (cmd != SENSOR_WRITE_REGS)
++		return -ENOIOCTLCMD;
++
++	if (!wcmd || wcmd->count == 0 || wcmd->count > 4096)
++		return -EINVAL;
++
++	if (wcmd->data_width != 1 && wcmd->data_width != 2)
++		return -EINVAL;
++
++	regs = kvmalloc_array(wcmd->count, sizeof(*regs), GFP_KERNEL);
++	if (!regs)
++		return -ENOMEM;
++
++	if (copy_from_user(regs, u64_to_user_ptr(wcmd->regs),
++			   wcmd->count * sizeof(*regs))) {
++		ret = -EFAULT;
++		goto out;
++	}
++
++	if (!sensor->powered) {
++		ret = os04c10_power_on(sensor->dev);
++		if (ret < 0)
++			goto out;
++	}
++
++	for (i = 0; i < wcmd->count; i++) {
++		if (wcmd->data_width == 2)
++			ret = cci_write(sensor->cci, CCI_REG16(regs[i].addr),
++					regs[i].data, NULL);
++		else
++			ret = cci_write(sensor->cci, CCI_REG8(regs[i].addr),
++					regs[i].data & 0xff, NULL);
++		if (ret)
++			goto out;
++	}
++
++out:
++	kvfree(regs);
++	return ret;
++}
++
++static int os04c10_get_fmt(struct v4l2_subdev *sd,
++			   struct v4l2_subdev_state *state,
++			   struct v4l2_subdev_format *fmt)
++{
++	struct os04c10 *sensor = to_os04c10(sd);
++
++	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY)
++		fmt->format = *v4l2_subdev_state_get_format(state, fmt->pad);
++	else {
++		fmt->format.width = sensor->active_width ?: OS04C10_NATIVE_WIDTH;
++		fmt->format.height = sensor->active_height ?: OS04C10_NATIVE_HEIGHT;
++		os04c10_fill_format(&fmt->format, sensor->mbus_code);
++	}
++
++	return 0;
++}
++
++static int os04c10_set_fmt(struct v4l2_subdev *sd,
++			   struct v4l2_subdev_state *state,
++			   struct v4l2_subdev_format *fmt)
++{
++	struct os04c10 *sensor = to_os04c10(sd);
++
++	os04c10_fill_format(&fmt->format, fmt->format.code);
++
++	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY)
++		*v4l2_subdev_state_get_format(state, fmt->pad) = fmt->format;
++	else {
++		sensor->mbus_code = fmt->format.code;
++		sensor->active_width = fmt->format.width;
++		sensor->active_height = fmt->format.height;
++	}
++
++	return 0;
++}
++
++static int os04c10_enum_mbus_code(struct v4l2_subdev *sd,
++				  struct v4l2_subdev_state *state,
++				  struct v4l2_subdev_mbus_code_enum *code)
++{
++	switch (code->index) {
++	case 0:
++		code->code = MEDIA_BUS_FMT_SBGGR12_1X12;
++		break;
++	case 1:
++		code->code = MEDIA_BUS_FMT_SBGGR10_1X10;
++		break;
++	default:
++		return -EINVAL;
++	}
++	return 0;
++}
++
++static int os04c10_enum_frame_size(struct v4l2_subdev *sd,
++				   struct v4l2_subdev_state *state,
++				   struct v4l2_subdev_frame_size_enum *fse)
++{
++	if (fse->index > 0 ||
++	    (fse->code != MEDIA_BUS_FMT_SBGGR12_1X12 &&
++	     fse->code != MEDIA_BUS_FMT_SBGGR10_1X10))
++		return -EINVAL;
++
++	fse->min_width = 1;
++	fse->max_width = OS04C10_NATIVE_WIDTH;
++	fse->min_height = 1;
++	fse->max_height = OS04C10_NATIVE_HEIGHT;
++	return 0;
++}
++
++static int os04c10_init_state(struct v4l2_subdev *sd,
++			      struct v4l2_subdev_state *state)
++{
++	struct v4l2_mbus_framefmt *fmt =
++		v4l2_subdev_state_get_format(state, 0);
++
++	fmt->width = OS04C10_NATIVE_WIDTH;
++	fmt->height = OS04C10_NATIVE_HEIGHT;
++	os04c10_fill_format(fmt, MEDIA_BUS_FMT_SBGGR12_1X12);
++	return 0;
++}
++
++static int os04c10_power_on(struct device *dev)
++{
++	struct v4l2_subdev *sd = dev_get_drvdata(dev);
++	struct os04c10 *sensor = to_os04c10(sd);
++	int ret;
++
++	if (sensor->powered)
++		return 0;
++
++	if (sensor->enable_gpio) {
++		gpiod_set_value_cansleep(sensor->enable_gpio, 1);
++		usleep_range(1000, 2000);
++	}
++
++	ret = regulator_bulk_enable(ARRAY_SIZE(os04c10_supply_name),
++				    sensor->supplies);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to enable regulators\n");
++
++	ret = clk_prepare_enable(sensor->xclk);
++	if (ret) {
++		dev_err_probe(dev, ret, "failed to enable xclk\n");
++		goto reg_off;
++	}
++
++	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
++	usleep_range(30000, 31000);
++
++	sensor->powered = true;
++	return 0;
++
++reg_off:
++	regulator_bulk_disable(ARRAY_SIZE(os04c10_supply_name),
++			       sensor->supplies);
++	if (sensor->enable_gpio)
++		gpiod_set_value_cansleep(sensor->enable_gpio, 0);
++	return ret;
++}
++
++static int os04c10_power_off(struct device *dev)
++{
++	struct v4l2_subdev *sd = dev_get_drvdata(dev);
++	struct os04c10 *sensor = to_os04c10(sd);
++
++	if (!sensor->powered)
++		return 0;
++
++	sensor->powered = false;
++	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
++	clk_disable_unprepare(sensor->xclk);
++	regulator_bulk_disable(ARRAY_SIZE(os04c10_supply_name),
++			       sensor->supplies);
++	if (sensor->enable_gpio)
++		gpiod_set_value_cansleep(sensor->enable_gpio, 0);
++	return 0;
++}
++
++static int os04c10_set_stream(struct v4l2_subdev *sd, int enable)
++{
++	struct os04c10 *sensor = to_os04c10(sd);
++
++	if (enable)
++		return os04c10_power_on(sensor->dev);
++
++	cci_write(sensor->cci, CCI_REG8(0x0100), 0, NULL);
++	os04c10_power_off(sensor->dev);
++
++	return 0;
++}
++
++static const struct v4l2_subdev_video_ops os04c10_video_ops = {
++	.s_stream = os04c10_set_stream,
++};
++
++static const struct v4l2_subdev_pad_ops os04c10_pad_ops = {
++	.get_fmt = os04c10_get_fmt,
++	.set_fmt = os04c10_set_fmt,
++	.enum_mbus_code = os04c10_enum_mbus_code,
++	.enum_frame_size = os04c10_enum_frame_size,
++};
++
++static const struct v4l2_subdev_core_ops os04c10_core_ops = {
++	.subscribe_event = v4l2_ctrl_subdev_subscribe_event,
++	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
++	.ioctl = os04c10_ioctl,
++};
++
++static const struct v4l2_subdev_ops os04c10_subdev_ops = {
++	.core = &os04c10_core_ops,
++	.video = &os04c10_video_ops,
++	.pad = &os04c10_pad_ops,
++};
++
++static const struct media_entity_operations os04c10_entity_ops = {
++	.link_validate = v4l2_subdev_link_validate,
++};
++
++static const struct v4l2_subdev_internal_ops os04c10_internal_ops = {
++	.init_state = os04c10_init_state,
++};
++
++static int os04c10_identify_module(struct os04c10 *sensor)
++{
++	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
++	u64 val_h, val_l;
++	int ret;
++
++	ret = cci_read(sensor->cci, OS04C10_REG_CHIP_ID_H, &val_h, NULL);
++	if (ret)
++		return dev_warn_probe(&client->dev, ret,
++				      "failed to read chip id high byte\n");
++
++	ret = cci_read(sensor->cci, OS04C10_REG_CHIP_ID_L, &val_l, NULL);
++	if (ret)
++		return dev_warn_probe(&client->dev, ret,
++				      "failed to read chip id low byte\n");
++
++	if (val_h != OS04C10_CHIP_ID_H || val_l != OS04C10_CHIP_ID_L)
++		return dev_warn_probe(&client->dev, -EIO,
++				      "chip id mismatch: expected %02x%02x, got %02llx%02llx\n",
++				      OS04C10_CHIP_ID_H, OS04C10_CHIP_ID_L,
++				      val_h, val_l);
++
++	dev_info(&client->dev, "OS04C10 chip ID verified: 0x%02llx%02llx\n",
++		 val_h, val_l);
++	return 0;
++}
++
++static int os04c10_get_regulators(struct os04c10 *sensor)
++{
++	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(os04c10_supply_name); i++)
++		sensor->supplies[i].supply = os04c10_supply_name[i];
++
++	return devm_regulator_bulk_get(&client->dev,
++				       ARRAY_SIZE(os04c10_supply_name),
++				       sensor->supplies);
++}
++
++static int os04c10_check_hwcfg(struct device *dev, struct os04c10 *sensor)
++{
++	struct fwnode_handle *endpoint;
++	struct v4l2_fwnode_endpoint ep_cfg = {
++		.bus_type = V4L2_MBUS_CSI2_DPHY,
++	};
++	int ret;
++
++	endpoint = fwnode_graph_get_next_endpoint(dev_fwnode(dev), NULL);
++	if (!endpoint)
++		return dev_err_probe(dev, -EINVAL, "endpoint node not found\n");
++
++	ret = v4l2_fwnode_endpoint_alloc_parse(endpoint, &ep_cfg);
++	if (ret) {
++		dev_err_probe(dev, ret, "failed to parse endpoint\n");
++		goto out;
++	}
++
++	if (ep_cfg.bus.mipi_csi2.num_data_lanes != 2) {
++		ret = dev_err_probe(dev, -EINVAL,
++				    "only two CSI-2 data lanes are supported\n");
++		goto out;
++	}
++
++	ret = v4l2_link_freq_to_bitmap(dev, ep_cfg.link_frequencies,
++				       ep_cfg.nr_of_link_frequencies,
++				       os04c10_link_freq_menu,
++				       ARRAY_SIZE(os04c10_link_freq_menu),
++				       &sensor->link_freq_bitmap);
++	if (ret)
++		dev_err_probe(dev, ret, "link frequency not supported\n");
++
++out:
++	v4l2_fwnode_endpoint_free(&ep_cfg);
++	fwnode_handle_put(endpoint);
++	return ret;
++}
++
++static int os04c10_init_controls(struct os04c10 *sensor)
++{
++	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
++	int ret;
++
++	v4l2_ctrl_handler_init(hdl, 2);
++
++	sensor->link_freq = v4l2_ctrl_new_int_menu(
++		hdl, NULL, V4L2_CID_LINK_FREQ,
++		ARRAY_SIZE(os04c10_link_freq_menu) - 1, 0,
++		os04c10_link_freq_menu);
++	if (sensor->link_freq)
++		sensor->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
++
++	sensor->pixel_rate = v4l2_ctrl_new_std(
++		hdl, NULL, V4L2_CID_PIXEL_RATE,
++		OS04C10_PIXEL_RATE, OS04C10_PIXEL_RATE, 1,
++		OS04C10_PIXEL_RATE);
++	if (sensor->pixel_rate)
++		sensor->pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
++
++	ret = hdl->error;
++	if (ret) {
++		v4l2_ctrl_handler_free(hdl);
++		return ret;
++	}
++
++	sensor->sd.ctrl_handler = hdl;
++	return 0;
++}
++
++static int os04c10_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct os04c10 *sensor;
++	int ret;
++
++	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
++	if (!sensor)
++		return -ENOMEM;
++
++	sensor->mbus_code = MEDIA_BUS_FMT_SBGGR12_1X12;
++	sensor->dev = dev;
++	v4l2_i2c_subdev_init(&sensor->sd, client, &os04c10_subdev_ops);
++	sensor->sd.internal_ops = &os04c10_internal_ops;
++
++	ret = os04c10_check_hwcfg(dev, sensor);
++	if (ret)
++		return ret;
++
++	sensor->cci = devm_cci_regmap_init_i2c(client, 16);
++	if (IS_ERR(sensor->cci))
++		return dev_err_probe(dev, PTR_ERR(sensor->cci),
++				     "failed to initialize CCI\n");
++
++	sensor->xclk = devm_v4l2_sensor_clk_get_legacy(dev, NULL, true,
++						       OS04C10_XCLK_FREQ);
++	if (IS_ERR(sensor->xclk))
++		return dev_err_probe(dev, PTR_ERR(sensor->xclk),
++				     "failed to get xclk\n");
++
++	if (clk_get_rate(sensor->xclk) != OS04C10_XCLK_FREQ)
++		return dev_err_probe(dev, -EINVAL,
++				     "xclk frequency not supported: %lu Hz\n",
++				     clk_get_rate(sensor->xclk));
++
++	ret = os04c10_get_regulators(sensor);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to get regulators\n");
++
++	sensor->enable_gpio = devm_gpiod_get_optional(dev, "enable",
++						      GPIOD_OUT_LOW);
++	if (IS_ERR(sensor->enable_gpio))
++		return PTR_ERR(sensor->enable_gpio);
++
++	sensor->reset_gpio = devm_gpiod_get_optional(dev, "reset",
++						     GPIOD_OUT_LOW);
++	if (IS_ERR(sensor->reset_gpio))
++		return PTR_ERR(sensor->reset_gpio);
++
++	ret = os04c10_power_on(dev);
++	if (ret)
++		return ret;
++
++	ret = os04c10_identify_module(sensor);
++	if (ret)
++		dev_warn(dev, "registering optional OS04C10 node without sensor response: %d\n",
++			 ret);
++
++	ret = os04c10_init_controls(sensor);
++	if (ret)
++		goto error_power_off;
++
++	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
++			    V4L2_SUBDEV_FL_HAS_EVENTS;
++	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
++	sensor->sd.entity.ops = &os04c10_entity_ops;
++	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
++
++	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
++	if (ret)
++		goto error_handler_free;
++
++	sensor->sd.state_lock = sensor->ctrl_handler.lock;
++	ret = v4l2_subdev_init_finalize(&sensor->sd);
++	if (ret)
++		goto error_media_entity;
++
++	pm_runtime_set_active(dev);
++	pm_runtime_enable(dev);
++
++	ret = v4l2_async_register_subdev_sensor(&sensor->sd);
++	if (ret)
++		goto error_subdev_cleanup;
++
++	return 0;
++
++error_subdev_cleanup:
++	v4l2_subdev_cleanup(&sensor->sd);
++	pm_runtime_disable(dev);
++
++error_media_entity:
++	media_entity_cleanup(&sensor->sd.entity);
++
++error_handler_free:
++	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
++
++error_power_off:
++	os04c10_power_off(dev);
++	return ret;
++}
++
++static void os04c10_remove(struct i2c_client *client)
++{
++	struct v4l2_subdev *sd = i2c_get_clientdata(client);
++	struct os04c10 *sensor = to_os04c10(sd);
++
++	v4l2_async_unregister_subdev(sd);
++	v4l2_subdev_cleanup(sd);
++	media_entity_cleanup(&sd->entity);
++	v4l2_ctrl_handler_free(sd->ctrl_handler);
++
++	pm_runtime_disable(&client->dev);
++	os04c10_power_off(&client->dev);
++	pm_runtime_set_suspended(&client->dev);
++}
++
++static const struct of_device_id os04c10_dt_ids[] = {
++	{ .compatible = "ovti,os04c10" },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, os04c10_dt_ids);
++
++static const struct dev_pm_ops os04c10_pm_ops = {
++	SET_RUNTIME_PM_OPS(os04c10_power_off, os04c10_power_on, NULL)
++};
++
++static struct i2c_driver os04c10_i2c_driver = {
++	.driver = {
++		.name = "os04c10",
++		.of_match_table = os04c10_dt_ids,
++		.pm = &os04c10_pm_ops,
++	},
++	.probe = os04c10_probe,
++	.remove = os04c10_remove,
++};
++
++module_i2c_driver(os04c10_i2c_driver);
++
++MODULE_AUTHOR("Asius");
++MODULE_DESCRIPTION("OmniVision OS04C10 sensor driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+index e5ee7e717..19577728b 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -154,6 +154,8 @@
+ #define			MODE_QCOM_PLAIN	(0)
+ #define			MODE_MIPI_RAW	(1)
+ #define		WM_CFG_VIRTUALFRAME		(2)
++#define		WM_CFG_PORT_SEL		(5)
++#define			WM_CFG_PORT_SEL_RDI(n)	(3 + (n))
+ #define VFE_BUS_WM_HEADER_ADDR(n)		(0x220c + (n) * 0x100)
+ #define VFE_BUS_WM_HEADER_CFG(n)		(0x2210 + (n) * 0x100)
+ #define VFE_BUS_WM_IMAGE_ADDR(n)		(0x2214 + (n) * 0x100)
+@@ -243,7 +245,8 @@ static void vfe_wm_start(struct vfe_device *vfe, u8 wm, struct vfe_line *line)
+ 
+ 	/* Enable WM */
+ 	val = 1 << WM_CFG_EN |
+-	      MODE_MIPI_RAW << WM_CFG_MODE;
++	      MODE_MIPI_RAW << WM_CFG_MODE |
++	      WM_CFG_PORT_SEL_RDI(line->id) << WM_CFG_PORT_SEL;
+ 	writel_relaxed(val, vfe->base + VFE_BUS_WM_CFG(wm));
+ }
+ 
+diff --git a/include/uapi/linux/qcom-camss-vfe.h b/include/uapi/linux/qcom-camss-vfe.h
+new file mode 100644
+index 000000000..6934f8cd6
+--- /dev/null
++++ b/include/uapi/linux/qcom-camss-vfe.h
+@@ -0,0 +1,28 @@
++/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
++#ifndef __UAPI_QCOM_CAMSS_VFE_H
++#define __UAPI_QCOM_CAMSS_VFE_H
++
++#include <linux/ioctl.h>
++#include <linux/types.h>
++
++/*
++ * Sensor register write interface used on sensor V4L2 subdev fds through
++ * VIDIOC_DEFAULT. The Dragon RDI camerad path uses this to reuse comma's
++ * OS04C10 register arrays from userspace.
++ */
++struct sensor_reg_write {
++	__u16 addr;
++	__u16 data;
++};
++
++struct sensor_write_regs_cmd {
++	__u64 regs;		/* userspace pointer to struct sensor_reg_write[] */
++	__u32 count;
++	__u8 data_width;	/* 1 = byte, 2 = word */
++	__u8 pad[3];
++};
++
++#define SENSOR_IOC_MAGIC	'S'
++#define SENSOR_WRITE_REGS	_IOW(SENSOR_IOC_MAGIC, 1, struct sensor_write_regs_cmd)
++
++#endif /* __UAPI_QCOM_CAMSS_VFE_H */
