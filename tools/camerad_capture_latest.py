@@ -27,15 +27,40 @@ REMOTE_IMAGES = {
   "cam2": "/tmp/asius-cam2-latest.jpg",
   "cam3": "/tmp/asius-cam3-latest.jpg",
 }
+REMOTE_RAW_IMAGES = {
+  "cam1": "/tmp/asius-cam1-raw.jpg",
+  "cam2": "/tmp/asius-cam2-raw.jpg",
+  "cam3": "/tmp/asius-cam3-raw.jpg",
+}
+REMOTE_RAW_STATS = {
+  "cam1": "/tmp/asius-cam1-raw-stats.json",
+  "cam2": "/tmp/asius-cam2-raw-stats.json",
+  "cam3": "/tmp/asius-cam3-raw-stats.json",
+}
 LOCAL_IMAGES = {
   "cam1": "latest-camerad-driver.jpg",
   "cam2": "latest-camerad-road.jpg",
   "cam3": "latest-camerad-wide.jpg",
 }
+LOCAL_RAW_IMAGES = {
+  "cam1": "latest-camerad-driver-raw.jpg",
+  "cam2": "latest-camerad-road-raw.jpg",
+  "cam3": "latest-camerad-wide-raw.jpg",
+}
+LOCAL_RAW_STATS = {
+  "cam1": "latest-camerad-driver-raw-stats.json",
+  "cam2": "latest-camerad-road-raw-stats.json",
+  "cam3": "latest-camerad-wide-raw-stats.json",
+}
 HOST_IMAGES = {
   "cam1": Path("/tmp/asius-cam1-latest.jpg"),
   "cam2": Path("/tmp/asius-cam2-latest.jpg"),
   "cam3": Path("/tmp/asius-cam3-latest.jpg"),
+}
+HOST_RAW_IMAGES = {
+  "cam1": Path("/tmp/asius-cam1-raw.jpg"),
+  "cam2": Path("/tmp/asius-cam2-raw.jpg"),
+  "cam3": Path("/tmp/asius-cam3-raw.jpg"),
 }
 HOST_MONTAGE = Path("/tmp/asius-cams-latest.jpg")
 REMOTE_LOG = "/tmp/camerad_dual_latest.log"
@@ -54,14 +79,25 @@ def camera_list(selection: str) -> list[str]:
   return [selection]
 
 
-def remote_env(selection: str, exposure_lines: int) -> list[str]:
+def remote_env(selection: str, exposure_lines: int, target_grey: float, chroma_scale: float,
+               preview_saturation: float, preview_median: float, pix_ioctl: bool,
+               rdi: bool) -> list[str]:
   selected = camera_list(selection)
   env = [
     "ASIUS=1",
+    "ASIUS_CAMERA_ONE=1",
     "LOGPRINT=debug",
     "DEBUG_FRAMES=1",
+    f"ASIUS_CAM_TARGET_GREY={target_grey}",
+    f"ASIUS_CAM_CHROMA_SCALE={chroma_scale}",
     f"ASIUS_CAM_START_EXPOSURE_LINES={exposure_lines}",
+    f"ASIUS_SNAPSHOT_SATURATION={preview_saturation}",
+    f"ASIUS_SNAPSHOT_TARGET_MEDIAN={preview_median}",
   ]
+  if rdi:
+    env.append("ASIUS_CAM_USE_RDI=1")
+  if pix_ioctl:
+    env.append("ASIUS_CAM_PIX_IOCTL=1")
   if "cam1" not in selected:
     env.append("DISABLE_DRIVER=1")
   if "cam2" not in selected:
@@ -71,16 +107,26 @@ def remote_env(selection: str, exposure_lines: int) -> list[str]:
   return env
 
 
-def remote_script(selection: str, settle: float, exposure_lines: int) -> str:
+def remote_script(selection: str, settle: float, exposure_lines: int, target_grey: float,
+                  chroma_scale: float, preview_saturation: float, preview_median: float,
+                  pix_ioctl: bool, raw_debug: bool, rdi: bool) -> str:
   cameras = camera_list(selection)
   targets_literal = repr(cameras)
-  env_words = " ".join(shlex.quote(word) for word in remote_env(selection, exposure_lines))
+  raw_images_literal = repr(REMOTE_RAW_IMAGES)
+  raw_stats_literal = repr(REMOTE_RAW_STATS)
+  env_words = " ".join(shlex.quote(word) for word in remote_env(
+    selection, exposure_lines, target_grey, chroma_scale, preview_saturation, preview_median, pix_ioctl, rdi))
   return textwrap.dedent(f"""\
     set -e
     cd /data/openpilot
-    rm -f /tmp/asius-cam2-latest.jpg /tmp/asius-cam3-latest.jpg {REMOTE_LOG} /tmp/camerad_dual_latest.pid
+    rm -f /tmp/asius-cam1-latest.jpg /tmp/asius-cam2-latest.jpg /tmp/asius-cam3-latest.jpg \\
+      /tmp/asius-cam1-raw.jpg /tmp/asius-cam2-raw.jpg /tmp/asius-cam3-raw.jpg \\
+      /tmp/asius-cam1-raw-stats.json /tmp/asius-cam2-raw-stats.json /tmp/asius-cam3-raw-stats.json \\
+      {REMOTE_LOG} /tmp/camerad_dual_latest.pid
     pkill -x camerad 2>/dev/null || true
-    env {env_words} ./system/camerad/camerad > {REMOTE_LOG} 2>&1 &
+    pkill -f '/tmp/camerad-cache' 2>/dev/null || true
+    export {env_words}
+    ./system/camerad/camerad > {REMOTE_LOG} 2>&1 &
     pid=$!
     echo "$pid" > /tmp/camerad_dual_latest.pid
     cleanup() {{
@@ -90,46 +136,101 @@ def remote_script(selection: str, settle: float, exposure_lines: int) -> str:
     trap cleanup EXIT
     sleep 1
     /usr/local/venv/bin/python - <<'PY'
+    import json
     import time
+    import numpy as np
+    from PIL import Image
     from msgq.visionipc import VisionIpcClient, VisionStreamType
     from openpilot.system.camerad.snapshot import extract_image, jpeg_write
 
     selected = {targets_literal}
+    raw_debug = {raw_debug!r}
+    raw_images = {raw_images_literal}
+    raw_stats = {raw_stats_literal}
     streams = {{
       "cam1": ("driver", VisionStreamType.VISION_STREAM_DRIVER, "/tmp/asius-cam1-latest.jpg"),
       "cam2": ("road", VisionStreamType.VISION_STREAM_ROAD, "/tmp/asius-cam2-latest.jpg"),
       "cam3": ("wide", VisionStreamType.VISION_STREAM_WIDE_ROAD, "/tmp/asius-cam3-latest.jpg"),
     }}
+
+    def frame_stats(buf, rgb):
+      y = np.array(buf.data[:buf.uv_offset], dtype=np.uint8).reshape((-1, buf.stride))[:buf.height, :buf.width]
+      luma = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]
+      chroma = np.sqrt(((rgb.astype(np.float32) - rgb.mean(axis=2, keepdims=True)) ** 2).mean(axis=2))
+      center = y[buf.height // 4:buf.height * 3 // 4, buf.width // 4:buf.width * 3 // 4]
+      flat_rgb = rgb.reshape(-1, 3).astype(np.float32)
+      return {{
+        "width": int(buf.width),
+        "height": int(buf.height),
+        "stride": int(buf.stride),
+        "uv_offset": int(buf.uv_offset),
+        "y_mean": float(y.mean()),
+        "y_median": float(np.median(y)),
+        "y_center_median": float(np.median(center)),
+        "y_p01": float(np.percentile(y, 1.0)),
+        "y_p99": float(np.percentile(y, 99.0)),
+        "y_clip_lo_frac": float((y <= 4).mean()),
+        "y_clip_hi_frac": float((y >= 250).mean()),
+        "rgb_mean": [float(x) for x in flat_rgb.mean(axis=0)],
+        "rgb_median": [float(x) for x in np.median(flat_rgb, axis=0)],
+        "luma_median": float(np.median(luma)),
+        "luma_clip_hi_frac": float((luma >= 250.0).mean()),
+        "mean_chroma": float(chroma.mean()),
+      }}
+
     clients = {{}}
+    unavailable = set()
     deadline = time.monotonic() + 10.0
-    while len(clients) < len(selected) and time.monotonic() < deadline:
+    while len(clients) + len(unavailable) < len(selected) and time.monotonic() < deadline:
       for key in selected:
-        if key in clients:
+        if key in clients or key in unavailable:
           continue
         label, stream, out = streams[key]
         c = VisionIpcClient("camerad", stream, True)
         if c.connect(False):
-          clients[key] = (label, c, out)
-          print(f"connected {{key}} {{label}} {{c.width}}x{{c.height}} stride={{c.stride}}")
-      if len(clients) < len(selected):
+          if c.width is None or c.height is None or c.stride is None:
+            unavailable.add(key)
+            print(f"connected {{key}} {{label}} without buffers")
+          else:
+            clients[key] = (label, c, out)
+            print(f"connected {{key}} {{label}} {{c.width}}x{{c.height}} stride={{c.stride}}")
+      if len(clients) + len(unavailable) < len(selected):
         time.sleep(0.1)
 
     missing = [key for key in selected if key not in clients]
     if missing:
-      raise RuntimeError("missing streams: " + ",".join(missing))
+      print("missing streams: " + ",".join(missing))
 
     time.sleep({settle:.3f})
-    for key, (label, client, out) in clients.items():
-      buf = None
-      for _ in range(20):
-        buf = client.recv(500)
-        if buf is not None:
-          break
-      if buf is None:
-        raise RuntimeError(f"no frame from {{key}} {{label}}")
-      img = extract_image(buf)
-      jpeg_write(out, img)
-      print(f"saved {{key}} {{label}} {{out}} shape={{img.shape}} frame_id={{client.frame_id}}")
+    saved = {{}}
+    frame_deadline = time.monotonic() + 10.0
+    while len(saved) < len(clients) and time.monotonic() < frame_deadline:
+      progressed = False
+      for key in selected:
+        if key not in clients or key in saved:
+          continue
+        label, client, out = clients[key]
+        buf = client.recv(100)
+        if buf is None:
+          continue
+        img = extract_image(buf)
+        if raw_debug:
+          Image.fromarray(img).save(raw_images[key], "JPEG", quality=95)
+          stats = frame_stats(buf, img)
+          stats["frame_id"] = int(client.frame_id)
+          with open(raw_stats[key], "w") as f:
+            json.dump(stats, f, indent=2, sort_keys=True)
+        jpeg_write(out, img)
+        saved[key] = True
+        progressed = True
+        print(f"saved {{key}} {{label}} {{out}} shape={{img.shape}} frame_id={{client.frame_id}}")
+      if not progressed:
+        time.sleep(0.02)
+    for key in selected:
+      if key in clients and key not in saved:
+        print(f"no frame from {{key}} {{clients[key][0]}}")
+    if not saved:
+      raise RuntimeError("no selected camera produced a frame")
     PY
   """)
 
@@ -186,26 +287,65 @@ def refresh_host_images(cameras: list[str], out_dir: Path) -> None:
   montage.save(HOST_MONTAGE, "JPEG", quality=95)
 
 
+def refresh_host_raw_images(cameras: list[str], out_dir: Path) -> None:
+  for cam in cameras:
+    local = out_dir / LOCAL_RAW_IMAGES[cam]
+    if local.exists():
+      HOST_RAW_IMAGES[cam].write_bytes(local.read_bytes())
+
+
 def main() -> int:
   parser = argparse.ArgumentParser()
   parser.add_argument("--cam", choices=("cam1", "cam2", "cam3", "both", "all"), default="both")
   parser.add_argument("--out-dir", default="/tmp/dragon_os04_bench")
-  parser.add_argument("--settle", type=float, default=5.0, help="seconds to let AE settle before saving")
-  parser.add_argument("--exposure-lines", type=int, default=5, help="initial OS04 exposure lines")
+  parser.add_argument("--settle", type=float, default=7.0, help="seconds to let AE settle before saving")
+  parser.add_argument("--exposure-lines", type=int, default=1000, help="initial OS04 exposure lines")
+  parser.add_argument("--target-grey", type=float, default=0.44, help="OS04 AE target grey fraction")
+  parser.add_argument("--chroma-scale", type=float, default=2.05, help="OS04 software debayer chroma scale")
+  parser.add_argument("--preview-saturation", type=float, default=1.20, help="JPEG preview saturation boost")
+  parser.add_argument("--preview-median", type=float, default=115.0, help="JPEG preview target median luma")
+  parser.add_argument("--pix-ioctl", action="store_true", help="use the experimental liberation-day-style VFE userspace ioctl path")
+  parser.add_argument("--rdi", action="store_true", help="use the RDI raw capture + software debayer fallback path")
+  parser.add_argument("--raw-debug", action="store_true", help="save unenhanced NV12-derived JPEGs and JSON stats beside the normal preview JPEG")
   args = parser.parse_args()
 
   out_dir = Path(args.out_dir)
-  script = remote_script(args.cam, args.settle, args.exposure_lines)
+  script = remote_script(args.cam, args.settle, args.exposure_lines, args.target_grey,
+                         args.chroma_scale, args.preview_saturation, args.preview_median,
+                         args.pix_ioctl, args.raw_debug, args.rdi)
   run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "bash", "-s"], input=script, text=True)
 
   cameras = camera_list(args.cam)
+  pulled = []
   for cam in cameras:
     local = out_dir / LOCAL_IMAGES[cam]
+    present = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "test", "-s", REMOTE_IMAGES[cam]], check=False)
+    if present.returncode != 0:
+      print(f"{cam}: no remote image at {REMOTE_IMAGES[cam]}")
+      continue
     pull_file(REMOTE_IMAGES[cam], local)
+    pulled.append(cam)
     print(f"{cam}: remote={REMOTE_IMAGES[cam]} local={local} bytes={local.stat().st_size}")
 
-  refresh_host_images(cameras, out_dir)
+  if not pulled:
+    return 1
+
+  refresh_host_images(pulled, out_dir)
   print(f"host_montage={HOST_MONTAGE} bytes={HOST_MONTAGE.stat().st_size}")
+
+  if args.raw_debug:
+    for cam in pulled:
+      raw_local = out_dir / LOCAL_RAW_IMAGES[cam]
+      raw_stats_local = out_dir / LOCAL_RAW_STATS[cam]
+      raw_present = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "test", "-s", REMOTE_RAW_IMAGES[cam]], check=False)
+      stats_present = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "test", "-s", REMOTE_RAW_STATS[cam]], check=False)
+      if raw_present.returncode == 0:
+        pull_file(REMOTE_RAW_IMAGES[cam], raw_local)
+        print(f"{cam}: raw_remote={REMOTE_RAW_IMAGES[cam]} raw_local={raw_local} bytes={raw_local.stat().st_size}")
+      if stats_present.returncode == 0:
+        pull_file(REMOTE_RAW_STATS[cam], raw_stats_local)
+        print(f"{cam}: stats_remote={REMOTE_RAW_STATS[cam]} stats_local={raw_stats_local} bytes={raw_stats_local.stat().st_size}")
+    refresh_host_raw_images(pulled, out_dir)
 
   local_log = out_dir / LOCAL_LOG
   pull_file(REMOTE_LOG, local_log)
