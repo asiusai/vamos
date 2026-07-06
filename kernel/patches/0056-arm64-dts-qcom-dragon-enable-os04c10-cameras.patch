@@ -207,7 +207,7 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 index 702a520d4..89b2c10b7 100644
 --- a/drivers/firmware/efi/libstub/fdt.c
 +++ b/drivers/firmware/efi/libstub/fdt.c
-@@ -83,6 +83,495 @@ static void asius_enable_panda_spi(void *fdt)
+@@ -83,6 +83,503 @@ static void asius_enable_panda_spi(void *fdt)
  			 status);
  }
  
@@ -439,6 +439,10 @@ index 702a520d4..89b2c10b7 100644
 +					 u32 *endpoint_phandle)
 +{
 +	const u32 data_lanes[] = { 1, 2 };
++	const char pinctrl_names[] = "default\0suspend";
++	u32 clock_cells[] = { camcc_phandle, mclk };
++	u32 pinctrl0_cells[] = { mclk_default_phandle };
++	u32 pinctrl1_cells[] = { mclk_suspend_phandle };
 +	u32 reset_cells[] = { reset_phandle, reset_gpio, 0 };
 +	u32 enable_cells[] = { reset_phandle, enable_gpio, 0 };
 +	int endpoint;
@@ -449,17 +453,21 @@ index 702a520d4..89b2c10b7 100644
 +	if (sensor < 0)
 +		return sensor;
 +
-+	/* cam-v2 boards use their local 24 MHz oscillator; do not drive Dragon MCLK. */
-+	fdt_delprop(fdt, sensor, "clocks");
-+	fdt_delprop(fdt, sensor, "clock-names");
-+	fdt_delprop(fdt, sensor, "assigned-clocks");
-+	fdt_delprop(fdt, sensor, "assigned-clock-rates");
-+	fdt_delprop(fdt, sensor, "pinctrl-names");
-+	fdt_delprop(fdt, sensor, "pinctrl-0");
-+	fdt_delprop(fdt, sensor, "pinctrl-1");
-+
 +	status = fdt_setprop_string(fdt, sensor, "compatible", compatible) ?:
 +		 fdt_setprop_u32(fdt, sensor, "reg", i2c_addr) ?:
++		 asius_fdt_setprop_u32_array(fdt, sensor, "clocks",
++					     clock_cells, ARRAY_SIZE(clock_cells)) ?:
++		 fdt_setprop_string(fdt, sensor, "clock-names", "xclk") ?:
++		 asius_fdt_setprop_u32_array(fdt, sensor, "assigned-clocks",
++					     clock_cells, ARRAY_SIZE(clock_cells)) ?:
++		 fdt_setprop_u32(fdt, sensor, "assigned-clock-rates",
++				 24000000) ?:
++		 fdt_setprop(fdt, sensor, "pinctrl-names", pinctrl_names,
++			     sizeof(pinctrl_names)) ?:
++		 asius_fdt_setprop_u32_array(fdt, sensor, "pinctrl-0",
++					     pinctrl0_cells, ARRAY_SIZE(pinctrl0_cells)) ?:
++		 asius_fdt_setprop_u32_array(fdt, sensor, "pinctrl-1",
++					     pinctrl1_cells, ARRAY_SIZE(pinctrl1_cells)) ?:
 +		 asius_fdt_setprop_u32_array(fdt, sensor, "reset-gpios",
 +					     reset_cells, ARRAY_SIZE(reset_cells));
 +	if (status)
@@ -703,7 +711,7 @@ index 702a520d4..89b2c10b7 100644
  static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
  			       void *fdt, int new_fdt_size, char *cmdline_ptr)
  {
-@@ -149,6 +634,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+@@ -149,6 +646,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
  	}
  
  	asius_enable_panda_spi(fdt);
@@ -715,9 +723,7 @@ diff --git a/drivers/media/i2c/Kconfig b/drivers/media/i2c/Kconfig
 index cdd7ba5da..516952953 100644
 --- a/drivers/media/i2c/Kconfig
 +++ b/drivers/media/i2c/Kconfig
-@@ -169,6 +169,20 @@ config VIDEO_IMX219
- 	  To compile this driver as a module, choose M here: the
- 	  module will be called imx219.
+@@ -172,4 +172,18 @@
  
 +config VIDEO_OS04C10
 +	tristate "OmniVision OS04C10 sensor support"
@@ -740,10 +746,7 @@ diff --git a/drivers/media/i2c/Makefile b/drivers/media/i2c/Makefile
 index 57cdd8dc9..8ac0a31c9 100644
 --- a/drivers/media/i2c/Makefile
 +++ b/drivers/media/i2c/Makefile
-@@ -49,6 +49,7 @@ obj-$(CONFIG_VIDEO_I2C) += video-i2c.o
- obj-$(CONFIG_VIDEO_IMX208) += imx208.o
- obj-$(CONFIG_VIDEO_IMX214) += imx214.o
- obj-$(CONFIG_VIDEO_IMX219) += imx219.o
+@@ -52,3 +52,4 @@
 +obj-$(CONFIG_VIDEO_OS04C10) += os04c10.o
  obj-$(CONFIG_VIDEO_IMX258) += imx258.o
  obj-$(CONFIG_VIDEO_IMX274) += imx274.o
@@ -753,7 +756,7 @@ new file mode 100644
 index 000000000..e8c61ac96
 --- /dev/null
 +++ b/drivers/media/i2c/os04c10.c
-@@ -0,0 +1,570 @@
+@@ -0,0 +1,588 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * OmniVision OS04C10 CMOS Image Sensor Driver
@@ -982,6 +985,9 @@ index 000000000..e8c61ac96
 +	if (sensor->powered)
 +		return 0;
 +
++	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
++	usleep_range(1000, 2000);
++
 +	if (sensor->enable_gpio) {
 +		gpiod_set_value_cansleep(sensor->enable_gpio, 1);
 +		usleep_range(1000, 2000);
@@ -998,8 +1004,9 @@ index 000000000..e8c61ac96
 +		goto reg_off;
 +	}
 +
++	usleep_range(5000, 6000);
 +	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
-+	usleep_range(30000, 31000);
++	usleep_range(50000, 51000);
 +
 +	sensor->powered = true;
 +	return 0;
@@ -1187,7 +1194,7 @@ index 000000000..e8c61ac96
 +{
 +	struct device *dev = &client->dev;
 +	struct os04c10 *sensor;
-+	int ret;
++	int ret, i;
 +
 +	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
 +	if (!sensor)
@@ -1236,7 +1243,21 @@ index 000000000..e8c61ac96
 +	if (ret)
 +		return ret;
 +
-+	ret = os04c10_identify_module(sensor);
++	for (i = 0; i < 4; i++) {
++		ret = os04c10_identify_module(sensor);
++		if (!ret)
++			break;
++		if (i == 3)
++			break;
++
++		dev_warn(dev, "chip id read failed on attempt %d, power cycling sensor: %d\n",
++			 i + 1, ret);
++		os04c10_power_off(dev);
++		usleep_range(20000, 30000);
++		ret = os04c10_power_on(dev);
++		if (ret)
++			return ret;
++	}
 +	if (ret)
 +		dev_warn(dev, "registering optional OS04C10 node without sensor response: %d\n",
 +			 ret);
