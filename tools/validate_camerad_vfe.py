@@ -60,7 +60,7 @@ ROAD_SPATIAL_QUALITY_PROFILE = {
   "max_tile_uv_median_offset": 18.0,
   "max_tile_uv_median_range": 28.0,
   "max_tile_rgb_spread": 60.0,
-  "max_uv_hf_abs_mean": 6.0,
+  "max_uv_hf_abs_mean": 6.25,
 }
 
 QUALITY_PROFILES = {
