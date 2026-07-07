@@ -45,6 +45,24 @@ DMESG_FORBIDDEN_PATTERNS = [
   )),
 ]
 
+ROAD_SPATIAL_QUALITY_PROFILE = {
+  "min_y_median": 70.0,
+  "max_y_median": 190.0,
+  "min_y_range": 50.0,
+  "max_y_clip_lo": 0.20,
+  "max_y_clip_hi": 0.20,
+  "max_luma_clip_hi": 0.08,
+  "max_rgb_spread": 12.0,
+  "max_uv_median_offset": 4.0,
+  "max_uv_center_median_offset": 3.0,
+  "min_mean_chroma": 6.0,
+  "min_uv_abs": 4.0,
+  "max_tile_uv_median_offset": 18.0,
+  "max_tile_uv_median_range": 28.0,
+  "max_tile_rgb_spread": 60.0,
+  "max_uv_hf_abs_mean": 6.0,
+}
+
 QUALITY_PROFILES = {
   "bench": {},
   "road": {
@@ -60,23 +78,8 @@ QUALITY_PROFILES = {
     "min_mean_chroma": 6.0,
     "min_uv_abs": 4.0,
   },
-  "road-spatial": {
-    "min_y_median": 70.0,
-    "max_y_median": 190.0,
-    "min_y_range": 50.0,
-    "max_y_clip_lo": 0.20,
-    "max_y_clip_hi": 0.20,
-    "max_luma_clip_hi": 0.08,
-    "max_rgb_spread": 12.0,
-    "max_uv_median_offset": 4.0,
-    "max_uv_center_median_offset": 3.0,
-    "min_mean_chroma": 6.0,
-    "min_uv_abs": 4.0,
-    "max_tile_uv_median_offset": 18.0,
-    "max_tile_uv_median_range": 28.0,
-    "max_tile_rgb_spread": 60.0,
-    "max_uv_hf_abs_mean": 6.0,
-  },
+  "road-spatial": ROAD_SPATIAL_QUALITY_PROFILE,
+  "daylight-road": ROAD_SPATIAL_QUALITY_PROFILE,
 }
 
 
@@ -448,7 +451,7 @@ def main() -> int:
     "--quality-profile",
     choices=tuple(QUALITY_PROFILES),
     default="bench",
-    help="bench keeps broad bring-up thresholds; road adds stricter image-quality thresholds",
+    help="bench keeps broad bring-up thresholds; road/daylight profiles add stricter image-quality thresholds",
   )
   parser.add_argument("--require-dmabuf", action=argparse.BooleanOptionalAction, default=True)
   parser.add_argument("--min-frames", type=int, default=20, help="minimum DEBUG_FRAMES lines per selected camera")

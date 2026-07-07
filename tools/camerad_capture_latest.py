@@ -531,7 +531,7 @@ def main() -> int:
   parser.add_argument("--validate-min-fps", type=float, default=18.0, help="minimum median VFE FPS when --validate-vfe is set")
   parser.add_argument("--validate-max-slow-gaps", type=int, default=0, help="maximum slow VFE frame gaps when --validate-vfe is set")
   parser.add_argument("--validate-max-cpu-pct", type=float, default=10.0, help="maximum camerad single-core CPU percent during the monitor window when --validate-vfe is set")
-  parser.add_argument("--validate-quality-profile", choices=("bench", "road", "road-spatial"), default="bench", help="image-stat threshold profile passed to validate_camerad_vfe.py")
+  parser.add_argument("--validate-quality-profile", choices=("bench", "road", "road-spatial", "daylight-road"), default="bench", help="image-stat threshold profile passed to validate_camerad_vfe.py")
   parser.add_argument("--check-dmesg", action="store_true", help="capture dmesg during the camerad run; with --validate-vfe, fail on CAMSS/VFE errors, stalls, or buffer-address spam")
   parser.add_argument("--validate-max-dmesg-matches", type=int, default=0, help="maximum forbidden dmesg matches allowed when --validate-vfe --check-dmesg is set")
   parser.add_argument("--pull-timeout", type=float, default=DEFAULT_PULL_TIMEOUT, help="seconds allowed for each SSH/SCP artifact pull before retrying")
