@@ -60,6 +60,23 @@ QUALITY_PROFILES = {
     "min_mean_chroma": 6.0,
     "min_uv_abs": 4.0,
   },
+  "road-spatial": {
+    "min_y_median": 70.0,
+    "max_y_median": 190.0,
+    "min_y_range": 50.0,
+    "max_y_clip_lo": 0.20,
+    "max_y_clip_hi": 0.20,
+    "max_luma_clip_hi": 0.08,
+    "max_rgb_spread": 12.0,
+    "max_uv_median_offset": 4.0,
+    "max_uv_center_median_offset": 3.0,
+    "min_mean_chroma": 6.0,
+    "min_uv_abs": 4.0,
+    "max_tile_uv_median_offset": 18.0,
+    "max_tile_uv_median_range": 28.0,
+    "max_tile_rgb_spread": 60.0,
+    "max_uv_hf_abs_mean": 6.0,
+  },
 }
 
 
@@ -317,7 +334,18 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
       "max_uv_center_median_offset": max_uv_center_median_offset,
       "mean_chroma": float(data.get("mean_chroma", -1.0)),
       "uv_abs_mean": float(data.get("uv_abs_mean", -1.0)),
+      "uv_hf_abs_mean": float(data.get("uv_hf_abs_mean", 999.0)),
+      "tile_y_median_range": float(data.get("tile_y_median_range", 999.0)),
+      "tile_uv_median_range": float(data.get("tile_uv_median_range", 999.0)),
+      "tile_max_uv_median_offset": float(data.get("tile_max_uv_median_offset", 999.0)),
+      "tile_p95_uv_median_offset": float(data.get("tile_p95_uv_median_offset", 999.0)),
+      "tile_max_rgb_median_spread": float(data.get("tile_max_rgb_median_spread", 999.0)),
+      "tile_p95_rgb_median_spread": float(data.get("tile_p95_rgb_median_spread", 999.0)),
     }
+    if "tiles" in data:
+      image_summary["tile_rows"] = int(data.get("tile_rows", 0))
+      image_summary["tile_cols"] = int(data.get("tile_cols", 0))
+      image_summary["tiles"] = data["tiles"]
     summary["cameras"].setdefault(cam, {})["image"] = image_summary
 
     checks = [
@@ -331,6 +359,10 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
       ("max_uv_center_median_offset", image_summary["max_uv_center_median_offset"], 0.0, args.max_uv_center_median_offset),
       ("mean_chroma", image_summary["mean_chroma"], args.min_mean_chroma, 999.0),
       ("uv_abs_mean", image_summary["uv_abs_mean"], args.min_uv_abs, 999.0),
+      ("tile_max_uv_median_offset", image_summary["tile_max_uv_median_offset"], 0.0, args.max_tile_uv_median_offset),
+      ("tile_uv_median_range", image_summary["tile_uv_median_range"], 0.0, args.max_tile_uv_median_range),
+      ("tile_max_rgb_median_spread", image_summary["tile_max_rgb_median_spread"], 0.0, args.max_tile_rgb_spread),
+      ("uv_hf_abs_mean", image_summary["uv_hf_abs_mean"], 0.0, args.max_uv_hf_abs_mean),
     ]
     for name, value, low, high in checks:
       if value < low or value > high:
@@ -419,6 +451,10 @@ def main() -> int:
   parser.add_argument("--max-uv-center-median-offset", type=float, default=999.0, help="maximum absolute U/V center median offset from 128")
   parser.add_argument("--min-mean-chroma", type=float, default=1.0)
   parser.add_argument("--min-uv-abs", type=float, default=1.0)
+  parser.add_argument("--max-tile-uv-median-offset", type=float, default=999.0, help="maximum per-tile absolute U/V median offset from 128")
+  parser.add_argument("--max-tile-uv-median-range", type=float, default=999.0, help="maximum range of per-tile U or V medians")
+  parser.add_argument("--max-tile-rgb-spread", type=float, default=999.0, help="maximum per-tile RGB median channel spread")
+  parser.add_argument("--max-uv-hf-abs-mean", type=float, default=999.0, help="maximum mean high-frequency U/V absolute delta")
   parser.add_argument("--check-dmesg", action="store_true", help=f"fail on CAMSS/VFE errors, stalls, or buffer-address spam in {DMESG_LOG_FILE}")
   parser.add_argument("--dmesg-log", type=Path, help=f"dmesg log to check; default is RUN_DIR/{DMESG_LOG_FILE}")
   parser.add_argument("--max-dmesg-matches", type=int, default=0)
@@ -453,6 +489,10 @@ def main() -> int:
       "max_uv_center_median_offset": args.max_uv_center_median_offset,
       "min_mean_chroma": args.min_mean_chroma,
       "min_uv_abs": args.min_uv_abs,
+      "max_tile_uv_median_offset": args.max_tile_uv_median_offset,
+      "max_tile_uv_median_range": args.max_tile_uv_median_range,
+      "max_tile_rgb_spread": args.max_tile_rgb_spread,
+      "max_uv_hf_abs_mean": args.max_uv_hf_abs_mean,
       "check_dmesg": args.check_dmesg,
       "max_dmesg_matches": args.max_dmesg_matches,
     },
