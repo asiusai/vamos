@@ -749,7 +749,7 @@ index cdd7ba5da..516952953 100644
 +	  This is a Video4Linux2 sensor driver for the OmniVision
 +	  OS04C10 camera sensor.
 +
-+	  The driver exposes the sensor as a RAW12 V4L2 sub-device and
++	  The driver exposes the sensor as a RAW10/RAW12 V4L2 sub-device and
 +	  accepts register writes from userspace through SENSOR_WRITE_REGS.
 +
 +	  To compile this driver as a module, choose M here: the module
@@ -850,8 +850,8 @@ index 000000000..e8c61ac96
 +		fmt->width = OS04C10_NATIVE_WIDTH;
 +	if (!fmt->height || fmt->height > OS04C10_NATIVE_HEIGHT)
 +		fmt->height = OS04C10_NATIVE_HEIGHT;
-+	if (code != MEDIA_BUS_FMT_SBGGR10_1X10)
-+		code = MEDIA_BUS_FMT_SBGGR12_1X12;
++	if (code != MEDIA_BUS_FMT_SBGGR12_1X12)
++		code = MEDIA_BUS_FMT_SBGGR10_1X10;
 +	fmt->code = code;
 +	fmt->field = V4L2_FIELD_NONE;
 +	fmt->colorspace = V4L2_COLORSPACE_RAW;
@@ -953,10 +953,10 @@ index 000000000..e8c61ac96
 +{
 +	switch (code->index) {
 +	case 0:
-+		code->code = MEDIA_BUS_FMT_SBGGR12_1X12;
++		code->code = MEDIA_BUS_FMT_SBGGR10_1X10;
 +		break;
 +	case 1:
-+		code->code = MEDIA_BUS_FMT_SBGGR10_1X10;
++		code->code = MEDIA_BUS_FMT_SBGGR12_1X12;
 +		break;
 +	default:
 +		return -EINVAL;
@@ -988,7 +988,7 @@ index 000000000..e8c61ac96
 +
 +	fmt->width = OS04C10_NATIVE_WIDTH;
 +	fmt->height = OS04C10_NATIVE_HEIGHT;
-+	os04c10_fill_format(fmt, MEDIA_BUS_FMT_SBGGR12_1X12);
++	os04c10_fill_format(fmt, MEDIA_BUS_FMT_SBGGR10_1X10);
 +	return 0;
 +}
 +
@@ -1216,7 +1216,7 @@ index 000000000..e8c61ac96
 +	if (!sensor)
 +		return -ENOMEM;
 +
-+	sensor->mbus_code = MEDIA_BUS_FMT_SBGGR12_1X12;
++	sensor->mbus_code = MEDIA_BUS_FMT_SBGGR10_1X10;
 +	sensor->dev = dev;
 +	v4l2_i2c_subdev_init(&sensor->sd, client, &os04c10_subdev_ops);
 +	sensor->sd.internal_ops = &os04c10_internal_ops;
