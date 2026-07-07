@@ -9,6 +9,7 @@ import re
 import shlex
 import statistics
 import subprocess
+import sys
 import textwrap
 import time
 from pathlib import Path
@@ -362,8 +363,18 @@ def main() -> int:
   parser.add_argument("--raw-debug", action="store_true", help="save unenhanced NV12-derived JPEGs and JSON stats beside the normal preview JPEG")
   parser.add_argument("--monitor-duration", type=float, default=5.0, help="seconds to keep camerad running before the one-shot JPEG capture")
   parser.add_argument("--camerad-debug-frames", action="store_true", help="make camerad print one log line per dequeued frame")
+  parser.add_argument("--validate-vfe", action="store_true", help="run the local VFE PIX/DMABUF validator after capture; implies --raw-debug and --camerad-debug-frames")
+  parser.add_argument("--validate-min-frames", type=int, default=20, help="minimum VFE debug frames per selected camera when --validate-vfe is set")
+  parser.add_argument("--validate-min-fps", type=float, default=18.0, help="minimum median VFE FPS when --validate-vfe is set")
+  parser.add_argument("--validate-max-slow-gaps", type=int, default=0, help="maximum slow VFE frame gaps when --validate-vfe is set")
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="extra remote camerad environment variable")
   args = parser.parse_args()
+
+  if args.validate_vfe:
+    if args.rdi:
+      parser.error("--validate-vfe checks the hardware VFE PIX path and cannot be used with --rdi")
+    args.raw_debug = True
+    args.camerad_debug_frames = True
 
   out_dir = Path(args.out_dir)
   script = remote_script(args.openpilot_dir, args.cam, args.settle, args.exposure_lines, args.target_grey,
@@ -413,6 +424,17 @@ def main() -> int:
   if stats_present.returncode == 0:
     pull_file(REMOTE_VIPC_STATS, stats_local)
     print(f"vipc_stats: remote={REMOTE_VIPC_STATS} local={stats_local} bytes={stats_local.stat().st_size}")
+  if args.validate_vfe:
+    validator = Path(__file__).with_name("validate_camerad_vfe.py")
+    run([
+      sys.executable,
+      str(validator),
+      str(out_dir),
+      "--cam", args.cam,
+      "--min-frames", str(args.validate_min_frames),
+      "--min-fps", str(args.validate_min_fps),
+      "--max-slow-gaps", str(args.validate_max_slow_gaps),
+    ])
   return 0
 
 
