@@ -111,7 +111,7 @@ def remote_env(selection: str, exposure_lines: int, target_grey: float, chroma_s
   return env
 
 
-def remote_script(selection: str, settle: float, exposure_lines: int, target_grey: float,
+def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_lines: int, target_grey: float,
                   chroma_scale: float, preview_saturation: float, preview_median: float,
                   pix_ioctl: bool, raw_debug: bool, rdi: bool, monitor_duration: float,
                   debug_frames: bool, extra_env: list[str]) -> str:
@@ -121,9 +121,10 @@ def remote_script(selection: str, settle: float, exposure_lines: int, target_gre
   raw_stats_literal = repr(REMOTE_RAW_STATS)
   env_words = " ".join(shlex.quote(word) for word in remote_env(
     selection, exposure_lines, target_grey, chroma_scale, preview_saturation, preview_median, pix_ioctl, rdi, debug_frames, extra_env))
+  openpilot_dir_q = shlex.quote(openpilot_dir)
   return textwrap.dedent(f"""\
     set -e
-    cd /data/openpilot
+    cd {openpilot_dir_q}
     rm -f /tmp/asius-cam1-latest.jpg /tmp/asius-cam2-latest.jpg /tmp/asius-cam3-latest.jpg \\
       /tmp/asius-cam1-raw.jpg /tmp/asius-cam2-raw.jpg /tmp/asius-cam3-raw.jpg \\
       /tmp/asius-cam1-raw-stats.json /tmp/asius-cam2-raw-stats.json /tmp/asius-cam3-raw-stats.json \\
@@ -317,6 +318,7 @@ def main() -> int:
   parser = argparse.ArgumentParser()
   parser.add_argument("--cam", choices=("cam1", "cam2", "cam3", "both", "all"), default="both")
   parser.add_argument("--out-dir", default="/tmp/dragon_os04_bench")
+  parser.add_argument("--openpilot-dir", default="/data/openpilot", help="remote openpilot checkout to run camerad from")
   parser.add_argument("--settle", type=float, default=7.0, help="seconds to let AE settle before saving")
   parser.add_argument("--exposure-lines", type=int, default=1000, help="initial OS04 exposure lines")
   parser.add_argument("--target-grey", type=float, default=0.44, help="OS04 AE target grey fraction")
@@ -332,7 +334,7 @@ def main() -> int:
   args = parser.parse_args()
 
   out_dir = Path(args.out_dir)
-  script = remote_script(args.cam, args.settle, args.exposure_lines, args.target_grey,
+  script = remote_script(args.openpilot_dir, args.cam, args.settle, args.exposure_lines, args.target_grey,
                          args.chroma_scale, args.preview_saturation, args.preview_median,
                          args.pix_ioctl, args.raw_debug, args.rdi, args.monitor_duration,
                          args.camerad_debug_frames, args.env)
