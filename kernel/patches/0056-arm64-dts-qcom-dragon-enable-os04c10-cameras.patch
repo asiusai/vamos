@@ -2,12 +2,15 @@ diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/
 index 1e793de87..f07c711ab 100644
 --- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
 +++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
-@@ -1571,3 +1571,169 @@ user_led: user-led-state {
+@@ -1571,3 +1571,172 @@ user_led: user-led-state {
  		bias-pull-up;
  	};
  };
 +
 +&camss {
++	vdda-phy-supply = <&vreg_l10c_0p88>;
++	vdda-pll-supply = <&vreg_l6b_1p2>;
++
 +	status = "okay";
 +
 +	ports {
@@ -207,7 +210,7 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 index 702a520d4..89b2c10b7 100644
 --- a/drivers/firmware/efi/libstub/fdt.c
 +++ b/drivers/firmware/efi/libstub/fdt.c
-@@ -83,6 +83,503 @@ static void asius_enable_panda_spi(void *fdt)
+@@ -83,6 +83,516 @@ static void asius_enable_panda_spi(void *fdt)
  			 status);
  }
  
@@ -241,6 +244,8 @@ index 702a520d4..89b2c10b7 100644
 +#define ASIUS_CAM2_MCLK_SUSPEND_PATH	ASIUS_TLMM_PATH "/cam2-mclk-suspend-state"
 +#define ASIUS_CAM3_MCLK_DEFAULT_PATH	ASIUS_TLMM_PATH "/cam3-mclk-default-state"
 +#define ASIUS_CAM3_MCLK_SUSPEND_PATH	ASIUS_TLMM_PATH "/cam3-mclk-suspend-state"
++#define ASIUS_VREG_L6B_1P2_PATH		"/soc@0/rsc@18200000/regulators-0/ldo6"
++#define ASIUS_VREG_L10C_0P88_PATH	"/soc@0/rsc@18200000/regulators-1/ldo10"
 +
 +#define ASIUS_CAM_CC_MCLK0_CLK		92
 +#define ASIUS_CAM_CC_MCLK2_CLK		96
@@ -509,6 +514,7 @@ index 702a520d4..89b2c10b7 100644
 +	u32 cam1_mclk_default_phandle, cam1_mclk_suspend_phandle;
 +	u32 cam2_mclk_default_phandle, cam2_mclk_suspend_phandle;
 +	u32 cam3_mclk_default_phandle, cam3_mclk_suspend_phandle;
++	u32 camss_vdda_phy_phandle, camss_vdda_pll_phandle;
 +	u32 camcc_phandle, tlmm_phandle;
 +	int camss, cci0, cci1;
 +	int status;
@@ -596,6 +602,10 @@ index 702a520d4..89b2c10b7 100644
 +					&camcc_phandle) ?:
 +		 asius_fdt_node_phandle(fdt, ASIUS_TLMM_PATH,
 +					&tlmm_phandle) ?:
++		 asius_fdt_node_phandle(fdt, ASIUS_VREG_L10C_0P88_PATH,
++					&camss_vdda_phy_phandle) ?:
++		 asius_fdt_node_phandle(fdt, ASIUS_VREG_L6B_1P2_PATH,
++					&camss_vdda_pll_phandle) ?:
 +		 asius_configure_cam_mclk_pinctrl(fdt,
 +						  ASIUS_CAM1_MCLK_DEFAULT_PATH,
 +						  "gpio64", "bias-disable") ?:
@@ -628,6 +638,12 @@ index 702a520d4..89b2c10b7 100644
 +					&cam3_mclk_suspend_phandle) ?:
 +		 asius_fdt_setprop_string_path(fdt, ASIUS_CAMSS_PATH,
 +					       "status", "okay") ?:
++		 asius_fdt_setprop_u32_path(fdt, ASIUS_CAMSS_PATH,
++					    "vdda-phy-supply",
++					    camss_vdda_phy_phandle) ?:
++		 asius_fdt_setprop_u32_path(fdt, ASIUS_CAMSS_PATH,
++					    "vdda-pll-supply",
++					    camss_vdda_pll_phandle) ?:
 +		 asius_fdt_setprop_string_path(fdt, ASIUS_CCI0_PATH,
 +					       "status", "okay") ?:
 +		 asius_fdt_setprop_string_path(fdt, ASIUS_CCI1_PATH,
@@ -711,7 +727,7 @@ index 702a520d4..89b2c10b7 100644
  static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
  			       void *fdt, int new_fdt_size, char *cmdline_ptr)
  {
-@@ -149,6 +646,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+@@ -149,6 +659,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
  	}
  
  	asius_enable_panda_spi(fdt);
@@ -1370,10 +1386,10 @@ index e5ee7e717..19577728b 100644
  
 diff --git a/include/uapi/linux/qcom-camss-vfe.h b/include/uapi/linux/qcom-camss-vfe.h
 new file mode 100644
-index 000000000..6934f8cd6
+index 000000000..a279d3434
 --- /dev/null
 +++ b/include/uapi/linux/qcom-camss-vfe.h
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,79 @@
 +/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 +#ifndef __UAPI_QCOM_CAMSS_VFE_H
 +#define __UAPI_QCOM_CAMSS_VFE_H
@@ -1381,9 +1397,60 @@ index 000000000..6934f8cd6
 +#include <linux/ioctl.h>
 +#include <linux/types.h>
 +
++#define VFE_REG_SPACE_SIZE	0x3000
++
++struct vfe_reg_write {
++	__u32 offset;
++	__u32 value;
++};
++
++struct vfe_write_regs_cmd {
++	__u64 regs;	/* userspace pointer to struct vfe_reg_write[] */
++	__u32 count;
++	__u32 pad;
++};
++
++struct vfe_dmi_cmd {
++	__u32 dmi_cfg_offset;	/* DMI config register, e.g. 0xc24 on VFE170 */
++	__u8 ram_select;	/* DMI table selector */
++	__u8 pad[3];
++	__u32 count;		/* number of 32-bit entries */
++	__u64 data;		/* userspace pointer to __u32[] */
++};
++
++struct vfe_map_buf_cmd {
++	__s32 fd;		/* input: DMA-BUF fd */
++	__u32 pad;
++	__u64 iova;		/* output: IOVA in VFE SMMU */
++	__u64 size;		/* output: mapped size */
++};
++
++struct vfe_unmap_buf_cmd {
++	__u64 iova;
++};
++
++struct vfe_set_buf_cmd {
++	__u32 wm_index;		/* write master index */
++	__u32 stride;		/* bytes per line */
++	__u64 iova;		/* buffer IOVA */
++	__u32 frame_inc;	/* frame size for auto-increment */
++	__u32 pad;
++};
++
++#define VFE_IOC_MAGIC		'#'
++#define VFE_WRITE_REGS		_IOW(VFE_IOC_MAGIC, 1, struct vfe_write_regs_cmd)
++#define VFE_WRITE_DMI		_IOW(VFE_IOC_MAGIC, 2, struct vfe_dmi_cmd)
++#define VFE_MAP_BUF		_IOWR(VFE_IOC_MAGIC, 3, struct vfe_map_buf_cmd)
++#define VFE_UNMAP_BUF		_IOW(VFE_IOC_MAGIC, 4, struct vfe_unmap_buf_cmd)
++#define VFE_SET_BUF		_IOW(VFE_IOC_MAGIC, 5, struct vfe_set_buf_cmd)
++#define VFE_REG_UPDATE		_IO(VFE_IOC_MAGIC, 6)
++#define VFE_START		_IO(VFE_IOC_MAGIC, 7)
++#define VFE_STOP		_IO(VFE_IOC_MAGIC, 8)
++#define VFE_WAIT_SOF		_IO(VFE_IOC_MAGIC, 9)
++
 +/*
 + * Sensor register write interface used on sensor V4L2 subdev fds through
-+ * VIDIOC_DEFAULT. The Dragon RDI camerad path uses this to reuse comma's
++ * VIDIOC_DEFAULT. The Dragon camerad path uses this to reuse comma's
 + * OS04C10 register arrays from userspace.
 + */
 +struct sensor_reg_write {

@@ -1,0 +1,89 @@
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -265,5 +265,10 @@ static u32 vfe_pix_wm4_count[4];
+ static u32 vfe_pix_last_warn_sof[4];
+ static u32 vfe_pix_last_wm_addr[4][2];
+ static u32 vfe_pix_last_wm_inc[4][2];
++static u32 vfe_pix_last_prog_idx[4][2];
++static u32 vfe_pix_last_ready_idx[4];
++static u32 vfe_pix_last_next_idx[4];
++static u32 vfe_pix_last_active_num[4];
++static u32 vfe_pix_last_seq[4];
+ 
+ static void vfe_pix_reset_debug_counters(struct vfe_device *vfe)
+@@ -284,6 +289,12 @@ static void vfe_pix_reset_debug_counters(struct vfe_device *vfe)
+ 	vfe_pix_last_wm_addr[id][1] = 0;
+ 	vfe_pix_last_wm_inc[id][0] = 0;
+ 	vfe_pix_last_wm_inc[id][1] = 0;
++	vfe_pix_last_prog_idx[id][0] = 0xffffffff;
++	vfe_pix_last_prog_idx[id][1] = 0xffffffff;
++	vfe_pix_last_ready_idx[id] = 0xffffffff;
++	vfe_pix_last_next_idx[id] = 0xffffffff;
++	vfe_pix_last_active_num[id] = 0;
++	vfe_pix_last_seq[id] = 0;
+ }
+ 
+ static void vfe_pix_maybe_log_stall(struct vfe_device *vfe, u32 irq0, u32 irq1,
+@@ -331,6 +342,12 @@ static void vfe_pix_maybe_log_stall(struct vfe_device *vfe, u32 irq0, u32 irq1,
+ 		vfe_pix_last_wm_addr[id][1], vfe_pix_last_wm_inc[id][1],
+ 		readl_relaxed(vfe->base + VFE_BUS_WM_STATUS1(4)),
+ 		vfe_pix_wm_done_mask[id]);
++
++	dev_warn_ratelimited(vfe->camss->dev,
++		"vfe%u pix rotation ready=%u next=%u prog3=%u prog4=%u active=%u seq=%u\n",
++		id, vfe_pix_last_ready_idx[id], vfe_pix_last_next_idx[id],
++		vfe_pix_last_prog_idx[id][0], vfe_pix_last_prog_idx[id][1],
++		vfe_pix_last_active_num[id], vfe_pix_last_seq[id]);
+ }
+ 
+ static inline void vfe_reg_set(struct vfe_device *vfe, u32 reg, u32 set_bits)
+@@ -1149,6 +1167,12 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 		goto out_unlock;
+ 	}
+ 
++	if (line->id == VFE_LINE_PIX && vfe->id < ARRAY_SIZE(vfe_pix_last_ready_idx)) {
++		vfe_pix_last_ready_idx[vfe->id] = ready_buf->vb.vb2_buf.index;
++		vfe_pix_last_active_num[vfe->id] = output->gen2.active_num;
++		vfe_pix_last_seq[vfe->id] = output->sequence;
++	}
++
+ 	ready_buf->vb.vb2_buf.timestamp = ts;
+ 	ready_buf->vb.sequence = output->sequence++;
+ 
+@@ -1158,6 +1182,14 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 	output->buf[index] = vfe_buf_get_pending(output);
+ 
+ 	if (output->buf[index]) {
++		if (line->id == VFE_LINE_PIX &&
++		    vfe->id < ARRAY_SIZE(vfe_pix_last_next_idx)) {
++			vfe_pix_last_next_idx[vfe->id] =
++				output->buf[index]->vb.vb2_buf.index;
++			for (i = 0; i < output->wm_num && i < 2; i++)
++				vfe_pix_last_prog_idx[vfe->id][i] =
++					output->buf[index]->vb.vb2_buf.index;
++		}
+ 		for (i = 0; i < output->wm_num; i++)
+ 			vfe_wm_update(vfe, output->wm_idx[i],
+ 				      output->buf[index]->addr[i], line);
+diff --git a/drivers/media/platform/qcom/camss/camss-video.c b/drivers/media/platform/qcom/camss/camss-video.c
+--- a/drivers/media/platform/qcom/camss/camss-video.c
++++ b/drivers/media/platform/qcom/camss/camss-video.c
+@@ -171,6 +171,17 @@ static int video_buf_init(struct vb2_buffer *vb)
+ 				format->plane_fmt[0].bytesperline *
+ 				format->height;
+ 
++	if (video->line_based &&
++	    (format->pixelformat == V4L2_PIX_FMT_NV12 ||
++	     format->pixelformat == V4L2_PIX_FMT_NV21 ||
++	     format->pixelformat == V4L2_PIX_FMT_NV16 ||
++	     format->pixelformat == V4L2_PIX_FMT_NV61))
++		dev_info(video->camss->dev,
++			 "%s pix buf%u addr0=%pad addr1=%pad size0=%u bpl=%u height=%u\n",
++			 video->vdev.name, vb->index, &buffer->addr[0],
++			 &buffer->addr[1], format->plane_fmt[0].sizeimage,
++			 format->plane_fmt[0].bytesperline, format->height);
++
+ 	return 0;
+ }
+ 

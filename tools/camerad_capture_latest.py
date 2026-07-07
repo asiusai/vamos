@@ -65,6 +65,8 @@ HOST_RAW_IMAGES = {
 HOST_MONTAGE = Path("/tmp/asius-cams-latest.jpg")
 REMOTE_LOG = "/tmp/camerad_dual_latest.log"
 LOCAL_LOG = "latest-camerad-dual.log"
+REMOTE_VIPC_STATS = "/tmp/camerad_vipc_stats_latest.json"
+LOCAL_VIPC_STATS = "latest-camerad-vipc-stats.json"
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -81,19 +83,20 @@ def camera_list(selection: str) -> list[str]:
 
 def remote_env(selection: str, exposure_lines: int, target_grey: float, chroma_scale: float,
                preview_saturation: float, preview_median: float, pix_ioctl: bool,
-               rdi: bool) -> list[str]:
+               rdi: bool, debug_frames: bool, extra_env: list[str]) -> list[str]:
   selected = camera_list(selection)
   env = [
     "ASIUS=1",
     "ASIUS_CAMERA_ONE=1",
     "LOGPRINT=debug",
-    "DEBUG_FRAMES=1",
     f"ASIUS_CAM_TARGET_GREY={target_grey}",
     f"ASIUS_CAM_CHROMA_SCALE={chroma_scale}",
     f"ASIUS_CAM_START_EXPOSURE_LINES={exposure_lines}",
     f"ASIUS_SNAPSHOT_SATURATION={preview_saturation}",
     f"ASIUS_SNAPSHOT_TARGET_MEDIAN={preview_median}",
   ]
+  if debug_frames:
+    env.append("DEBUG_FRAMES=1")
   if rdi:
     env.append("ASIUS_CAM_USE_RDI=1")
   if pix_ioctl:
@@ -104,25 +107,27 @@ def remote_env(selection: str, exposure_lines: int, target_grey: float, chroma_s
     env.append("DISABLE_ROAD=1")
   if "cam3" not in selected:
     env.append("DISABLE_WIDE_ROAD=1")
+  env.extend(extra_env)
   return env
 
 
 def remote_script(selection: str, settle: float, exposure_lines: int, target_grey: float,
                   chroma_scale: float, preview_saturation: float, preview_median: float,
-                  pix_ioctl: bool, raw_debug: bool, rdi: bool) -> str:
+                  pix_ioctl: bool, raw_debug: bool, rdi: bool, monitor_duration: float,
+                  debug_frames: bool, extra_env: list[str]) -> str:
   cameras = camera_list(selection)
   targets_literal = repr(cameras)
   raw_images_literal = repr(REMOTE_RAW_IMAGES)
   raw_stats_literal = repr(REMOTE_RAW_STATS)
   env_words = " ".join(shlex.quote(word) for word in remote_env(
-    selection, exposure_lines, target_grey, chroma_scale, preview_saturation, preview_median, pix_ioctl, rdi))
+    selection, exposure_lines, target_grey, chroma_scale, preview_saturation, preview_median, pix_ioctl, rdi, debug_frames, extra_env))
   return textwrap.dedent(f"""\
     set -e
     cd /data/openpilot
     rm -f /tmp/asius-cam1-latest.jpg /tmp/asius-cam2-latest.jpg /tmp/asius-cam3-latest.jpg \\
       /tmp/asius-cam1-raw.jpg /tmp/asius-cam2-raw.jpg /tmp/asius-cam3-raw.jpg \\
       /tmp/asius-cam1-raw-stats.json /tmp/asius-cam2-raw-stats.json /tmp/asius-cam3-raw-stats.json \\
-      {REMOTE_LOG} /tmp/camerad_dual_latest.pid
+      {REMOTE_LOG} {REMOTE_VIPC_STATS} /tmp/camerad_dual_latest.pid
     pkill -x camerad 2>/dev/null || true
     pkill -f '/tmp/camerad-cache' 2>/dev/null || true
     export {env_words}
@@ -135,6 +140,8 @@ def remote_script(selection: str, settle: float, exposure_lines: int, target_gre
     }}
     trap cleanup EXIT
     sleep 1
+    sleep {settle:.3f}
+    sleep {monitor_duration:.3f}
     /usr/local/venv/bin/python - <<'PY'
     import json
     import time
@@ -201,8 +208,8 @@ def remote_script(selection: str, settle: float, exposure_lines: int, target_gre
     if missing:
       print("missing streams: " + ",".join(missing))
 
-    time.sleep({settle:.3f})
     saved = {{}}
+    capture_stats = {{}}
     frame_deadline = time.monotonic() + 10.0
     while len(saved) < len(clients) and time.monotonic() < frame_deadline:
       progressed = False
@@ -213,19 +220,31 @@ def remote_script(selection: str, settle: float, exposure_lines: int, target_gre
         buf = client.recv(100)
         if buf is None:
           continue
+
+        frame_id = int(client.frame_id)
         img = extract_image(buf)
         if raw_debug:
           Image.fromarray(img).save(raw_images[key], "JPEG", quality=95)
-          stats = frame_stats(buf, img)
-          stats["frame_id"] = int(client.frame_id)
+          raw_frame_stats = frame_stats(buf, img)
+          raw_frame_stats["frame_id"] = frame_id
           with open(raw_stats[key], "w") as f:
-            json.dump(stats, f, indent=2, sort_keys=True)
+            json.dump(raw_frame_stats, f, indent=2, sort_keys=True)
         jpeg_write(out, img)
         saved[key] = True
+        capture_stats[key] = {{
+          "saved_frame_id": frame_id,
+          "width": int(buf.width),
+          "height": int(buf.height),
+          "stride": int(buf.stride),
+        }}
         progressed = True
-        print(f"saved {{key}} {{label}} {{out}} shape={{img.shape}} frame_id={{client.frame_id}}")
+        print(f"saved {{key}} {{label}} {{out}} shape={{img.shape}} frame_id={{frame_id}}")
       if not progressed:
         time.sleep(0.02)
+
+    with open("{REMOTE_VIPC_STATS}", "w") as f:
+      json.dump(capture_stats, f, indent=2, sort_keys=True)
+
     for key in selected:
       if key in clients and key not in saved:
         print(f"no frame from {{key}} {{clients[key][0]}}")
@@ -302,17 +321,21 @@ def main() -> int:
   parser.add_argument("--exposure-lines", type=int, default=1000, help="initial OS04 exposure lines")
   parser.add_argument("--target-grey", type=float, default=0.44, help="OS04 AE target grey fraction")
   parser.add_argument("--chroma-scale", type=float, default=2.05, help="OS04 software debayer chroma scale")
-  parser.add_argument("--preview-saturation", type=float, default=1.20, help="JPEG preview saturation boost")
+  parser.add_argument("--preview-saturation", type=float, default=1.00, help="JPEG preview saturation boost")
   parser.add_argument("--preview-median", type=float, default=115.0, help="JPEG preview target median luma")
   parser.add_argument("--pix-ioctl", action="store_true", help="use the experimental liberation-day-style VFE userspace ioctl path")
   parser.add_argument("--rdi", action="store_true", help="use the RDI raw capture + software debayer fallback path")
   parser.add_argument("--raw-debug", action="store_true", help="save unenhanced NV12-derived JPEGs and JSON stats beside the normal preview JPEG")
+  parser.add_argument("--monitor-duration", type=float, default=5.0, help="seconds to keep camerad running before the one-shot JPEG capture")
+  parser.add_argument("--camerad-debug-frames", action="store_true", help="make camerad print one log line per dequeued frame")
+  parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="extra remote camerad environment variable")
   args = parser.parse_args()
 
   out_dir = Path(args.out_dir)
   script = remote_script(args.cam, args.settle, args.exposure_lines, args.target_grey,
                          args.chroma_scale, args.preview_saturation, args.preview_median,
-                         args.pix_ioctl, args.raw_debug, args.rdi)
+                         args.pix_ioctl, args.raw_debug, args.rdi, args.monitor_duration,
+                         args.camerad_debug_frames, args.env)
   run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "bash", "-s"], input=script, text=True)
 
   cameras = camera_list(args.cam)
@@ -351,6 +374,11 @@ def main() -> int:
   pull_file(REMOTE_LOG, local_log)
   print(f"log: remote={REMOTE_LOG} local={local_log} bytes={local_log.stat().st_size}")
   summarize_fps(local_log)
+  stats_local = out_dir / LOCAL_VIPC_STATS
+  stats_present = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "test", "-s", REMOTE_VIPC_STATS], check=False)
+  if stats_present.returncode == 0:
+    pull_file(REMOTE_VIPC_STATS, stats_local)
+    print(f"vipc_stats: remote={REMOTE_VIPC_STATS} local={stats_local} bytes={stats_local.stat().st_size}")
   return 0
 
 

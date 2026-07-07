@@ -1,0 +1,16 @@
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+index 6d85f476b..3944f1bb8 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -691,8 +691,10 @@ static void vfe_wm_start(struct vfe_device *vfe, u8 wm, struct vfe_line *line)
+ 		writel_relaxed(1, vfe->base + VFE_BUS_WM_FRAMEDROP_PATTERN(wm));
+ 
+ 		/* Enable WM: QCOM_PLAIN mode for processed output */
++		/* PIX port 0 carries Y/luma and PIX port 1 carries UV/chroma. */
+ 		val = 1 << WM_CFG_EN |
+-		      MODE_QCOM_PLAIN << WM_CFG_MODE;
++		      MODE_QCOM_PLAIN << WM_CFG_MODE |
++		      (wm_idx == 0 ? 0 : 1) << WM_CFG_PORT_SEL;
+ 		writel_relaxed(val, vfe->base + VFE_BUS_WM_CFG(wm));
+ 	} else {
+ 		val = WM_BUFFER_DEFAULT_WIDTH;

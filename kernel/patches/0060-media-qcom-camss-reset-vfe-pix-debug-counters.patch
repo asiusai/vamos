@@ -1,0 +1,57 @@
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+index 1dd4983be..6d85f476b 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -257,11 +257,32 @@ static u32 vfe_pix_dual_count[4];
+ static u32 vfe_pix_wm3_count[4];
+ static u32 vfe_pix_wm4_count[4];
+ static u32 vfe_pix_last_warn_sof[4];
+ static u32 vfe_pix_last_wm_addr[4][2];
+ static u32 vfe_pix_last_wm_inc[4][2];
+ 
++static void vfe_pix_reset_debug_counters(struct vfe_device *vfe)
++{
++	unsigned int id = vfe->id;
++
++	if (id >= ARRAY_SIZE(vfe_pix_wm_done_mask))
++		return;
++
++	vfe_pix_wm_done_mask[id] = 0;
++	vfe_pix_sof_count[id] = 0;
++	vfe_pix_reg_count[id] = 0;
++	vfe_pix_comp_count[id] = 0;
++	vfe_pix_dual_count[id] = 0;
++	vfe_pix_wm3_count[id] = 0;
++	vfe_pix_wm4_count[id] = 0;
++	vfe_pix_last_warn_sof[id] = 0;
++	vfe_pix_last_wm_addr[id][0] = 0;
++	vfe_pix_last_wm_addr[id][1] = 0;
++	vfe_pix_last_wm_inc[id][0] = 0;
++	vfe_pix_last_wm_inc[id][1] = 0;
++}
++
+ static void vfe_pix_maybe_log_stall(struct vfe_device *vfe, u32 irq0, u32 irq1,
+ 				    u32 bus0, u32 bus1, u32 bus2)
+ {
+ 	unsigned int id = vfe->id;
+ 	u32 sof_gap;
+@@ -972,8 +993,7 @@ static int vfe_enable(struct vfe_line *line)
+ 		vfe_pix_configure_isp(vfe, in_w, in_h, out_w, out_h);
+ 		vfe_pix_set_crop_wm(vfe, line->output.wm_idx[0],
+ 				    line->output.wm_idx[1]);
+-		if (vfe->id < ARRAY_SIZE(vfe_pix_wm_done_mask))
+-			vfe_pix_wm_done_mask[vfe->id] = 0;
++		vfe_pix_reset_debug_counters(vfe);
+ 
+ 		/* Send reg_update to latch ISP config before first frame */
+ 		vfe_reg_update(vfe, VFE_LINE_PIX);
+@@ -1366,8 +1386,7 @@ static int vfe_17x_start(struct vfe_device *vfe, struct vfe_line *line)
+ 		struct vfe_output *output = &line->output;
+ 		int i;
+ 
+-		if (vfe->id < ARRAY_SIZE(vfe_pix_wm_done_mask))
+-			vfe_pix_wm_done_mask[vfe->id] = 0;
++		vfe_pix_reset_debug_counters(vfe);
+ 
+ 		for (i = 0; i < output->wm_num; i++)
+ 			vfe->res->hw_ops->vfe_wm_start(vfe, output->wm_idx[i], line);
