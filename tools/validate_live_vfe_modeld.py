@@ -19,8 +19,14 @@ SSH_OPTS = [
   "-i", os.path.expanduser("~/.ssh/comma_setup"),
   "-o", "StrictHostKeyChecking=no",
   "-o", "UserKnownHostsFile=/dev/null",
+  "-o", "GlobalKnownHostsFile=/dev/null",
   "-o", "LogLevel=ERROR",
+  "-o", "BatchMode=yes",
+  "-o", "ConnectTimeout=8",
+  "-o", "ServerAliveInterval=5",
+  "-o", "ServerAliveCountMax=2",
 ]
+DEFAULT_PULL_TIMEOUT = 30.0
 
 REMOTE_CAMERAD_LOG = "/tmp/asius_live_vfe_modeld_camerad.log"
 REMOTE_MODELD_LOG = "/tmp/asius_live_vfe_modeld_modeld.log"
@@ -56,7 +62,7 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
   return subprocess.run(cmd, check=True, **kwargs)
 
 
-def remote_env(extra_env: list[str]) -> list[str]:
+def remote_env(target_grey: float, extra_env: list[str]) -> list[str]:
   env = [
     "ASIUS=1",
     "ASIUS_CAMERA_ONE=1",
@@ -64,16 +70,17 @@ def remote_env(extra_env: list[str]) -> list[str]:
     "DEBUG_FRAMES=1",
     "DISABLE_DRIVER=1",
     "VISIONBUF_USE_DMA_HEAP=1",
-    "ASIUS_CAM_TARGET_GREY=0.48",
   ]
+  if target_grey > 0.0:
+    env.append(f"ASIUS_CAM_TARGET_GREY={target_grey}")
   env.extend(extra_env)
   return env
 
 
-def remote_script(openpilot_dir: str, duration: float, settle: float, extra_env: list[str],
+def remote_script(openpilot_dir: str, duration: float, settle: float, target_grey: float, extra_env: list[str],
                   isolate: bool, ignore_initial_model_frames: int,
                   capture_dmesg: bool) -> str:
-  env_exports = " ".join(shlex.quote(e) for e in remote_env(extra_env))
+  env_exports = " ".join(shlex.quote(e) for e in remote_env(target_grey, extra_env))
   openpilot_dir_q = shlex.quote(openpilot_dir)
   capture_dmesg_value = "1" if capture_dmesg else "0"
   isolate_cmds = textwrap.dedent("""\
@@ -284,9 +291,17 @@ def remote_script(openpilot_dir: str, duration: float, settle: float, extra_env:
   """)
 
 
-def pull(remote: str, local: Path) -> bool:
-  result = subprocess.run(["scp", *SSH_OPTS, f"comma@{NCM_IP}:{remote}", str(local)], check=False)
-  return result.returncode == 0 and local.exists()
+def pull(remote: str, local: Path, timeout: float = DEFAULT_PULL_TIMEOUT) -> bool:
+  local.parent.mkdir(parents=True, exist_ok=True)
+  cmd = ["scp", *SSH_OPTS, f"comma@{NCM_IP}:{remote}", str(local)]
+  for attempt in range(1, 4):
+    try:
+      subprocess.run(cmd, check=True, timeout=timeout)
+      return local.exists()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+      if attempt == 3:
+        return False
+  return False
 
 
 def forbidden_dmesg_matches(dmesg_text: str) -> list[dict[str, str]]:
@@ -308,6 +323,7 @@ def main() -> int:
   parser.add_argument("--out-dir", default="/tmp/dragon_os04_bench/live-vfe-modeld")
   parser.add_argument("--duration", type=float, default=25.0)
   parser.add_argument("--settle", type=float, default=7.0)
+  parser.add_argument("--target-grey", type=float, default=0.0, help="OS04 AE target grey fraction; 0 uses camerad defaults")
   parser.add_argument("--min-model-frames", type=int, default=20)
   parser.add_argument("--min-camera-frames", type=int, default=20)
   parser.add_argument("--max-model-exec-ms", type=float, default=80.0)
@@ -319,14 +335,21 @@ def main() -> int:
   parser.add_argument("--max-dmesg-matches", type=int, default=0,
                       help="maximum forbidden dmesg matches allowed when --check-dmesg is set")
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
+  parser.add_argument("--pull-timeout", type=float, default=DEFAULT_PULL_TIMEOUT,
+                      help="seconds allowed for each SSH/SCP artifact pull before retrying")
   parser.add_argument("--keep-existing-openpilot", action="store_true",
                       help="do not stop an already-running manager/openpilot stack before testing")
   args = parser.parse_args()
+  if args.target_grey < 0.0:
+    parser.error("--target-grey must be non-negative")
+  if args.pull_timeout <= 0.0:
+    parser.error("--pull-timeout must be positive")
 
   out_dir = Path(args.out_dir)
   out_dir.mkdir(parents=True, exist_ok=True)
 
   script = remote_script(args.openpilot_dir, args.duration, args.settle,
+                         args.target_grey,
                          args.env, not args.keep_existing_openpilot,
                          args.ignore_initial_model_frames,
                          args.check_dmesg)
@@ -336,11 +359,11 @@ def main() -> int:
   camerad_log_path = out_dir / LOCAL_CAMERAD_LOG
   modeld_log_path = out_dir / LOCAL_MODELD_LOG
   dmesg_log_path = out_dir / LOCAL_DMESG_LOG
-  pull(REMOTE_SUMMARY, summary_path)
-  pull(REMOTE_CAMERAD_LOG, camerad_log_path)
-  pull(REMOTE_MODELD_LOG, modeld_log_path)
+  pull(REMOTE_SUMMARY, summary_path, args.pull_timeout)
+  pull(REMOTE_CAMERAD_LOG, camerad_log_path, args.pull_timeout)
+  pull(REMOTE_MODELD_LOG, modeld_log_path, args.pull_timeout)
   if args.check_dmesg:
-    pull(REMOTE_DMESG_LOG, dmesg_log_path)
+    pull(REMOTE_DMESG_LOG, dmesg_log_path, args.pull_timeout)
 
   if result.returncode != 0:
     return result.returncode
