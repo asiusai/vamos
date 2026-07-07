@@ -158,7 +158,7 @@ def main() -> int:
     summary["modeld"]["returncode"] = modeld_rc
     modeld_json = load_json(modeld_dir / "live-vfe-modeld-summary.json")
     summary["modeld"]["summary_json"] = str(modeld_dir / "live-vfe-modeld-summary.json")
-    summary["modeld"]["passed"] = modeld_rc == 0
+    summary["modeld"]["passed"] = modeld_rc == 0 and modeld_json is not None
     if modeld_json:
       summary["modeld"]["road_frames"] = modeld_json.get("roadCameraState", {}).get("frames")
       summary["modeld"]["wide_frames"] = modeld_json.get("wideRoadCameraState", {}).get("frames")
@@ -170,9 +170,24 @@ def main() -> int:
     else:
       summary["modeld"]["failures"] = ["missing modeld summary"]
 
-  snapshot_ok = args.skip_snapshot or snapshot_rc == 0
-  modeld_ok = args.skip_modeld or modeld_rc == 0
-  summary["passed"] = snapshot_ok and modeld_ok
+  gate_failures: list[str] = []
+  if not args.skip_snapshot:
+    if snapshot_rc != 0:
+      gate_failures.append(f"snapshot command failed with returncode {snapshot_rc}")
+    if not summary["snapshot"].get("passed", False):
+      gate_failures.append("snapshot summary did not pass")
+    if not summary["snapshot"].get("hardware_path_passed", False):
+      gate_failures.append("snapshot hardware path gate did not pass")
+    if not summary["snapshot"].get("image_quality_passed", False):
+      gate_failures.append("snapshot image quality gate did not pass")
+  if not args.skip_modeld:
+    if modeld_rc != 0:
+      gate_failures.append(f"modeld command failed with returncode {modeld_rc}")
+    if not summary["modeld"].get("passed", False):
+      gate_failures.append("modeld summary did not pass")
+
+  summary["gate_failures"] = gate_failures
+  summary["passed"] = not gate_failures
   summary["note"] = (
     "A passing machine summary still needs a human visual check of "
     "/tmp/asius-cams-latest.jpg for the final daylight-road acceptance."
