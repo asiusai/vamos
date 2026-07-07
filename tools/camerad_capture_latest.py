@@ -23,7 +23,12 @@ SSH_OPTS = [
   "-o", "UserKnownHostsFile=/dev/null",
   "-o", "GlobalKnownHostsFile=/dev/null",
   "-o", "LogLevel=ERROR",
+  "-o", "BatchMode=yes",
+  "-o", "ConnectTimeout=8",
+  "-o", "ServerAliveInterval=5",
+  "-o", "ServerAliveCountMax=2",
 ]
+DEFAULT_PULL_TIMEOUT = 30.0
 
 REMOTE_IMAGES = {
   "cam1": "/tmp/asius-cam1-latest.jpg",
@@ -436,14 +441,14 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
   """)
 
 
-def pull_file(remote: str, local: Path) -> None:
+def pull_file(remote: str, local: Path, timeout: float = DEFAULT_PULL_TIMEOUT) -> None:
   local.parent.mkdir(parents=True, exist_ok=True)
   cmd = ["scp", *SSH_OPTS, f"comma@{NCM_IP}:{remote}", str(local)]
   for attempt in range(1, 4):
     try:
-      run(cmd)
+      run(cmd, timeout=timeout)
       return
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
       if attempt == 3:
         raise
       time.sleep(1.0)
@@ -529,11 +534,14 @@ def main() -> int:
   parser.add_argument("--validate-quality-profile", choices=("bench", "road", "road-spatial"), default="bench", help="image-stat threshold profile passed to validate_camerad_vfe.py")
   parser.add_argument("--check-dmesg", action="store_true", help="capture dmesg during the camerad run; with --validate-vfe, fail on CAMSS/VFE errors, stalls, or buffer-address spam")
   parser.add_argument("--validate-max-dmesg-matches", type=int, default=0, help="maximum forbidden dmesg matches allowed when --validate-vfe --check-dmesg is set")
+  parser.add_argument("--pull-timeout", type=float, default=DEFAULT_PULL_TIMEOUT, help="seconds allowed for each SSH/SCP artifact pull before retrying")
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="extra remote camerad environment variable")
   args = parser.parse_args()
 
   if args.rdi:
     parser.error("--rdi was removed from One camerad on the hardware VFE branch; use tools/camss_rdi_probe.c for raw RDI probing")
+  if args.pull_timeout <= 0.0:
+    parser.error("--pull-timeout must be positive")
 
   if args.validate_vfe:
     args.raw_debug = True
@@ -555,7 +563,7 @@ def main() -> int:
     if present.returncode != 0:
       print(f"{cam}: no remote image at {REMOTE_IMAGES[cam]}")
       continue
-    pull_file(REMOTE_IMAGES[cam], local)
+    pull_file(REMOTE_IMAGES[cam], local, args.pull_timeout)
     pulled.append(cam)
     print(f"{cam}: remote={REMOTE_IMAGES[cam]} local={local} bytes={local.stat().st_size}")
 
@@ -572,26 +580,26 @@ def main() -> int:
       raw_present = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "test", "-s", REMOTE_RAW_IMAGES[cam]], check=False)
       stats_present = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "test", "-s", REMOTE_RAW_STATS[cam]], check=False)
       if raw_present.returncode == 0:
-        pull_file(REMOTE_RAW_IMAGES[cam], raw_local)
+        pull_file(REMOTE_RAW_IMAGES[cam], raw_local, args.pull_timeout)
         print(f"{cam}: raw_remote={REMOTE_RAW_IMAGES[cam]} raw_local={raw_local} bytes={raw_local.stat().st_size}")
       if stats_present.returncode == 0:
-        pull_file(REMOTE_RAW_STATS[cam], raw_stats_local)
+        pull_file(REMOTE_RAW_STATS[cam], raw_stats_local, args.pull_timeout)
         print(f"{cam}: stats_remote={REMOTE_RAW_STATS[cam]} stats_local={raw_stats_local} bytes={raw_stats_local.stat().st_size}")
     refresh_host_raw_images(pulled, out_dir)
 
   local_log = out_dir / LOCAL_LOG
-  pull_file(REMOTE_LOG, local_log)
+  pull_file(REMOTE_LOG, local_log, args.pull_timeout)
   print(f"log: remote={REMOTE_LOG} local={local_log} bytes={local_log.stat().st_size}")
   summarize_fps(local_log)
   stats_local = out_dir / LOCAL_VIPC_STATS
   stats_present = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "test", "-s", REMOTE_VIPC_STATS], check=False)
   if stats_present.returncode == 0:
-    pull_file(REMOTE_VIPC_STATS, stats_local)
+    pull_file(REMOTE_VIPC_STATS, stats_local, args.pull_timeout)
     print(f"vipc_stats: remote={REMOTE_VIPC_STATS} local={stats_local} bytes={stats_local.stat().st_size}")
   cpu_stats_local = out_dir / LOCAL_CPU_STATS
   cpu_stats_present = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "test", "-s", REMOTE_CPU_STATS], check=False)
   if cpu_stats_present.returncode == 0:
-    pull_file(REMOTE_CPU_STATS, cpu_stats_local)
+    pull_file(REMOTE_CPU_STATS, cpu_stats_local, args.pull_timeout)
     try:
       cpu_stats = json.loads(cpu_stats_local.read_text())
       cpu_pct = cpu_stats.get("single_core_cpu_pct")
@@ -603,7 +611,7 @@ def main() -> int:
     dmesg_log_local = out_dir / LOCAL_DMESG_LOG
     dmesg_present = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "test", "-e", REMOTE_DMESG_LOG], check=False)
     if dmesg_present.returncode == 0:
-      pull_file(REMOTE_DMESG_LOG, dmesg_log_local)
+      pull_file(REMOTE_DMESG_LOG, dmesg_log_local, args.pull_timeout)
       print(f"dmesg: remote={REMOTE_DMESG_LOG} local={dmesg_log_local} bytes={dmesg_log_local.stat().st_size}")
     else:
       print(f"dmesg: no remote log at {REMOTE_DMESG_LOG}")
