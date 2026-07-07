@@ -10,6 +10,7 @@ import shlex
 import statistics
 import subprocess
 import textwrap
+import time
 from pathlib import Path
 
 
@@ -257,7 +258,15 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
 
 def pull_file(remote: str, local: Path) -> None:
   local.parent.mkdir(parents=True, exist_ok=True)
-  run(["scp", *SSH_OPTS, f"comma@{NCM_IP}:{remote}", str(local)])
+  cmd = ["scp", *SSH_OPTS, f"comma@{NCM_IP}:{remote}", str(local)]
+  for attempt in range(1, 4):
+    try:
+      run(cmd)
+      return
+    except subprocess.CalledProcessError:
+      if attempt == 3:
+        raise
+      time.sleep(1.0)
 
 
 def summarize_fps(log_path: Path) -> None:
