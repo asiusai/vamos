@@ -129,6 +129,20 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
   openpilot_dir_q = shlex.quote(openpilot_dir)
   return textwrap.dedent(f"""\
     set -e
+    lock_dir=/tmp/camerad_capture_latest.lock
+    if ! mkdir "$lock_dir" 2>/dev/null; then
+      echo "another camerad_capture_latest.py run is active on this Dragon" >&2
+      exit 75
+    fi
+    pid=""
+    cleanup() {{
+      if [ -n "$pid" ]; then
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+      fi
+      rmdir "$lock_dir" 2>/dev/null || true
+    }}
+    trap cleanup EXIT
     cd {openpilot_dir_q}
     rm -f /tmp/asius-cam1-latest.jpg /tmp/asius-cam2-latest.jpg /tmp/asius-cam3-latest.jpg \\
       /tmp/asius-cam1-raw.jpg /tmp/asius-cam2-raw.jpg /tmp/asius-cam3-raw.jpg \\
@@ -140,11 +154,6 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
     ./system/camerad/camerad > {REMOTE_LOG} 2>&1 &
     pid=$!
     echo "$pid" > /tmp/camerad_dual_latest.pid
-    cleanup() {{
-      kill "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-    }}
-    trap cleanup EXIT
     sleep 1
     sleep {settle:.3f}
     /usr/local/venv/bin/python - <<'PY'
@@ -485,7 +494,7 @@ def main() -> int:
       print(f"cpu_stats: remote={REMOTE_CPU_STATS} local={cpu_stats_local} bytes={cpu_stats_local.stat().st_size}")
   if args.validate_vfe:
     validator = Path(__file__).with_name("validate_camerad_vfe.py")
-    run([
+    ret = subprocess.run([
       sys.executable,
       str(validator),
       str(out_dir),
@@ -497,6 +506,8 @@ def main() -> int:
       "--require-cpu-stats",
       "--max-camerad-cpu-pct", str(args.validate_max_cpu_pct),
     ])
+    if ret.returncode != 0:
+      return ret.returncode
   return 0
 
 

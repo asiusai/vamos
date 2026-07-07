@@ -31,7 +31,7 @@ FATAL_LOG_PATTERNS = [
   "falling back to RDI",
   "NV12 sw debayer",
   "VFE PIX unavailable",
-  "V4L2 MMAP CPU-copy path",
+  "falling back to V4L2 MMAP CPU-copy path",
 ]
 
 QUALITY_PROFILES = {
