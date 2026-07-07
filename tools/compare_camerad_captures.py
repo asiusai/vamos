@@ -146,6 +146,7 @@ def main() -> int:
         "uvc_med_off": max(abs(u_center - 128.0), abs(v_center - 128.0)),
         "mean_chroma": stats["mean_chroma"],
         "clip_hi": stats["luma_clip_hi_frac"],
+        "tile_clip": stats.get("tile_max_luma_clip_hi_frac", -1.0),
         "road_fails": ",".join(failures) if failures else "pass",
         "score": score,
       })
@@ -165,6 +166,7 @@ def main() -> int:
     ("uvc_med_off", "uvc_off"),
     ("mean_chroma", "chroma"),
     ("clip_hi", "clip_hi"),
+    ("tile_clip", "tile_clip"),
     ("road_fails", "road"),
     ("score", "score"),
   ]

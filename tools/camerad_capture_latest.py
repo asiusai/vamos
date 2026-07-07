@@ -244,7 +244,7 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
       dy = np.abs(np.diff(plane_i, axis=0)).mean()
       return float((dx + dy) / 2.0)
 
-    def tile_frame_stats(y, u, v, rgb, rows=5, cols=5):
+    def tile_frame_stats(y, u, v, rgb, luma, rows=5, cols=5):
       tiles = []
       for row in range(rows):
         y0 = rgb.shape[0] * row // rows
@@ -258,6 +258,8 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
           ux1 = max(ux0 + 1, x1 // 2)
 
           rgb_tile = rgb[y0:y1, x0:x1].reshape(-1, 3).astype(np.float32)
+          y_tile = y[y0:y1, x0:x1]
+          luma_tile = luma[y0:y1, x0:x1]
           rgb_median = np.median(rgb_tile, axis=0)
           tile = dict(
             row=int(row),
@@ -266,7 +268,9 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
             y0=int(y0),
             x1=int(x1),
             y1=int(y1),
-            y_median=float(np.median(y[y0:y1, x0:x1])),
+            y_median=float(np.median(y_tile)),
+            y_clip_hi_frac=float((y_tile >= 250).mean()),
+            luma_clip_hi_frac=float((luma_tile >= 250.0).mean()),
             u_median=float(np.median(u[uy0:uy1, ux0:ux1])),
             v_median=float(np.median(v[uy0:uy1, ux0:ux1])),
             rgb_median=[float(x) for x in rgb_median],
@@ -280,6 +284,8 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
       v_medians = np.array([tile["v_median"] for tile in tiles], dtype=np.float32)
       rgb_spreads = np.array([tile["rgb_median_spread"] for tile in tiles], dtype=np.float32)
       uv_offsets = np.array([tile["uv_median_offset"] for tile in tiles], dtype=np.float32)
+      y_clip_hi_fracs = np.array([tile["y_clip_hi_frac"] for tile in tiles], dtype=np.float32)
+      luma_clip_hi_fracs = np.array([tile["luma_clip_hi_frac"] for tile in tiles], dtype=np.float32)
       return dict(
         tile_rows=int(rows),
         tile_cols=int(cols),
@@ -292,6 +298,10 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
         tile_p95_uv_median_offset=float(np.percentile(uv_offsets, 95.0)),
         tile_max_rgb_median_spread=float(rgb_spreads.max()),
         tile_p95_rgb_median_spread=float(np.percentile(rgb_spreads, 95.0)),
+        tile_max_y_clip_hi_frac=float(y_clip_hi_fracs.max()),
+        tile_p95_y_clip_hi_frac=float(np.percentile(y_clip_hi_fracs, 95.0)),
+        tile_max_luma_clip_hi_frac=float(luma_clip_hi_fracs.max()),
+        tile_p95_luma_clip_hi_frac=float(np.percentile(luma_clip_hi_fracs, 95.0)),
       )
 
     def frame_stats(buf, rgb):
@@ -345,7 +355,7 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
         "v_hf_abs_mean": highfreq_abs_mean(v),
       }}
       stats["uv_hf_abs_mean"] = float((stats["u_hf_abs_mean"] + stats["v_hf_abs_mean"]) / 2.0)
-      stats.update(tile_frame_stats(y, u, v, rgb))
+      stats.update(tile_frame_stats(y, u, v, rgb, luma))
       return stats
 
     clients = {{}}
