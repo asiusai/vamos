@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shlex
@@ -69,6 +70,8 @@ REMOTE_LOG = "/tmp/camerad_dual_latest.log"
 LOCAL_LOG = "latest-camerad-dual.log"
 REMOTE_VIPC_STATS = "/tmp/camerad_vipc_stats_latest.json"
 LOCAL_VIPC_STATS = "latest-camerad-vipc-stats.json"
+REMOTE_CPU_STATS = "/tmp/camerad_cpu_stats_latest.json"
+LOCAL_CPU_STATS = "latest-camerad-cpu-stats.json"
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -130,7 +133,7 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
     rm -f /tmp/asius-cam1-latest.jpg /tmp/asius-cam2-latest.jpg /tmp/asius-cam3-latest.jpg \\
       /tmp/asius-cam1-raw.jpg /tmp/asius-cam2-raw.jpg /tmp/asius-cam3-raw.jpg \\
       /tmp/asius-cam1-raw-stats.json /tmp/asius-cam2-raw-stats.json /tmp/asius-cam3-raw-stats.json \\
-      {REMOTE_LOG} {REMOTE_VIPC_STATS} /tmp/camerad_dual_latest.pid
+      {REMOTE_LOG} {REMOTE_VIPC_STATS} {REMOTE_CPU_STATS} /tmp/camerad_dual_latest.pid
     pkill -x camerad 2>/dev/null || true
     pkill -f '/tmp/camerad-cache' 2>/dev/null || true
     export {env_words}
@@ -144,7 +147,50 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
     trap cleanup EXIT
     sleep 1
     sleep {settle:.3f}
-    sleep {monitor_duration:.3f}
+    /usr/local/venv/bin/python - <<'PY'
+    import json
+    import os
+    import time
+
+    with open("/tmp/camerad_dual_latest.pid") as f:
+      pid = int(f.read().strip())
+    clk_tck = os.sysconf("SC_CLK_TCK")
+    monitor_duration = {monitor_duration:.6f}
+
+    def proc_ticks():
+      try:
+        with open("/proc/%d/stat" % pid) as f:
+          fields = f.read().split()
+        return int(fields[13]) + int(fields[14])
+      except (FileNotFoundError, IndexError, ValueError):
+        return None
+
+    start_wall = time.monotonic()
+    start_ticks = proc_ticks()
+    time.sleep(monitor_duration)
+    end_wall = time.monotonic()
+    end_ticks = proc_ticks()
+    wall_seconds = max(end_wall - start_wall, 0.0)
+    cpu_seconds = None
+    cpu_pct = None
+    available = start_ticks is not None and end_ticks is not None and wall_seconds > 0.0
+    if available:
+      cpu_seconds = max(end_ticks - start_ticks, 0) / float(clk_tck)
+      cpu_pct = 100.0 * cpu_seconds / wall_seconds
+
+    stats = dict(
+      pid=pid,
+      available=available,
+      wall_seconds=wall_seconds,
+      cpu_seconds=cpu_seconds,
+      single_core_cpu_pct=cpu_pct,
+      clk_tck=clk_tck,
+      start_ticks=start_ticks,
+      end_ticks=end_ticks,
+    )
+    with open("{REMOTE_CPU_STATS}", "w") as f:
+      json.dump(stats, f, indent=2, sort_keys=True)
+    PY
     /usr/local/venv/bin/python - <<'PY'
     import json
     import time
@@ -367,6 +413,7 @@ def main() -> int:
   parser.add_argument("--validate-min-frames", type=int, default=20, help="minimum VFE debug frames per selected camera when --validate-vfe is set")
   parser.add_argument("--validate-min-fps", type=float, default=18.0, help="minimum median VFE FPS when --validate-vfe is set")
   parser.add_argument("--validate-max-slow-gaps", type=int, default=0, help="maximum slow VFE frame gaps when --validate-vfe is set")
+  parser.add_argument("--validate-max-cpu-pct", type=float, default=10.0, help="maximum camerad single-core CPU percent during the monitor window when --validate-vfe is set")
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="extra remote camerad environment variable")
   args = parser.parse_args()
 
@@ -424,6 +471,17 @@ def main() -> int:
   if stats_present.returncode == 0:
     pull_file(REMOTE_VIPC_STATS, stats_local)
     print(f"vipc_stats: remote={REMOTE_VIPC_STATS} local={stats_local} bytes={stats_local.stat().st_size}")
+  cpu_stats_local = out_dir / LOCAL_CPU_STATS
+  cpu_stats_present = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "test", "-s", REMOTE_CPU_STATS], check=False)
+  if cpu_stats_present.returncode == 0:
+    pull_file(REMOTE_CPU_STATS, cpu_stats_local)
+    try:
+      cpu_stats = json.loads(cpu_stats_local.read_text())
+      cpu_pct = cpu_stats.get("single_core_cpu_pct")
+      cpu_text = "unavailable" if cpu_pct is None else f"{float(cpu_pct):.1f}%"
+      print(f"cpu_stats: remote={REMOTE_CPU_STATS} local={cpu_stats_local} camerad_cpu={cpu_text} bytes={cpu_stats_local.stat().st_size}")
+    except (OSError, ValueError, TypeError):
+      print(f"cpu_stats: remote={REMOTE_CPU_STATS} local={cpu_stats_local} bytes={cpu_stats_local.stat().st_size}")
   if args.validate_vfe:
     validator = Path(__file__).with_name("validate_camerad_vfe.py")
     run([
@@ -434,6 +492,8 @@ def main() -> int:
       "--min-frames", str(args.validate_min_frames),
       "--min-fps", str(args.validate_min_fps),
       "--max-slow-gaps", str(args.validate_max_slow_gaps),
+      "--require-cpu-stats",
+      "--max-camerad-cpu-pct", str(args.validate_max_cpu_pct),
     ])
   return 0
 
