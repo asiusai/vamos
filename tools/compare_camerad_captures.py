@@ -147,6 +147,8 @@ def main() -> int:
         "mean_chroma": stats["mean_chroma"],
         "clip_hi": stats["luma_clip_hi_frac"],
         "tile_clip": stats.get("tile_max_luma_clip_hi_frac", -1.0),
+        "clip_area10": stats.get("tile_luma_clip_hi_area_frac_gt_10pct", -1.0),
+        "clip_area50": stats.get("tile_luma_clip_hi_area_frac_gt_50pct", -1.0),
         "road_fails": ",".join(failures) if failures else "pass",
         "score": score,
       })
@@ -167,6 +169,8 @@ def main() -> int:
     ("mean_chroma", "chroma"),
     ("clip_hi", "clip_hi"),
     ("tile_clip", "tile_clip"),
+    ("clip_area10", "clip_a10"),
+    ("clip_area50", "clip_a50"),
     ("road_fails", "road"),
     ("score", "score"),
   ]

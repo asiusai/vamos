@@ -286,6 +286,7 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
       uv_offsets = np.array([tile["uv_median_offset"] for tile in tiles], dtype=np.float32)
       y_clip_hi_fracs = np.array([tile["y_clip_hi_frac"] for tile in tiles], dtype=np.float32)
       luma_clip_hi_fracs = np.array([tile["luma_clip_hi_frac"] for tile in tiles], dtype=np.float32)
+      tile_count = len(tiles)
       return dict(
         tile_rows=int(rows),
         tile_cols=int(cols),
@@ -302,6 +303,10 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
         tile_p95_y_clip_hi_frac=float(np.percentile(y_clip_hi_fracs, 95.0)),
         tile_max_luma_clip_hi_frac=float(luma_clip_hi_fracs.max()),
         tile_p95_luma_clip_hi_frac=float(np.percentile(luma_clip_hi_fracs, 95.0)),
+        tile_luma_clip_hi_count_gt_10pct=int((luma_clip_hi_fracs > 0.10).sum()),
+        tile_luma_clip_hi_count_gt_50pct=int((luma_clip_hi_fracs > 0.50).sum()),
+        tile_luma_clip_hi_area_frac_gt_10pct=float((luma_clip_hi_fracs > 0.10).sum() / tile_count),
+        tile_luma_clip_hi_area_frac_gt_50pct=float((luma_clip_hi_fracs > 0.50).sum() / tile_count),
       )
 
     def frame_stats(buf, rgb):
