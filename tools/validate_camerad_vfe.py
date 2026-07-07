@@ -341,6 +341,10 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
       "tile_p95_uv_median_offset": float(data.get("tile_p95_uv_median_offset", 999.0)),
       "tile_max_rgb_median_spread": float(data.get("tile_max_rgb_median_spread", 999.0)),
       "tile_p95_rgb_median_spread": float(data.get("tile_p95_rgb_median_spread", 999.0)),
+      "tile_max_y_clip_hi_frac": float(data.get("tile_max_y_clip_hi_frac", -1.0)),
+      "tile_p95_y_clip_hi_frac": float(data.get("tile_p95_y_clip_hi_frac", -1.0)),
+      "tile_max_luma_clip_hi_frac": float(data.get("tile_max_luma_clip_hi_frac", -1.0)),
+      "tile_p95_luma_clip_hi_frac": float(data.get("tile_p95_luma_clip_hi_frac", -1.0)),
     }
     if "tiles" in data:
       image_summary["tile_rows"] = int(data.get("tile_rows", 0))
