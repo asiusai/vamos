@@ -1,0 +1,68 @@
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -334,6 +334,7 @@ static void vfe_pix_maybe_log_stall(struct vfe_device *vfe, u32 irq0, u32 irq1,
+ 
+ 	{
+-		u32 completed = vfe_pix_wm4_count[id] + vfe_pix_recover_count[id];
++		u32 completed = vfe_pix_comp_count[id] + vfe_pix_wm4_count[id] +
++			vfe_pix_recover_count[id];
+ 
+ 		if (completed != vfe_pix_last_completed_count[id]) {
+ 			vfe_pix_last_completed_count[id] = completed;
+@@ -627,12 +628,14 @@ static void vfe_pix_configure_isp(struct vfe_device *vfe,
+ /*
+  * vfe_pix_set_crop_wm - Configure BUS write master mapping for PIX
+  *
+- * WM3/WM4 are the downstream VFE175 FULL output pair. Keep them in no-sync
+- * mode because programming the downstream dual comp/address-sync group on this
+- * mainline CAMSS path stops all WM completions on Dragon.
++ * WM3/WM4 are the downstream VFE170/175 FULL output pair. Downstream BUS v2
++ * uses a regular composite group for multi-plane FULL output and leaves the
++ * dual composite/address-sync path for dual-IFE synchronization.
+  */
+ static void vfe_pix_set_crop_wm(struct vfe_device *vfe, u8 wm_y, u8 wm_uv)
+ {
++	u32 mask = BIT(wm_y) | BIT(wm_uv);
++
+ 	writel_relaxed(0x16, vfe->base + VFE_BUS_WM_STATUS0(wm_y) + 0xa0);
+ 	writel_relaxed(0x16, vfe->base + VFE_BUS_WM_STATUS0(wm_uv) + 0xa0);
+ 
+@@ -640,5 +643,7 @@ static void vfe_pix_set_crop_wm(struct vfe_device *vfe, u8 wm_y, u8 wm_uv)
+ 		       vfe->base + VFE_BUS_WM_ADDR_SYNC_NO_SYNC);
+ 	readl_relaxed(vfe->base + VFE_BUS_WM_ADDR_SYNC_NO_SYNC);
++
++	writel_relaxed(mask, vfe->base + VFE_BUS_COMP_GROUP(0));
+ }
+ 
+ static void vfe_wm_start(struct vfe_device *vfe, u8 wm, struct vfe_line *line)
+@@ -1022,7 +1027,17 @@ static irqreturn_t vfe_isr(int irq, void *dev)
+ 
+ 	for (i = 0; i < MSM_VFE_COMPOSITE_IRQ_NUM; i++)
+ 		if (vfe_bus_status[0] & STATUS0_COMP_BUF_DONE(i)) {
++			struct vfe_output *output = &vfe->line[VFE_LINE_PIX].output;
++
+ 			if (id < 4 && i == 0)
+ 				vfe_pix_comp_count[id]++;
++			if (i == 0 && output->state == VFE_OUTPUT_ON &&
++			    output->wm_num >= 2) {
++				if (id < ARRAY_SIZE(vfe_pix_wm_done_mask))
++					vfe_pix_wm_done_mask[id] = 0;
++				vfe->isr_ops.wm_done(vfe, output->wm_idx[0]);
++				vfe->isr_ops.wm_done(vfe, output->wm_idx[1]);
++				continue;
++			}
+ 			vfe->isr_ops.comp_done(vfe, i);
+ 		}
+@@ -1033,6 +1048,11 @@ static irqreturn_t vfe_isr(int irq, void *dev)
+ 					vfe_pix_wm3_count[id]++;
+ 				if (id < 4 && wm == 4)
+ 					vfe_pix_wm4_count[id]++;
++				if ((wm == 3 || wm == 4) && id < 4 &&
++				    vfe_pix_comp_count[id] > 0) {
++					vfe_pix_wm_done_mask[id] = 0;
++					continue;
++				}
+ 				vfe->isr_ops.wm_done(vfe, wm);
+ 			}
+ 		}
