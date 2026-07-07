@@ -90,7 +90,7 @@ def camera_list(selection: str) -> list[str]:
 
 def remote_env(selection: str, exposure_lines: int, target_grey: float,
                preview_saturation: float, preview_median: float, pix_ioctl: bool,
-               debug_frames: bool, extra_env: list[str]) -> list[str]:
+               debug_frames: bool, log_awb: bool, log_ae: bool, extra_env: list[str]) -> list[str]:
   selected = camera_list(selection)
   env = [
     "ASIUS=1",
@@ -103,6 +103,10 @@ def remote_env(selection: str, exposure_lines: int, target_grey: float,
   ]
   if debug_frames:
     env.append("DEBUG_FRAMES=1")
+  if log_awb:
+    env.append("ASIUS_CAM_LOG_AWB=1")
+  if log_ae:
+    env.append("ASIUS_CAM_LOG_AE=1")
   if pix_ioctl:
     env.append("ASIUS_CAM_PIX_IOCTL=1")
   if "cam1" not in selected:
@@ -118,13 +122,15 @@ def remote_env(selection: str, exposure_lines: int, target_grey: float,
 def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_lines: int, target_grey: float,
                   preview_saturation: float, preview_median: float,
                   pix_ioctl: bool, raw_debug: bool, monitor_duration: float,
-                  debug_frames: bool, capture_dmesg: bool, extra_env: list[str]) -> str:
+                  debug_frames: bool, log_awb: bool, log_ae: bool,
+                  capture_dmesg: bool, extra_env: list[str]) -> str:
   cameras = camera_list(selection)
   targets_literal = repr(cameras)
   raw_images_literal = repr(REMOTE_RAW_IMAGES)
   raw_stats_literal = repr(REMOTE_RAW_STATS)
   env_words = " ".join(shlex.quote(word) for word in remote_env(
-    selection, exposure_lines, target_grey, preview_saturation, preview_median, pix_ioctl, debug_frames, extra_env))
+    selection, exposure_lines, target_grey, preview_saturation, preview_median,
+    pix_ioctl, debug_frames, log_awb, log_ae, extra_env))
   openpilot_dir_q = shlex.quote(openpilot_dir)
   capture_dmesg_value = "1" if capture_dmesg else "0"
   return textwrap.dedent(f"""\
@@ -512,6 +518,8 @@ def main() -> int:
   parser.add_argument("--raw-debug", action="store_true", help="save unenhanced NV12-derived JPEGs and JSON stats beside the normal preview JPEG")
   parser.add_argument("--monitor-duration", type=float, default=5.0, help="seconds to keep camerad running before the one-shot JPEG capture")
   parser.add_argument("--camerad-debug-frames", action="store_true", help="make camerad print one log line per dequeued frame")
+  parser.add_argument("--log-awb", action="store_true", help="log OS04 VFE AWB samples, including stable/no-op samples")
+  parser.add_argument("--log-ae", action="store_true", help="log OS04 AE samples and exposure decisions")
   parser.add_argument("--validate-vfe", action="store_true", help="run the local VFE PIX/DMABUF validator after capture; implies --raw-debug and --camerad-debug-frames")
   parser.add_argument("--validate-min-frames", type=int, default=20, help="minimum VFE debug frames per selected camera when --validate-vfe is set")
   parser.add_argument("--validate-min-fps", type=float, default=18.0, help="minimum median VFE FPS when --validate-vfe is set")
@@ -534,7 +542,8 @@ def main() -> int:
   script = remote_script(args.openpilot_dir, args.cam, args.settle, args.exposure_lines, args.target_grey,
                          args.preview_saturation, args.preview_median,
                          args.pix_ioctl, args.raw_debug, args.monitor_duration,
-                         args.camerad_debug_frames, args.check_dmesg, args.env)
+                         args.camerad_debug_frames, args.log_awb, args.log_ae,
+                         args.check_dmesg, args.env)
   run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "bash", "-s"], input=script, text=True)
 
   cameras = camera_list(args.cam)
