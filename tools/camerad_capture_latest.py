@@ -88,24 +88,21 @@ def camera_list(selection: str) -> list[str]:
   return [selection]
 
 
-def remote_env(selection: str, exposure_lines: int, target_grey: float, chroma_scale: float,
+def remote_env(selection: str, exposure_lines: int, target_grey: float,
                preview_saturation: float, preview_median: float, pix_ioctl: bool,
-               rdi: bool, debug_frames: bool, extra_env: list[str]) -> list[str]:
+               debug_frames: bool, extra_env: list[str]) -> list[str]:
   selected = camera_list(selection)
   env = [
     "ASIUS=1",
     "ASIUS_CAMERA_ONE=1",
     "LOGPRINT=debug",
     f"ASIUS_CAM_TARGET_GREY={target_grey}",
-    f"ASIUS_CAM_CHROMA_SCALE={chroma_scale}",
     f"ASIUS_CAM_START_EXPOSURE_LINES={exposure_lines}",
     f"ASIUS_SNAPSHOT_SATURATION={preview_saturation}",
     f"ASIUS_SNAPSHOT_TARGET_MEDIAN={preview_median}",
   ]
   if debug_frames:
     env.append("DEBUG_FRAMES=1")
-  if rdi:
-    env.append("ASIUS_CAM_USE_RDI=1")
   if pix_ioctl:
     env.append("ASIUS_CAM_PIX_IOCTL=1")
   if "cam1" not in selected:
@@ -119,15 +116,15 @@ def remote_env(selection: str, exposure_lines: int, target_grey: float, chroma_s
 
 
 def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_lines: int, target_grey: float,
-                  chroma_scale: float, preview_saturation: float, preview_median: float,
-                  pix_ioctl: bool, raw_debug: bool, rdi: bool, monitor_duration: float,
+                  preview_saturation: float, preview_median: float,
+                  pix_ioctl: bool, raw_debug: bool, monitor_duration: float,
                   debug_frames: bool, capture_dmesg: bool, extra_env: list[str]) -> str:
   cameras = camera_list(selection)
   targets_literal = repr(cameras)
   raw_images_literal = repr(REMOTE_RAW_IMAGES)
   raw_stats_literal = repr(REMOTE_RAW_STATS)
   env_words = " ".join(shlex.quote(word) for word in remote_env(
-    selection, exposure_lines, target_grey, chroma_scale, preview_saturation, preview_median, pix_ioctl, rdi, debug_frames, extra_env))
+    selection, exposure_lines, target_grey, preview_saturation, preview_median, pix_ioctl, debug_frames, extra_env))
   openpilot_dir_q = shlex.quote(openpilot_dir)
   capture_dmesg_value = "1" if capture_dmesg else "0"
   return textwrap.dedent(f"""\
@@ -507,11 +504,11 @@ def main() -> int:
   parser.add_argument("--settle", type=float, default=7.0, help="seconds to let AE settle before saving")
   parser.add_argument("--exposure-lines", type=int, default=600, help="initial OS04 exposure lines")
   parser.add_argument("--target-grey", type=float, default=0.48, help="OS04 AE target grey fraction")
-  parser.add_argument("--chroma-scale", type=float, default=2.05, help="OS04 software debayer chroma scale")
+  parser.add_argument("--chroma-scale", type=float, default=2.05, help="legacy ignored option; One camerad no longer has a software debayer path on this branch")
   parser.add_argument("--preview-saturation", type=float, default=1.00, help="JPEG preview saturation boost")
   parser.add_argument("--preview-median", type=float, default=115.0, help="JPEG preview target median luma")
   parser.add_argument("--pix-ioctl", action="store_true", help="use the experimental liberation-day-style VFE userspace ioctl path")
-  parser.add_argument("--rdi", action="store_true", help="use the RDI raw capture + software debayer fallback path")
+  parser.add_argument("--rdi", action="store_true", help="legacy unsupported option; use tools/camss_rdi_probe.c for raw RDI probing")
   parser.add_argument("--raw-debug", action="store_true", help="save unenhanced NV12-derived JPEGs and JSON stats beside the normal preview JPEG")
   parser.add_argument("--monitor-duration", type=float, default=5.0, help="seconds to keep camerad running before the one-shot JPEG capture")
   parser.add_argument("--camerad-debug-frames", action="store_true", help="make camerad print one log line per dequeued frame")
@@ -526,16 +523,17 @@ def main() -> int:
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="extra remote camerad environment variable")
   args = parser.parse_args()
 
+  if args.rdi:
+    parser.error("--rdi was removed from One camerad on the hardware VFE branch; use tools/camss_rdi_probe.c for raw RDI probing")
+
   if args.validate_vfe:
-    if args.rdi:
-      parser.error("--validate-vfe checks the hardware VFE PIX path and cannot be used with --rdi")
     args.raw_debug = True
     args.camerad_debug_frames = True
 
   out_dir = Path(args.out_dir)
   script = remote_script(args.openpilot_dir, args.cam, args.settle, args.exposure_lines, args.target_grey,
-                         args.chroma_scale, args.preview_saturation, args.preview_median,
-                         args.pix_ioctl, args.raw_debug, args.rdi, args.monitor_duration,
+                         args.preview_saturation, args.preview_median,
+                         args.pix_ioctl, args.raw_debug, args.monitor_duration,
                          args.camerad_debug_frames, args.check_dmesg, args.env)
   run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "bash", "-s"], input=script, text=True)
 
