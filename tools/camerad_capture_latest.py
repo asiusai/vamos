@@ -353,7 +353,7 @@ def main() -> int:
   parser.add_argument("--openpilot-dir", default="/data/openpilot", help="remote openpilot checkout to run camerad from")
   parser.add_argument("--settle", type=float, default=7.0, help="seconds to let AE settle before saving")
   parser.add_argument("--exposure-lines", type=int, default=1000, help="initial OS04 exposure lines")
-  parser.add_argument("--target-grey", type=float, default=0.44, help="OS04 AE target grey fraction")
+  parser.add_argument("--target-grey", type=float, default=0.48, help="OS04 AE target grey fraction")
   parser.add_argument("--chroma-scale", type=float, default=2.05, help="OS04 software debayer chroma scale")
   parser.add_argument("--preview-saturation", type=float, default=1.00, help="JPEG preview saturation boost")
   parser.add_argument("--preview-median", type=float, default=115.0, help="JPEG preview target median luma")
