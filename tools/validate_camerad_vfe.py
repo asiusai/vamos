@@ -12,6 +12,7 @@ from pathlib import Path
 
 LOG_FILE = "latest-camerad-dual.log"
 VIPC_STATS_FILE = "latest-camerad-vipc-stats.json"
+CPU_STATS_FILE = "latest-camerad-cpu-stats.json"
 
 CAMERA_NUMS = {
   "cam1": "2",
@@ -164,6 +165,41 @@ def validate_vipc_stats(run_dir: Path, cams: list[str], args: argparse.Namespace
       report.pass_(f"{cam}: VIPC stride {stride} >= width {width}")
 
 
+def validate_cpu_stats(run_dir: Path, args: argparse.Namespace, report: Report) -> None:
+  path = run_dir / CPU_STATS_FILE
+  if not path.exists():
+    if args.require_cpu_stats:
+      report.fail(f"camerad CPU stats missing: {path}")
+    return
+
+  data = load_json(path, report, "camerad CPU stats")
+  if data is None:
+    return
+
+  if not bool(data.get("available", False)):
+    report.fail("camerad CPU stats unavailable")
+    return
+
+  wall_seconds = float(data.get("wall_seconds", 0.0))
+  cpu_seconds = float(data.get("cpu_seconds", -1.0))
+  cpu_pct = float(data.get("single_core_cpu_pct", 999.0))
+
+  if wall_seconds < args.min_cpu_sample_seconds:
+    report.fail(f"camerad CPU sample {wall_seconds:.3f}s below {args.min_cpu_sample_seconds:.3f}s")
+  else:
+    report.pass_(f"camerad CPU sample {wall_seconds:.3f}s >= {args.min_cpu_sample_seconds:.3f}s")
+
+  if cpu_seconds < 0.0:
+    report.fail(f"camerad CPU seconds invalid: {cpu_seconds:.3f}")
+  else:
+    report.pass_(f"camerad CPU seconds {cpu_seconds:.3f}")
+
+  if cpu_pct > args.max_camerad_cpu_pct:
+    report.fail(f"camerad CPU {cpu_pct:.2f}% > {args.max_camerad_cpu_pct:.2f}%")
+  else:
+    report.pass_(f"camerad CPU {cpu_pct:.2f}% <= {args.max_camerad_cpu_pct:.2f}%")
+
+
 def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespace, report: Report) -> None:
   if args.no_raw_stats:
     return
@@ -206,6 +242,9 @@ def main() -> int:
   parser.add_argument("--min-fps", type=float, default=18.0)
   parser.add_argument("--slow-gap-ms", type=float, default=75.0)
   parser.add_argument("--max-slow-gaps", type=int, default=0)
+  parser.add_argument("--require-cpu-stats", action="store_true", help="fail if latest-camerad-cpu-stats.json is missing")
+  parser.add_argument("--min-cpu-sample-seconds", type=float, default=1.0)
+  parser.add_argument("--max-camerad-cpu-pct", type=float, default=10.0, help="maximum camerad CPU use as percent of one core")
   parser.add_argument("--min-width", type=int, default=1280)
   parser.add_argument("--min-height", type=int, default=720)
   parser.add_argument("--no-raw-stats", action="store_true", help="skip raw-debug JSON image-stat checks")
@@ -228,6 +267,7 @@ def main() -> int:
 
   validate_log(args.run_dir, cams, args, report)
   validate_vipc_stats(args.run_dir, cams, args, report)
+  validate_cpu_stats(args.run_dir, args, report)
   validate_image_stats(args.run_dir, cams, args, report)
 
   print(f"summary: failures={len(report.failures)} warnings={len(report.warnings)}")
