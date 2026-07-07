@@ -1,0 +1,118 @@
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -246,6 +246,54 @@
+ #define VFE_BUS_WM_FRAME_INC(n)			(0x2258 + (n) * 0x100)
+ #define VFE_BUS_WM_BURST_LIMIT(n)		(0x225c + (n) * 0x100)
+ 
++#define VFE_PIX_STALL_SOF_GAP			20
++
++static u32 vfe_pix_sof_count[4];
++static u32 vfe_pix_reg_count[4];
++static u32 vfe_pix_comp_count[4];
++static u32 vfe_pix_dual_count[4];
++static u32 vfe_pix_wm3_count[4];
++static u32 vfe_pix_wm4_count[4];
++static u32 vfe_pix_last_warn_sof[4];
++
++static void vfe_pix_maybe_log_stall(struct vfe_device *vfe, u32 irq0, u32 irq1,
++				    u32 bus0, u32 bus1, u32 bus2)
++{
++	unsigned int id = vfe->id;
++	u32 sof_gap;
++
++	if (id >= 4)
++		return;
++
++	sof_gap = vfe_pix_sof_count[id] - vfe_pix_wm4_count[id];
++	if (sof_gap < VFE_PIX_STALL_SOF_GAP)
++		return;
++	if (vfe_pix_sof_count[id] - vfe_pix_last_warn_sof[id] < VFE_PIX_STALL_SOF_GAP)
++		return;
++
++	vfe_pix_last_warn_sof[id] = vfe_pix_sof_count[id];
++	dev_warn_ratelimited(vfe->camss->dev,
++		"vfe%u pix stall? sof=%u reg=%u comp=%u dual=%u wm3=%u wm4=%u gap=%u irq0=0x%08x irq1=0x%08x bus0=0x%08x bus1=0x%08x bus2=0x%08x camif=0x%08x wm3_addr=0x%08x wm3_inc=0x%08x wm3_cfg=0x%08x wm3_st0=0x%08x wm4_addr=0x%08x wm4_inc=0x%08x wm4_cfg=0x%08x wm4_st0=0x%08x comp0=0x%08x dual0=0x%08x addrsync=0x%08x addrmask0=0x%08x nosync=0x%08x\n",
++		id, vfe_pix_sof_count[id], vfe_pix_reg_count[id],
++		vfe_pix_comp_count[id], vfe_pix_dual_count[id],
++		vfe_pix_wm3_count[id], vfe_pix_wm4_count[id], sof_gap,
++		irq0, irq1, bus0, bus1, bus2,
++		readl_relaxed(vfe->base + VFE_CAMIF_STATUS),
++		readl_relaxed(vfe->base + VFE_BUS_WM_IMAGE_ADDR(3)),
++		readl_relaxed(vfe->base + VFE_BUS_WM_FRAME_INC(3)),
++		readl_relaxed(vfe->base + VFE_BUS_WM_CFG(3)),
++		readl_relaxed(vfe->base + VFE_BUS_WM_STATUS0(3)),
++		readl_relaxed(vfe->base + VFE_BUS_WM_IMAGE_ADDR(4)),
++		readl_relaxed(vfe->base + VFE_BUS_WM_FRAME_INC(4)),
++		readl_relaxed(vfe->base + VFE_BUS_WM_CFG(4)),
++		readl_relaxed(vfe->base + VFE_BUS_WM_STATUS0(4)),
++		readl_relaxed(vfe->base + VFE_BUS_COMP_GROUP(0)),
++		readl_relaxed(vfe->base + VFE_BUS_DUAL_COMP_GROUP(0)),
++		readl_relaxed(vfe->base + VFE_BUS_ADDR_SYNC_CFG),
++		readl_relaxed(vfe->base + VFE_BUS_ADDR_SYNC_MASK(0)),
++		readl_relaxed(vfe->base + VFE_BUS_WM_ADDR_SYNC_NO_SYNC));
++}
++
+ static inline void vfe_reg_set(struct vfe_device *vfe, u32 reg, u32 set_bits)
+ {
+ 	u32 bits = readl_relaxed(vfe->base + reg);
+@@ -737,8 +785,9 @@
+ static irqreturn_t vfe_isr(int irq, void *dev)
+ {
+ 	struct vfe_device *vfe = dev;
+-	u32 status0, status1, vfe_bus_status[VFE_LINE_NUM_MAX];
++	u32 status0, status1, vfe_bus_status[VFE_LINE_NUM_MAX] = {};
+ 	int i, wm;
++	unsigned int id = vfe->id;
+ 
+ 	status0 = readl_relaxed(vfe->base + VFE_IRQ_STATUS_0);
+ 	status1 = readl_relaxed(vfe->base + VFE_IRQ_STATUS_1);
+@@ -762,12 +811,17 @@
+ 
+ 	/* PIX CAMIF SOF */
+ 	if (status0 & STATUS_0_CAMIF_SOF) {
++		if (id < 4)
++			vfe_pix_sof_count[id]++;
+ 		vfe->isr_ops.sof(vfe, VFE_LINE_PIX);
+ 	}
+ 
+ 	/* PIX reg_update done (from BUS status) */
+-	if (vfe_bus_status[0] & STATUS0_COMP_REG_UPDATE0_DONE)
++	if (vfe_bus_status[0] & STATUS0_COMP_REG_UPDATE0_DONE) {
++		if (id < 4)
++			vfe_pix_reg_count[id]++;
+ 		vfe->isr_ops.reg_update(vfe, VFE_LINE_PIX);
++	}
+ 
+ 	/* RDI reg_update and SOF */
+ 	for (i = VFE_LINE_RDI0; i <= VFE_LINE_RDI2; i++)
+@@ -796,16 +850,28 @@
+ 	for (i = VFE_LINE_RDI0; i <= VFE_LINE_RDI2; i++)
+ 		if (status0 & STATUS_1_RDI_SOF(i))
+ 			vfe->isr_ops.sof(vfe, i);
+ 
+ 	for (i = 0; i < MSM_VFE_COMPOSITE_IRQ_NUM; i++)
+-		if (vfe_bus_status[0] & STATUS0_COMP_BUF_DONE(i))
++		if (vfe_bus_status[0] & STATUS0_COMP_BUF_DONE(i)) {
++			if (id < 4 && i == 0)
++				vfe_pix_comp_count[id]++;
+ 			vfe->isr_ops.comp_done(vfe, i);
++		}
+ 
+ 	for (wm = 0; wm < MSM_VFE_IMAGE_MASTERS_NUM; wm++)
+ 		if (status0 & BIT(9)) {
+-			if (vfe_bus_status[1] & STATUS1_WM_CLIENT_BUF_DONE(wm))
++			if (vfe_bus_status[1] & STATUS1_WM_CLIENT_BUF_DONE(wm)) {
++				if (id < 4 && wm == 3)
++					vfe_pix_wm3_count[id]++;
++				if (id < 4 && wm == 4)
++					vfe_pix_wm4_count[id]++;
+ 				vfe->isr_ops.wm_done(vfe, wm);
++			}
+ 		}
+ 
++	vfe_pix_maybe_log_stall(vfe, status0, status1,
++				vfe_bus_status[0], vfe_bus_status[1],
++				vfe_bus_status[2]);
++
+ 	return IRQ_HANDLED;
+ }

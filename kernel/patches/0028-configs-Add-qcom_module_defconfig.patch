@@ -5,15 +5,15 @@ Subject: configs: Add qcom_module_defconfig
 
 Signed-off-by: Xilin Wu <sophon@radxa.com>
 ---
- arch/arm64/configs/qcom_module_defconfig | 2189 ++++++++++
- 1 file changed, 2189 insertions(+)
+ arch/arm64/configs/qcom_module_defconfig | 2188 ++++++++++
+ 1 file changed, 2188 insertions(+)
 
 diff --git a/arch/arm64/configs/qcom_module_defconfig b/arch/arm64/configs/qcom_module_defconfig
 new file mode 100644
 index 000000000000..111111111111
 --- /dev/null
 +++ b/arch/arm64/configs/qcom_module_defconfig
-@@ -0,0 +1,2189 @@
+@@ -0,0 +1,2188 @@
 +# CONFIG_LOCALVERSION_AUTO is not set
 +CONFIG_DEFAULT_HOSTNAME="radxa-qcom"
 +CONFIG_SYSVIPC=y
@@ -2202,5 +2202,3 @@ index 000000000000..111111111111
 +CONFIG_FUNCTION_ERROR_INJECTION=y
 +CONFIG_ASYNC_RAID6_TEST=m
 +CONFIG_MEMTEST=y
--- 
-Armbian
