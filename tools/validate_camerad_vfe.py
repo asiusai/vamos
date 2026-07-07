@@ -13,6 +13,7 @@ from pathlib import Path
 LOG_FILE = "latest-camerad-dual.log"
 VIPC_STATS_FILE = "latest-camerad-vipc-stats.json"
 CPU_STATS_FILE = "latest-camerad-cpu-stats.json"
+DMESG_LOG_FILE = "latest-camerad-dmesg.log"
 SUMMARY_FILE = "latest-camerad-vfe-summary.json"
 
 CAMERA_NUMS = {
@@ -32,6 +33,16 @@ FATAL_LOG_PATTERNS = [
   "NV12 sw debayer",
   "VFE PIX unavailable",
   "falling back to V4L2 MMAP CPU-copy path",
+]
+
+DMESG_FORBIDDEN_PATTERNS = [
+  ("normal VFE PIX buffer-address spam", re.compile(r"\bpix buf\d+ addr0=", re.IGNORECASE)),
+  ("VFE PIX stall/recovery warning", re.compile(r"\bvfe\d+ pix .*\b(stall|recovering)\b", re.IGNORECASE)),
+  ("camera pipeline error/failure", re.compile(
+    r"\b(camss|csiphy|csid|vfe|os04c10|cci|camera)\b.*"
+    r"\b(error|failed|failure|fault|timeout|timed out)\b",
+    re.IGNORECASE,
+  )),
 ]
 
 QUALITY_PROFILES = {
@@ -89,6 +100,19 @@ def load_json(path: Path, report: Report, label: str) -> dict | None:
     return None
   report.pass_(f"{label} present: {path}")
   return data
+
+
+def forbidden_dmesg_matches(dmesg_text: str) -> list[dict[str, str]]:
+  matches: list[dict[str, str]] = []
+  for line in dmesg_text.splitlines():
+    for label, pattern in DMESG_FORBIDDEN_PATTERNS:
+      if pattern.search(line):
+        matches.append({
+          "kind": label,
+          "line": line,
+        })
+        break
+  return matches
 
 
 def frame_times(log_text: str, cam: str) -> list[float]:
@@ -315,6 +339,35 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
         report.pass_(f"{cam}: {name}={value:.3f} inside [{low:.3f}, {high:.3f}]")
 
 
+def validate_dmesg(run_dir: Path, args: argparse.Namespace, report: Report, summary: dict) -> None:
+  if not args.check_dmesg:
+    return
+
+  path = args.dmesg_log or (run_dir / DMESG_LOG_FILE)
+  dmesg_summary = {
+    "checked": True,
+    "path": str(path),
+    "forbidden_matches": [],
+  }
+  summary["dmesg"] = dmesg_summary
+
+  if not path.exists():
+    report.fail(f"dmesg log missing: {path}")
+    return
+
+  dmesg_text = path.read_text(errors="replace")
+  matches = forbidden_dmesg_matches(dmesg_text)
+  dmesg_summary["forbidden_matches"] = matches
+  dmesg_summary["line_count"] = len(dmesg_text.splitlines())
+
+  if len(matches) > args.max_dmesg_matches:
+    report.fail(f"dmesg forbidden matches {len(matches)} > {args.max_dmesg_matches}")
+    for match in matches[:5]:
+      report.fail(f"dmesg {match['kind']}: {match['line']}")
+  else:
+    report.pass_(f"dmesg forbidden matches {len(matches)} <= {args.max_dmesg_matches}")
+
+
 def apply_quality_profile(args: argparse.Namespace) -> dict[str, dict[str, float]]:
   profile = QUALITY_PROFILES[args.quality_profile]
   applied: dict[str, dict[str, float]] = {}
@@ -366,6 +419,9 @@ def main() -> int:
   parser.add_argument("--max-uv-center-median-offset", type=float, default=999.0, help="maximum absolute U/V center median offset from 128")
   parser.add_argument("--min-mean-chroma", type=float, default=1.0)
   parser.add_argument("--min-uv-abs", type=float, default=1.0)
+  parser.add_argument("--check-dmesg", action="store_true", help=f"fail on CAMSS/VFE errors, stalls, or buffer-address spam in {DMESG_LOG_FILE}")
+  parser.add_argument("--dmesg-log", type=Path, help=f"dmesg log to check; default is RUN_DIR/{DMESG_LOG_FILE}")
+  parser.add_argument("--max-dmesg-matches", type=int, default=0)
   parser.add_argument("--summary-json", type=Path, help=f"write compact JSON summary; default is RUN_DIR/{SUMMARY_FILE}")
   args = parser.parse_args()
   applied_quality_profile = apply_quality_profile(args)
@@ -397,6 +453,8 @@ def main() -> int:
       "max_uv_center_median_offset": args.max_uv_center_median_offset,
       "min_mean_chroma": args.min_mean_chroma,
       "min_uv_abs": args.min_uv_abs,
+      "check_dmesg": args.check_dmesg,
+      "max_dmesg_matches": args.max_dmesg_matches,
     },
   }
   if not args.run_dir.is_dir():
@@ -407,6 +465,7 @@ def main() -> int:
   validate_vipc_stats(args.run_dir, cams, args, report, summary)
   validate_cpu_stats(args.run_dir, args, report, summary)
   validate_image_stats(args.run_dir, cams, args, report, summary)
+  validate_dmesg(args.run_dir, args, report, summary)
 
   summary["passed"] = not report.failures
   summary["failures"] = report.failures
