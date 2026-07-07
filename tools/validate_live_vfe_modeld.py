@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -23,10 +24,31 @@ SSH_OPTS = [
 
 REMOTE_CAMERAD_LOG = "/tmp/asius_live_vfe_modeld_camerad.log"
 REMOTE_MODELD_LOG = "/tmp/asius_live_vfe_modeld_modeld.log"
+REMOTE_DMESG_LOG = "/tmp/asius_live_vfe_modeld_dmesg.log"
 REMOTE_SUMMARY = "/tmp/asius_live_vfe_modeld_summary.json"
 LOCAL_CAMERAD_LOG = "live-vfe-modeld-camerad.log"
 LOCAL_MODELD_LOG = "live-vfe-modeld-modeld.log"
+LOCAL_DMESG_LOG = "live-vfe-modeld-dmesg.log"
 LOCAL_SUMMARY = "live-vfe-modeld-summary.json"
+
+DMESG_FORBIDDEN_PATTERNS = [
+  (
+    "normal VFE PIX buffer-address spam",
+    re.compile(r"\bpix buf\d+ addr0=", re.IGNORECASE),
+  ),
+  (
+    "VFE PIX stall/recovery warning",
+    re.compile(r"\bvfe\d+ pix .*\b(stall|recovering)\b", re.IGNORECASE),
+  ),
+  (
+    "camera pipeline error/failure",
+    re.compile(
+      r"\b(camss|csiphy|csid|vfe|os04c10|cci|camera)\b.*"
+      r"\b(error|failed|failure|fault|timeout|timed out)\b",
+      re.IGNORECASE,
+    ),
+  ),
+]
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -49,9 +71,11 @@ def remote_env(extra_env: list[str]) -> list[str]:
 
 
 def remote_script(openpilot_dir: str, duration: float, settle: float, extra_env: list[str],
-                  isolate: bool, ignore_initial_model_frames: int) -> str:
+                  isolate: bool, ignore_initial_model_frames: int,
+                  capture_dmesg: bool) -> str:
   env_exports = " ".join(shlex.quote(e) for e in remote_env(extra_env))
   openpilot_dir_q = shlex.quote(openpilot_dir)
+  capture_dmesg_value = "1" if capture_dmesg else "0"
   isolate_cmds = textwrap.dedent("""\
     pkill -f './manager.py' 2>/dev/null || true
     pkill -f 'selfdrive\\.modeld\\.modeld|selfdrive\\.modeld\\.dmonitoringmodeld|selfdrive\\.locationd\\.calibrationd|selfdrive\\.controls\\.controlsd|selfdrive\\.selfdrived\\.selfdrived' 2>/dev/null || true
@@ -68,20 +92,35 @@ def remote_script(openpilot_dir: str, duration: float, settle: float, extra_env:
     fi
     camerad_pid=""
     modeld_pid=""
+    capture_dmesg={capture_dmesg_value}
+    dmesg_before_lines=0
+    collect_dmesg() {{
+      [ "$capture_dmesg" = "1" ] || return 0
+      start_line=$((dmesg_before_lines + 1))
+      if command -v dmesg >/dev/null 2>&1; then
+        dmesg 2>/dev/null | tail -n +"$start_line" > {REMOTE_DMESG_LOG} || true
+      else
+        echo "dmesg command unavailable" > {REMOTE_DMESG_LOG}
+      fi
+    }}
     cleanup() {{
       [ -n "$modeld_pid" ] && kill "$modeld_pid" 2>/dev/null || true
       [ -n "$camerad_pid" ] && kill "$camerad_pid" 2>/dev/null || true
       [ -n "$modeld_pid" ] && wait "$modeld_pid" 2>/dev/null || true
       [ -n "$camerad_pid" ] && wait "$camerad_pid" 2>/dev/null || true
+      collect_dmesg
       rmdir "$lock_dir" 2>/dev/null || true
     }}
     trap cleanup EXIT
 
     cd {openpilot_dir_q}
-    rm -f {REMOTE_CAMERAD_LOG} {REMOTE_MODELD_LOG} {REMOTE_SUMMARY}
+    rm -f {REMOTE_CAMERAD_LOG} {REMOTE_MODELD_LOG} {REMOTE_DMESG_LOG} {REMOTE_SUMMARY}
 {isolate_block}
     pkill -x camerad 2>/dev/null || true
     pkill -f 'selfdrive/modeld/modeld.py --demo' 2>/dev/null || true
+    if [ "$capture_dmesg" = "1" ] && command -v dmesg >/dev/null 2>&1; then
+      dmesg_before_lines=$(dmesg 2>/dev/null | wc -l || echo 0)
+    fi
     export PYTHONPATH={openpilot_dir_q}:{openpilot_dir_q}/tinygrad_repo:{openpilot_dir_q}/opendbc_repo
     export LD_LIBRARY_PATH=/opt/qcom-adreno/lib
     export {env_exports}
@@ -250,6 +289,19 @@ def pull(remote: str, local: Path) -> bool:
   return result.returncode == 0 and local.exists()
 
 
+def forbidden_dmesg_matches(dmesg_text: str) -> list[dict[str, str]]:
+  matches: list[dict[str, str]] = []
+  for line in dmesg_text.splitlines():
+    for label, pattern in DMESG_FORBIDDEN_PATTERNS:
+      if pattern.search(line):
+        matches.append({
+          "kind": label,
+          "line": line,
+        })
+        break
+  return matches
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--openpilot-dir", default="/data/openpilot_hw_vfe")
@@ -262,6 +314,10 @@ def main() -> int:
   parser.add_argument("--max-frame-drop-pct", type=float, default=10.0)
   parser.add_argument("--max-sync-warnings", type=int, default=0)
   parser.add_argument("--ignore-initial-model-frames", type=int, default=20)
+  parser.add_argument("--check-dmesg", action="store_true",
+                      help="capture dmesg during the run and fail on CAMSS/VFE errors, stalls, or buffer-address spam")
+  parser.add_argument("--max-dmesg-matches", type=int, default=0,
+                      help="maximum forbidden dmesg matches allowed when --check-dmesg is set")
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
   parser.add_argument("--keep-existing-openpilot", action="store_true",
                       help="do not stop an already-running manager/openpilot stack before testing")
@@ -272,15 +328,19 @@ def main() -> int:
 
   script = remote_script(args.openpilot_dir, args.duration, args.settle,
                          args.env, not args.keep_existing_openpilot,
-                         args.ignore_initial_model_frames)
+                         args.ignore_initial_model_frames,
+                         args.check_dmesg)
   result = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "bash", "-s"], input=script, text=True)
 
   summary_path = out_dir / LOCAL_SUMMARY
   camerad_log_path = out_dir / LOCAL_CAMERAD_LOG
   modeld_log_path = out_dir / LOCAL_MODELD_LOG
+  dmesg_log_path = out_dir / LOCAL_DMESG_LOG
   pull(REMOTE_SUMMARY, summary_path)
   pull(REMOTE_CAMERAD_LOG, camerad_log_path)
   pull(REMOTE_MODELD_LOG, modeld_log_path)
+  if args.check_dmesg:
+    pull(REMOTE_DMESG_LOG, dmesg_log_path)
 
   if result.returncode != 0:
     return result.returncode
@@ -331,9 +391,30 @@ def main() -> int:
   if sync_warnings > args.max_sync_warnings:
     failures.append(f"modeld: sync warnings {sync_warnings} > {args.max_sync_warnings}")
 
+  if args.check_dmesg:
+    if not dmesg_log_path.exists():
+      failures.append(f"dmesg: missing captured log {dmesg_log_path}")
+      dmesg_matches = []
+    else:
+      dmesg_text = dmesg_log_path.read_text(errors="replace")
+      dmesg_matches = forbidden_dmesg_matches(dmesg_text)
+      if len(dmesg_matches) > args.max_dmesg_matches:
+        failures.append(
+          f"dmesg: forbidden CAMSS/VFE matches {len(dmesg_matches)} > {args.max_dmesg_matches}"
+        )
+    summary["dmesg"] = {
+      "path": str(dmesg_log_path),
+      "checked": True,
+      "forbidden_matches": dmesg_matches,
+      "max_matches": args.max_dmesg_matches,
+    }
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+
   print(f"summary: {summary_path}")
   print(f"camerad_log: {camerad_log_path}")
   print(f"modeld_log: {modeld_log_path}")
+  if args.check_dmesg:
+    print(f"dmesg_log: {dmesg_log_path}")
   print(json.dumps(summary, indent=2, sort_keys=True))
 
   if failures:
