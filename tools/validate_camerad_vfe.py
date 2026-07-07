@@ -83,13 +83,18 @@ QUALITY_PROFILES = {
 class Report:
   def __init__(self) -> None:
     self.failures: list[str] = []
+    self.failure_details: list[dict[str, str]] = []
     self.warnings: list[str] = []
 
   def pass_(self, text: str) -> None:
     print(f"PASS {text}")
 
-  def fail(self, text: str) -> None:
+  def fail(self, text: str, category: str = "general") -> None:
     self.failures.append(text)
+    self.failure_details.append({
+      "category": category,
+      "message": text,
+    })
     print(f"FAIL {text}")
 
   def warn(self, text: str) -> None:
@@ -105,15 +110,15 @@ def camera_list(selection: str) -> list[str]:
   return [selection]
 
 
-def load_json(path: Path, report: Report, label: str) -> dict | None:
+def load_json(path: Path, report: Report, label: str, category: str = "general") -> dict | None:
   if not path.exists():
-    report.fail(f"{label} missing: {path}")
+    report.fail(f"{label} missing: {path}", category)
     return None
   try:
     with path.open() as f:
       data = json.load(f)
   except (OSError, json.JSONDecodeError) as e:
-    report.fail(f"{label} unreadable: {path}: {e}")
+    report.fail(f"{label} unreadable: {path}: {e}", category)
     return None
   report.pass_(f"{label} present: {path}")
   return data
@@ -144,7 +149,7 @@ def frame_times(log_text: str, cam: str) -> list[float]:
 def validate_log(run_dir: Path, cams: list[str], args: argparse.Namespace, report: Report, summary: dict) -> str:
   log_path = run_dir / LOG_FILE
   if not log_path.exists():
-    report.fail(f"log missing: {log_path}")
+    report.fail(f"log missing: {log_path}", "transport")
     return ""
 
   log_text = log_path.read_text(errors="replace")
@@ -158,14 +163,14 @@ def validate_log(run_dir: Path, cams: list[str], args: argparse.Namespace, repor
     present = pattern in log_text
     summary["log"]["fallback_markers"][pattern] = present
     if pattern in log_text:
-      report.fail(f"log contains forbidden fallback marker: {pattern}")
+      report.fail(f"log contains forbidden fallback marker: {pattern}", "transport")
     else:
       report.pass_(f"log has no fallback marker: {pattern}")
 
   dmabuf_fallback = "REQBUFS DMABUF failed" in log_text
   summary["log"]["dmabuf_fallback"] = dmabuf_fallback
   if args.require_dmabuf and dmabuf_fallback:
-    report.fail("log contains DMABUF fallback: REQBUFS DMABUF failed")
+    report.fail("log contains DMABUF fallback: REQBUFS DMABUF failed", "transport")
   elif args.require_dmabuf:
     report.pass_("log has no DMABUF fallback")
 
@@ -176,7 +181,7 @@ def validate_log(run_dir: Path, cams: list[str], args: argparse.Namespace, repor
     has_vfe_pix_v4l2 = re.search(mode_pattern, log_text) is not None
     cam_summary["vfe_pix_v4l2"] = has_vfe_pix_v4l2
     if not has_vfe_pix_v4l2:
-      report.fail(f"{cam}: missing VFE PIX V4L2 VIPC buffer creation")
+      report.fail(f"{cam}: missing VFE PIX V4L2 VIPC buffer creation", "transport")
     else:
       report.pass_(f"{cam}: VFE PIX V4L2 VIPC buffer creation found")
 
@@ -185,7 +190,7 @@ def validate_log(run_dir: Path, cams: list[str], args: argparse.Namespace, repor
       has_dmabuf_nv12 = re.search(dmabuf_pattern, log_text) is not None
       cam_summary["dmabuf_nv12"] = has_dmabuf_nv12
       if not has_dmabuf_nv12:
-        report.fail(f"{cam}: missing VFE PIX V4L2 DMABUF NV12 mode")
+        report.fail(f"{cam}: missing VFE PIX V4L2 DMABUF NV12 mode", "transport")
       else:
         report.pass_(f"{cam}: VFE PIX V4L2 DMABUF NV12 mode found")
 
@@ -193,7 +198,7 @@ def validate_log(run_dir: Path, cams: list[str], args: argparse.Namespace, repor
     cam_summary["debug_frames"] = len(times)
     if args.min_frames > 0:
       if len(times) < args.min_frames:
-        report.fail(f"{cam}: only {len(times)} debug frames, expected >= {args.min_frames}")
+        report.fail(f"{cam}: only {len(times)} debug frames, expected >= {args.min_frames}", "transport")
       else:
         report.pass_(f"{cam}: {len(times)} debug frames >= {args.min_frames}")
 
@@ -205,21 +210,21 @@ def validate_log(run_dir: Path, cams: list[str], args: argparse.Namespace, repor
       cam_summary["median_fps"] = fps
       cam_summary["slow_gaps"] = slow_gaps
       if fps < args.min_fps:
-        report.fail(f"{cam}: median FPS {fps:.2f} below {args.min_fps:.2f}")
+        report.fail(f"{cam}: median FPS {fps:.2f} below {args.min_fps:.2f}", "transport")
       else:
         report.pass_(f"{cam}: median FPS {fps:.2f} >= {args.min_fps:.2f}")
       if slow_gaps > args.max_slow_gaps:
-        report.fail(f"{cam}: slow gaps {slow_gaps} > {args.max_slow_gaps} over {args.slow_gap_ms:.1f} ms")
+        report.fail(f"{cam}: slow gaps {slow_gaps} > {args.max_slow_gaps} over {args.slow_gap_ms:.1f} ms", "transport")
       else:
         report.pass_(f"{cam}: slow gaps {slow_gaps} <= {args.max_slow_gaps}")
     elif args.min_frames > 0:
-      report.fail(f"{cam}: no usable VFE PIX debug frame timestamps; capture with --camerad-debug-frames")
+      report.fail(f"{cam}: no usable VFE PIX debug frame timestamps; capture with --camerad-debug-frames", "transport")
 
   return log_text
 
 
 def validate_vipc_stats(run_dir: Path, cams: list[str], args: argparse.Namespace, report: Report, summary: dict) -> None:
-  data = load_json(run_dir / VIPC_STATS_FILE, report, "VIPC stats")
+  data = load_json(run_dir / VIPC_STATS_FILE, report, "VIPC stats", "transport")
   if data is None:
     return
   summary["vipc_stats_path"] = str(run_dir / VIPC_STATS_FILE)
@@ -227,7 +232,7 @@ def validate_vipc_stats(run_dir: Path, cams: list[str], args: argparse.Namespace
   for cam in cams:
     stats = data.get(cam)
     if not isinstance(stats, dict):
-      report.fail(f"{cam}: missing VIPC stats entry")
+      report.fail(f"{cam}: missing VIPC stats entry", "transport")
       continue
     width = int(stats.get("width", 0))
     height = int(stats.get("height", 0))
@@ -239,11 +244,11 @@ def validate_vipc_stats(run_dir: Path, cams: list[str], args: argparse.Namespace
       "saved_frame_id": int(stats.get("saved_frame_id", 0)),
     }
     if width < args.min_width or height < args.min_height:
-      report.fail(f"{cam}: VIPC size {width}x{height} below {args.min_width}x{args.min_height}")
+      report.fail(f"{cam}: VIPC size {width}x{height} below {args.min_width}x{args.min_height}", "transport")
     else:
       report.pass_(f"{cam}: VIPC size {width}x{height}")
     if stride < width:
-      report.fail(f"{cam}: VIPC stride {stride} below width {width}")
+      report.fail(f"{cam}: VIPC stride {stride} below width {width}", "transport")
     else:
       report.pass_(f"{cam}: VIPC stride {stride} >= width {width}")
 
@@ -252,10 +257,10 @@ def validate_cpu_stats(run_dir: Path, args: argparse.Namespace, report: Report, 
   path = run_dir / CPU_STATS_FILE
   if not path.exists():
     if args.require_cpu_stats:
-      report.fail(f"camerad CPU stats missing: {path}")
+      report.fail(f"camerad CPU stats missing: {path}", "cpu")
     return
 
-  data = load_json(path, report, "camerad CPU stats")
+  data = load_json(path, report, "camerad CPU stats", "cpu")
   if data is None:
     return
 
@@ -264,7 +269,7 @@ def validate_cpu_stats(run_dir: Path, args: argparse.Namespace, report: Report, 
       "path": str(path),
       "available": False,
     }
-    report.fail("camerad CPU stats unavailable")
+    report.fail("camerad CPU stats unavailable", "cpu")
     return
 
   wall_seconds = float(data.get("wall_seconds", 0.0))
@@ -279,17 +284,17 @@ def validate_cpu_stats(run_dir: Path, args: argparse.Namespace, report: Report, 
   }
 
   if wall_seconds < args.min_cpu_sample_seconds:
-    report.fail(f"camerad CPU sample {wall_seconds:.3f}s below {args.min_cpu_sample_seconds:.3f}s")
+    report.fail(f"camerad CPU sample {wall_seconds:.3f}s below {args.min_cpu_sample_seconds:.3f}s", "cpu")
   else:
     report.pass_(f"camerad CPU sample {wall_seconds:.3f}s >= {args.min_cpu_sample_seconds:.3f}s")
 
   if cpu_seconds < 0.0:
-    report.fail(f"camerad CPU seconds invalid: {cpu_seconds:.3f}")
+    report.fail(f"camerad CPU seconds invalid: {cpu_seconds:.3f}", "cpu")
   else:
     report.pass_(f"camerad CPU seconds {cpu_seconds:.3f}")
 
   if cpu_pct > args.max_camerad_cpu_pct:
-    report.fail(f"camerad CPU {cpu_pct:.2f}% > {args.max_camerad_cpu_pct:.2f}%")
+    report.fail(f"camerad CPU {cpu_pct:.2f}% > {args.max_camerad_cpu_pct:.2f}%", "cpu")
   else:
     report.pass_(f"camerad CPU {cpu_pct:.2f}% <= {args.max_camerad_cpu_pct:.2f}%")
 
@@ -299,14 +304,14 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
     return
 
   for cam in cams:
-    data = load_json(run_dir / STAT_FILES[cam], report, f"{cam} raw stats")
+    data = load_json(run_dir / STAT_FILES[cam], report, f"{cam} raw stats", "image")
     if data is None:
       continue
 
     width = int(data.get("width", 0))
     height = int(data.get("height", 0))
     if width < args.min_width or height < args.min_height:
-      report.fail(f"{cam}: raw stats size {width}x{height} below {args.min_width}x{args.min_height}")
+      report.fail(f"{cam}: raw stats size {width}x{height} below {args.min_width}x{args.min_height}", "image")
     else:
       report.pass_(f"{cam}: raw stats size {width}x{height}")
 
@@ -345,6 +350,11 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
       "tile_p95_y_clip_hi_frac": float(data.get("tile_p95_y_clip_hi_frac", -1.0)),
       "tile_max_luma_clip_hi_frac": float(data.get("tile_max_luma_clip_hi_frac", -1.0)),
       "tile_p95_luma_clip_hi_frac": float(data.get("tile_p95_luma_clip_hi_frac", -1.0)),
+      "tile_luma_clip_hi_count_gt_10pct": int(data.get("tile_luma_clip_hi_count_gt_10pct", -1)),
+      "tile_luma_clip_hi_count_gt_50pct": int(data.get("tile_luma_clip_hi_count_gt_50pct", -1)),
+      "tile_luma_clip_hi_area_frac_gt_10pct": float(data.get("tile_luma_clip_hi_area_frac_gt_10pct", -1.0)),
+      "tile_luma_clip_hi_area_frac_gt_50pct": float(data.get("tile_luma_clip_hi_area_frac_gt_50pct", -1.0)),
+      "checks": {},
     }
     if "tiles" in data:
       image_summary["tile_rows"] = int(data.get("tile_rows", 0))
@@ -369,8 +379,15 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
       ("uv_hf_abs_mean", image_summary["uv_hf_abs_mean"], 0.0, args.max_uv_hf_abs_mean),
     ]
     for name, value, low, high in checks:
+      passed = low <= value <= high
+      image_summary["checks"][name] = {
+        "value": value,
+        "low": low,
+        "high": high,
+        "passed": passed,
+      }
       if value < low or value > high:
-        report.fail(f"{cam}: {name}={value:.3f} outside [{low:.3f}, {high:.3f}]")
+        report.fail(f"{cam}: {name}={value:.3f} outside [{low:.3f}, {high:.3f}]", "image")
       else:
         report.pass_(f"{cam}: {name}={value:.3f} inside [{low:.3f}, {high:.3f}]")
 
@@ -388,7 +405,7 @@ def validate_dmesg(run_dir: Path, args: argparse.Namespace, report: Report, summ
   summary["dmesg"] = dmesg_summary
 
   if not path.exists():
-    report.fail(f"dmesg log missing: {path}")
+    report.fail(f"dmesg log missing: {path}", "dmesg")
     return
 
   dmesg_text = path.read_text(errors="replace")
@@ -397,9 +414,9 @@ def validate_dmesg(run_dir: Path, args: argparse.Namespace, report: Report, summ
   dmesg_summary["line_count"] = len(dmesg_text.splitlines())
 
   if len(matches) > args.max_dmesg_matches:
-    report.fail(f"dmesg forbidden matches {len(matches)} > {args.max_dmesg_matches}")
+    report.fail(f"dmesg forbidden matches {len(matches)} > {args.max_dmesg_matches}", "dmesg")
     for match in matches[:5]:
-      report.fail(f"dmesg {match['kind']}: {match['line']}")
+      report.fail(f"dmesg {match['kind']}: {match['line']}", "dmesg")
   else:
     report.pass_(f"dmesg forbidden matches {len(matches)} <= {args.max_dmesg_matches}")
 
@@ -502,7 +519,7 @@ def main() -> int:
     },
   }
   if not args.run_dir.is_dir():
-    report.fail(f"run directory missing: {args.run_dir}")
+    report.fail(f"run directory missing: {args.run_dir}", "general")
     return 1
 
   validate_log(args.run_dir, cams, args, report, summary)
@@ -512,7 +529,20 @@ def main() -> int:
   validate_dmesg(args.run_dir, args, report, summary)
 
   summary["passed"] = not report.failures
+  categories = ("transport", "cpu", "dmesg", "image", "general")
+  summary["category_passed"] = {
+    category: not any(detail["category"] == category for detail in report.failure_details)
+    for category in categories
+  }
+  summary["hardware_path_passed"] = (
+    summary["category_passed"]["transport"] and
+    summary["category_passed"]["cpu"] and
+    summary["category_passed"]["dmesg"] and
+    summary["category_passed"]["general"]
+  )
+  summary["image_quality_passed"] = summary["category_passed"]["image"]
   summary["failures"] = report.failures
+  summary["failure_details"] = report.failure_details
   summary["warnings"] = report.warnings
   summary_path = args.summary_json or (args.run_dir / SUMMARY_FILE)
   summary_path.parent.mkdir(parents=True, exist_ok=True)
