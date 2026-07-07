@@ -392,8 +392,7 @@ index 19577728b..928892207 100644
 +
 +	/*
 +	 * Neutral saturation CCM. Each row sums to 0x100, so grey balance is
-+	 * preserved while chroma is lifted conservatively from the flat identity
-+	 * path. Keep this in sync with openpilot camera_one.cc defaults.
++	 * preserved. Keep this in sync with openpilot camera_one.cc defaults.
 +	 */
 +	writel_relaxed(0x000001cc, vfe->base + VFE_CC_CFG + 0x00);
 +	writel_relaxed(0x00000f9a, vfe->base + VFE_CC_CFG + 0x04);
