@@ -392,29 +392,30 @@ index 19577728b..928892207 100644
 +
 +	/*
 +	 * Neutral saturation CCM. Each row sums to 0x100, so grey balance is
-+	 * preserved while chroma is lifted about 60% from the flat identity path.
++	 * preserved while chroma is lifted conservatively from the flat identity
++	 * path. Keep this in sync with openpilot camera_one.cc defaults.
 +	 */
-+	writel_relaxed(0x0000019a, vfe->base + VFE_CC_CFG + 0x00);
-+	writel_relaxed(0x00000fb3, vfe->base + VFE_CC_CFG + 0x04);
-+	writel_relaxed(0x00000fb3, vfe->base + VFE_CC_CFG + 0x08);
-+	writel_relaxed(0x00000fb3, vfe->base + VFE_CC_CFG + 0x0c);
-+	writel_relaxed(0x0000019a, vfe->base + VFE_CC_CFG + 0x10);
-+	writel_relaxed(0x00000fb3, vfe->base + VFE_CC_CFG + 0x14);
-+	writel_relaxed(0x00000fb3, vfe->base + VFE_CC_CFG + 0x18);
-+	writel_relaxed(0x00000fb3, vfe->base + VFE_CC_CFG + 0x1c);
-+	writel_relaxed(0x0000019a, vfe->base + VFE_CC_CFG + 0x20);
++	writel_relaxed(0x000001cc, vfe->base + VFE_CC_CFG + 0x00);
++	writel_relaxed(0x00000f9a, vfe->base + VFE_CC_CFG + 0x04);
++	writel_relaxed(0x00000f9a, vfe->base + VFE_CC_CFG + 0x08);
++	writel_relaxed(0x00000f9a, vfe->base + VFE_CC_CFG + 0x0c);
++	writel_relaxed(0x000001cc, vfe->base + VFE_CC_CFG + 0x10);
++	writel_relaxed(0x00000f9a, vfe->base + VFE_CC_CFG + 0x14);
++	writel_relaxed(0x00000f9a, vfe->base + VFE_CC_CFG + 0x18);
++	writel_relaxed(0x00000f9a, vfe->base + VFE_CC_CFG + 0x1c);
++	writel_relaxed(0x000001cc, vfe->base + VFE_CC_CFG + 0x20);
 +
-+	/* YUV conversion: BT.601 matrix */
++	/* YUV conversion: BT.601 luma, U/V rows scaled 1.2x for OS04 chroma. */
 +	writel_relaxed(0x00680208, vfe->base + VFE_YUV_CFG + 0x00);
 +	writel_relaxed(0x00000108, vfe->base + VFE_YUV_CFG + 0x04);
 +	writel_relaxed(0x00400000, vfe->base + VFE_YUV_CFG + 0x08);
 +	writel_relaxed(0x03ff0000, vfe->base + VFE_YUV_CFG + 0x0c);
-+	writel_relaxed(0x01c01ed8, vfe->base + VFE_YUV_CFG + 0x10);
-+	writel_relaxed(0x00001f68, vfe->base + VFE_YUV_CFG + 0x14);
++	writel_relaxed(0x021a1e9d, vfe->base + VFE_YUV_CFG + 0x10);
++	writel_relaxed(0x00001f4a, vfe->base + VFE_YUV_CFG + 0x14);
 +	writel_relaxed(0x02000000, vfe->base + VFE_YUV_CFG + 0x18);
 +	writel_relaxed(0x03ff0000, vfe->base + VFE_YUV_CFG + 0x1c);
-+	writel_relaxed(0x1fb81e88, vfe->base + VFE_YUV_CFG + 0x20);
-+	writel_relaxed(0x000001c0, vfe->base + VFE_YUV_CFG + 0x24);
++	writel_relaxed(0x1faa1e3d, vfe->base + VFE_YUV_CFG + 0x20);
++	writel_relaxed(0x0000021a, vfe->base + VFE_YUV_CFG + 0x24);
 +	writel_relaxed(0x02000000, vfe->base + VFE_YUV_CFG + 0x28);
 +	writel_relaxed(0x03ff0000, vfe->base + VFE_YUV_CFG + 0x2c);
 +
