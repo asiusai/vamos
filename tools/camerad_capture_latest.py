@@ -164,10 +164,19 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
 
     def frame_stats(buf, rgb):
       y = np.array(buf.data[:buf.uv_offset], dtype=np.uint8).reshape((-1, buf.stride))[:buf.height, :buf.width]
+      uv_height = ((buf.height // 2) + 15) // 16 * 16
+      uv_plane_size = buf.stride * uv_height
+      uv_data = buf.data[buf.uv_offset:buf.uv_offset + uv_plane_size]
+      u = np.array(uv_data[::2], dtype=np.uint8).reshape((-1, buf.stride // 2))[:buf.height // 2, :buf.width // 2]
+      v = np.array(uv_data[1::2], dtype=np.uint8).reshape((-1, buf.stride // 2))[:buf.height // 2, :buf.width // 2]
       luma = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]
       chroma = np.sqrt(((rgb.astype(np.float32) - rgb.mean(axis=2, keepdims=True)) ** 2).mean(axis=2))
       center = y[buf.height // 4:buf.height * 3 // 4, buf.width // 4:buf.width * 3 // 4]
+      u_center = u[buf.height // 8:buf.height * 3 // 8, buf.width // 8:buf.width * 3 // 8]
+      v_center = v[buf.height // 8:buf.height * 3 // 8, buf.width // 8:buf.width * 3 // 8]
       flat_rgb = rgb.reshape(-1, 3).astype(np.float32)
+      rgb_mean = flat_rgb.mean(axis=0)
+      rgb_median = np.median(flat_rgb, axis=0)
       return {{
         "width": int(buf.width),
         "height": int(buf.height),
@@ -180,8 +189,22 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
         "y_p99": float(np.percentile(y, 99.0)),
         "y_clip_lo_frac": float((y <= 4).mean()),
         "y_clip_hi_frac": float((y >= 250).mean()),
-        "rgb_mean": [float(x) for x in flat_rgb.mean(axis=0)],
-        "rgb_median": [float(x) for x in np.median(flat_rgb, axis=0)],
+        "u_mean": float(u.mean()),
+        "u_median": float(np.median(u)),
+        "u_center_median": float(np.median(u_center)),
+        "u_abs_mean": float(np.abs(u.astype(np.int16) - 128).mean()),
+        "v_mean": float(v.mean()),
+        "v_median": float(np.median(v)),
+        "v_center_median": float(np.median(v_center)),
+        "v_abs_mean": float(np.abs(v.astype(np.int16) - 128).mean()),
+        "uv_abs_mean": float((np.abs(u.astype(np.int16) - 128).mean() + np.abs(v.astype(np.int16) - 128).mean()) / 2.0),
+        "uv_center_abs_mean": float((np.abs(u_center.astype(np.int16) - 128).mean() + np.abs(v_center.astype(np.int16) - 128).mean()) / 2.0),
+        "rgb_mean": [float(x) for x in rgb_mean],
+        "rgb_median": [float(x) for x in rgb_median],
+        "rgb_mean_spread": float(rgb_mean.max() - rgb_mean.min()),
+        "rgb_median_spread": float(rgb_median.max() - rgb_median.min()),
+        "rgb_median_rg_delta": float(rgb_median[0] - rgb_median[1]),
+        "rgb_median_bg_delta": float(rgb_median[2] - rgb_median[1]),
         "luma_median": float(np.median(luma)),
         "luma_clip_hi_frac": float((luma >= 250.0).mean()),
         "mean_chroma": float(chroma.mean()),
