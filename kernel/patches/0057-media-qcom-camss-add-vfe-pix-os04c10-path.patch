@@ -373,7 +373,7 @@ index 19577728b..928892207 100644
 +	 * This keeps the VFE output neutral while letting sensor AE use longer
 +	 * exposure than the earlier high-gain 0x300/0x3e0 setup.
 +	 */
-+	writel_relaxed(0x01000180, vfe->base + VFE_WB_CFG + 0x00);
++	writel_relaxed(0x01000190, vfe->base + VFE_WB_CFG + 0x00);
 +	writel_relaxed(0x00000100, vfe->base + VFE_WB_CFG + 0x04);
 +	writel_relaxed(0x00000000, vfe->base + VFE_WB_CFG + 0x08);
 +	writel_relaxed(0x00000000, vfe->base + VFE_WB_CFG + 0x0c);
