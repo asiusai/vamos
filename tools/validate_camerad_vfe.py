@@ -34,6 +34,23 @@ FATAL_LOG_PATTERNS = [
   "V4L2 MMAP CPU-copy path",
 ]
 
+QUALITY_PROFILES = {
+  "bench": {},
+  "road": {
+    "min_y_median": 70.0,
+    "max_y_median": 190.0,
+    "min_y_range": 50.0,
+    "max_y_clip_lo": 0.20,
+    "max_y_clip_hi": 0.20,
+    "max_luma_clip_hi": 0.08,
+    "max_rgb_spread": 12.0,
+    "max_uv_median_offset": 2.0,
+    "max_uv_center_median_offset": 1.5,
+    "min_mean_chroma": 6.0,
+    "min_uv_abs": 4.0,
+  },
+}
+
 
 class Report:
   def __init__(self) -> None:
@@ -252,6 +269,12 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
     else:
       report.pass_(f"{cam}: raw stats size {width}x{height}")
 
+    u_median = float(data.get("u_median", 999.0))
+    v_median = float(data.get("v_median", 999.0))
+    u_center_median = float(data.get("u_center_median", 999.0))
+    v_center_median = float(data.get("v_center_median", 999.0))
+    max_uv_median_offset = max(abs(u_median - 128.0), abs(v_median - 128.0))
+    max_uv_center_median_offset = max(abs(u_center_median - 128.0), abs(v_center_median - 128.0))
     image_summary = {
       "width": width,
       "height": height,
@@ -262,6 +285,12 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
       "y_clip_hi_frac": float(data.get("y_clip_hi_frac", 1.0)),
       "luma_clip_hi_frac": float(data.get("luma_clip_hi_frac", 1.0)),
       "rgb_median_spread": float(data.get("rgb_median_spread", 999.0)),
+      "u_median": u_median,
+      "v_median": v_median,
+      "u_center_median": u_center_median,
+      "v_center_median": v_center_median,
+      "max_uv_median_offset": max_uv_median_offset,
+      "max_uv_center_median_offset": max_uv_center_median_offset,
       "mean_chroma": float(data.get("mean_chroma", -1.0)),
       "uv_abs_mean": float(data.get("uv_abs_mean", -1.0)),
     }
@@ -274,6 +303,8 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
       ("y_clip_hi_frac", image_summary["y_clip_hi_frac"], 0.0, args.max_y_clip_hi),
       ("luma_clip_hi_frac", image_summary["luma_clip_hi_frac"], 0.0, args.max_luma_clip_hi),
       ("rgb_median_spread", image_summary["rgb_median_spread"], 0.0, args.max_rgb_spread),
+      ("max_uv_median_offset", image_summary["max_uv_median_offset"], 0.0, args.max_uv_median_offset),
+      ("max_uv_center_median_offset", image_summary["max_uv_center_median_offset"], 0.0, args.max_uv_center_median_offset),
       ("mean_chroma", image_summary["mean_chroma"], args.min_mean_chroma, 999.0),
       ("uv_abs_mean", image_summary["uv_abs_mean"], args.min_uv_abs, 999.0),
     ]
@@ -284,10 +315,35 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
         report.pass_(f"{cam}: {name}={value:.3f} inside [{low:.3f}, {high:.3f}]")
 
 
+def apply_quality_profile(args: argparse.Namespace) -> dict[str, dict[str, float]]:
+  profile = QUALITY_PROFILES[args.quality_profile]
+  applied: dict[str, dict[str, float]] = {}
+  for attr, target in profile.items():
+    current = float(getattr(args, attr))
+    if attr.startswith("min_"):
+      value = max(current, target)
+    elif attr.startswith("max_"):
+      value = min(current, target)
+    else:
+      value = target
+    setattr(args, attr, value)
+    applied[attr] = {
+      "requested": target,
+      "applied": value,
+    }
+  return applied
+
+
 def main() -> int:
   parser = argparse.ArgumentParser()
   parser.add_argument("run_dir", type=Path, help="output directory from camerad_capture_latest.py")
   parser.add_argument("--cam", choices=("cam1", "cam2", "cam3", "both", "all"), default="both")
+  parser.add_argument(
+    "--quality-profile",
+    choices=tuple(QUALITY_PROFILES),
+    default="bench",
+    help="bench keeps broad bring-up thresholds; road adds stricter image-quality thresholds",
+  )
   parser.add_argument("--require-dmabuf", action=argparse.BooleanOptionalAction, default=True)
   parser.add_argument("--min-frames", type=int, default=20, help="minimum DEBUG_FRAMES lines per selected camera")
   parser.add_argument("--min-fps", type=float, default=18.0)
@@ -306,10 +362,13 @@ def main() -> int:
   parser.add_argument("--max-y-clip-hi", type=float, default=0.30)
   parser.add_argument("--max-luma-clip-hi", type=float, default=0.30)
   parser.add_argument("--max-rgb-spread", type=float, default=50.0)
+  parser.add_argument("--max-uv-median-offset", type=float, default=999.0, help="maximum absolute U/V full-frame median offset from 128")
+  parser.add_argument("--max-uv-center-median-offset", type=float, default=999.0, help="maximum absolute U/V center median offset from 128")
   parser.add_argument("--min-mean-chroma", type=float, default=1.0)
   parser.add_argument("--min-uv-abs", type=float, default=1.0)
   parser.add_argument("--summary-json", type=Path, help=f"write compact JSON summary; default is RUN_DIR/{SUMMARY_FILE}")
   args = parser.parse_args()
+  applied_quality_profile = apply_quality_profile(args)
 
   report = Report()
   cams = camera_list(args.cam)
@@ -318,6 +377,8 @@ def main() -> int:
     "cams": cams,
     "cameras": {},
     "thresholds": {
+      "quality_profile": args.quality_profile,
+      "applied_quality_profile": applied_quality_profile,
       "require_dmabuf": args.require_dmabuf,
       "min_frames": args.min_frames,
       "min_fps": args.min_fps,
@@ -325,8 +386,17 @@ def main() -> int:
       "max_slow_gaps": args.max_slow_gaps,
       "require_cpu_stats": args.require_cpu_stats,
       "max_camerad_cpu_pct": args.max_camerad_cpu_pct,
+      "min_y_median": args.min_y_median,
+      "max_y_median": args.max_y_median,
       "min_y_range": args.min_y_range,
+      "max_y_clip_lo": args.max_y_clip_lo,
+      "max_y_clip_hi": args.max_y_clip_hi,
+      "max_luma_clip_hi": args.max_luma_clip_hi,
       "max_rgb_spread": args.max_rgb_spread,
+      "max_uv_median_offset": args.max_uv_median_offset,
+      "max_uv_center_median_offset": args.max_uv_center_median_offset,
+      "min_mean_chroma": args.min_mean_chroma,
+      "min_uv_abs": args.min_uv_abs,
     },
   }
   if not args.run_dir.is_dir():
