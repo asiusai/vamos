@@ -72,6 +72,8 @@ REMOTE_VIPC_STATS = "/tmp/camerad_vipc_stats_latest.json"
 LOCAL_VIPC_STATS = "latest-camerad-vipc-stats.json"
 REMOTE_CPU_STATS = "/tmp/camerad_cpu_stats_latest.json"
 LOCAL_CPU_STATS = "latest-camerad-cpu-stats.json"
+REMOTE_DMESG_LOG = "/tmp/camerad_dmesg_latest.log"
+LOCAL_DMESG_LOG = "latest-camerad-dmesg.log"
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -119,7 +121,7 @@ def remote_env(selection: str, exposure_lines: int, target_grey: float, chroma_s
 def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_lines: int, target_grey: float,
                   chroma_scale: float, preview_saturation: float, preview_median: float,
                   pix_ioctl: bool, raw_debug: bool, rdi: bool, monitor_duration: float,
-                  debug_frames: bool, extra_env: list[str]) -> str:
+                  debug_frames: bool, capture_dmesg: bool, extra_env: list[str]) -> str:
   cameras = camera_list(selection)
   targets_literal = repr(cameras)
   raw_images_literal = repr(REMOTE_RAW_IMAGES)
@@ -127,6 +129,7 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
   env_words = " ".join(shlex.quote(word) for word in remote_env(
     selection, exposure_lines, target_grey, chroma_scale, preview_saturation, preview_median, pix_ioctl, rdi, debug_frames, extra_env))
   openpilot_dir_q = shlex.quote(openpilot_dir)
+  capture_dmesg_value = "1" if capture_dmesg else "0"
   return textwrap.dedent(f"""\
     set -e
     lock_dir=/tmp/camerad_capture_latest.lock
@@ -135,11 +138,23 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
       exit 75
     fi
     pid=""
+    capture_dmesg={capture_dmesg_value}
+    dmesg_before_lines=0
+    collect_dmesg() {{
+      [ "$capture_dmesg" = "1" ] || return 0
+      start_line=$((dmesg_before_lines + 1))
+      if command -v dmesg >/dev/null 2>&1; then
+        dmesg 2>/dev/null | tail -n +"$start_line" > {REMOTE_DMESG_LOG} || true
+      else
+        echo "dmesg command unavailable" > {REMOTE_DMESG_LOG}
+      fi
+    }}
     cleanup() {{
       if [ -n "$pid" ]; then
         kill "$pid" 2>/dev/null || true
         wait "$pid" 2>/dev/null || true
       fi
+      collect_dmesg
       rmdir "$lock_dir" 2>/dev/null || true
     }}
     trap cleanup EXIT
@@ -147,9 +162,12 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
     rm -f /tmp/asius-cam1-latest.jpg /tmp/asius-cam2-latest.jpg /tmp/asius-cam3-latest.jpg \\
       /tmp/asius-cam1-raw.jpg /tmp/asius-cam2-raw.jpg /tmp/asius-cam3-raw.jpg \\
       /tmp/asius-cam1-raw-stats.json /tmp/asius-cam2-raw-stats.json /tmp/asius-cam3-raw-stats.json \\
-      {REMOTE_LOG} {REMOTE_VIPC_STATS} {REMOTE_CPU_STATS} /tmp/camerad_dual_latest.pid
+      {REMOTE_LOG} {REMOTE_VIPC_STATS} {REMOTE_CPU_STATS} {REMOTE_DMESG_LOG} /tmp/camerad_dual_latest.pid
     pkill -x camerad 2>/dev/null || true
     pkill -f '/tmp/camerad-cache' 2>/dev/null || true
+    if [ "$capture_dmesg" = "1" ] && command -v dmesg >/dev/null 2>&1; then
+      dmesg_before_lines=$(dmesg 2>/dev/null | wc -l || echo 0)
+    fi
     export {env_words}
     ./system/camerad/camerad > {REMOTE_LOG} 2>&1 &
     pid=$!
@@ -424,6 +442,8 @@ def main() -> int:
   parser.add_argument("--validate-max-slow-gaps", type=int, default=0, help="maximum slow VFE frame gaps when --validate-vfe is set")
   parser.add_argument("--validate-max-cpu-pct", type=float, default=10.0, help="maximum camerad single-core CPU percent during the monitor window when --validate-vfe is set")
   parser.add_argument("--validate-quality-profile", choices=("bench", "road"), default="bench", help="image-stat threshold profile passed to validate_camerad_vfe.py")
+  parser.add_argument("--check-dmesg", action="store_true", help="capture dmesg during the camerad run; with --validate-vfe, fail on CAMSS/VFE errors, stalls, or buffer-address spam")
+  parser.add_argument("--validate-max-dmesg-matches", type=int, default=0, help="maximum forbidden dmesg matches allowed when --validate-vfe --check-dmesg is set")
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="extra remote camerad environment variable")
   args = parser.parse_args()
 
@@ -437,7 +457,7 @@ def main() -> int:
   script = remote_script(args.openpilot_dir, args.cam, args.settle, args.exposure_lines, args.target_grey,
                          args.chroma_scale, args.preview_saturation, args.preview_median,
                          args.pix_ioctl, args.raw_debug, args.rdi, args.monitor_duration,
-                         args.camerad_debug_frames, args.env)
+                         args.camerad_debug_frames, args.check_dmesg, args.env)
   run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "bash", "-s"], input=script, text=True)
 
   cameras = camera_list(args.cam)
@@ -492,9 +512,17 @@ def main() -> int:
       print(f"cpu_stats: remote={REMOTE_CPU_STATS} local={cpu_stats_local} camerad_cpu={cpu_text} bytes={cpu_stats_local.stat().st_size}")
     except (OSError, ValueError, TypeError):
       print(f"cpu_stats: remote={REMOTE_CPU_STATS} local={cpu_stats_local} bytes={cpu_stats_local.stat().st_size}")
+  if args.check_dmesg:
+    dmesg_log_local = out_dir / LOCAL_DMESG_LOG
+    dmesg_present = subprocess.run(["ssh", *SSH_OPTS, f"comma@{NCM_IP}", "test", "-e", REMOTE_DMESG_LOG], check=False)
+    if dmesg_present.returncode == 0:
+      pull_file(REMOTE_DMESG_LOG, dmesg_log_local)
+      print(f"dmesg: remote={REMOTE_DMESG_LOG} local={dmesg_log_local} bytes={dmesg_log_local.stat().st_size}")
+    else:
+      print(f"dmesg: no remote log at {REMOTE_DMESG_LOG}")
   if args.validate_vfe:
     validator = Path(__file__).with_name("validate_camerad_vfe.py")
-    ret = subprocess.run([
+    validator_cmd = [
       sys.executable,
       str(validator),
       str(out_dir),
@@ -505,7 +533,10 @@ def main() -> int:
       "--max-slow-gaps", str(args.validate_max_slow_gaps),
       "--require-cpu-stats",
       "--max-camerad-cpu-pct", str(args.validate_max_cpu_pct),
-    ])
+    ]
+    if args.check_dmesg:
+      validator_cmd.extend(["--check-dmesg", "--max-dmesg-matches", str(args.validate_max_dmesg_matches)])
+    ret = subprocess.run(validator_cmd)
     if ret.returncode != 0:
       return ret.returncode
   return 0
