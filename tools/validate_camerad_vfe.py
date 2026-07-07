@@ -182,6 +182,9 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
 
     checks = [
       ("y_median", float(data.get("y_median", -1.0)), args.min_y_median, args.max_y_median),
+      ("y_range_p99_p01", float(data.get("y_p99", -1.0)) - float(data.get("y_p01", 999.0)), args.min_y_range, 999.0),
+      ("y_clip_lo_frac", float(data.get("y_clip_lo_frac", 1.0)), 0.0, args.max_y_clip_lo),
+      ("y_clip_hi_frac", float(data.get("y_clip_hi_frac", 1.0)), 0.0, args.max_y_clip_hi),
       ("luma_clip_hi_frac", float(data.get("luma_clip_hi_frac", 1.0)), 0.0, args.max_luma_clip_hi),
       ("rgb_median_spread", float(data.get("rgb_median_spread", 999.0)), 0.0, args.max_rgb_spread),
       ("mean_chroma", float(data.get("mean_chroma", -1.0)), args.min_mean_chroma, 999.0),
@@ -208,6 +211,9 @@ def main() -> int:
   parser.add_argument("--no-raw-stats", action="store_true", help="skip raw-debug JSON image-stat checks")
   parser.add_argument("--min-y-median", type=float, default=20.0)
   parser.add_argument("--max-y-median", type=float, default=235.0)
+  parser.add_argument("--min-y-range", type=float, default=30.0, help="minimum raw Y p99-p01 contrast range")
+  parser.add_argument("--max-y-clip-lo", type=float, default=0.30)
+  parser.add_argument("--max-y-clip-hi", type=float, default=0.30)
   parser.add_argument("--max-luma-clip-hi", type=float, default=0.30)
   parser.add_argument("--max-rgb-spread", type=float, default=50.0)
   parser.add_argument("--min-mean-chroma", type=float, default=1.0)
