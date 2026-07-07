@@ -63,6 +63,7 @@ def main() -> int:
   parser.add_argument("--openpilot-dir", default="/data/openpilot_hw_vfe")
   parser.add_argument("--out-dir", type=Path, default=None)
   parser.add_argument("--snapshot-settle", type=float, default=7.0)
+  parser.add_argument("--snapshot-monitor-duration", type=float, default=15.0)
   parser.add_argument("--snapshot-profile", default="daylight-road", choices=("bench", "road", "road-spatial", "daylight-road"))
   parser.add_argument("--modeld-duration", type=float, default=25.0)
   parser.add_argument("--modeld-settle", type=float, default=7.0)
@@ -78,6 +79,8 @@ def main() -> int:
     parser.error("--target-grey must be non-negative")
   if args.pull_timeout <= 0.0:
     parser.error("--pull-timeout must be positive")
+  if args.snapshot_monitor_duration <= 0.0:
+    parser.error("--snapshot-monitor-duration must be positive")
 
   out_dir = args.out_dir or default_out_dir()
   snapshot_dir = out_dir / "snapshot"
@@ -91,6 +94,7 @@ def main() -> int:
     "snapshot": {
       "skipped": bool(args.skip_snapshot),
       "out_dir": str(snapshot_dir),
+      "monitor_duration": args.snapshot_monitor_duration,
       "profile": args.snapshot_profile,
     },
     "modeld": {
@@ -114,6 +118,7 @@ def main() -> int:
       "--cam", "both",
       "--out-dir", str(snapshot_dir),
       "--settle", str(args.snapshot_settle),
+      "--monitor-duration", str(args.snapshot_monitor_duration),
       "--target-grey", str(args.target_grey),
       "--validate-vfe",
       "--validate-quality-profile", args.snapshot_profile,
