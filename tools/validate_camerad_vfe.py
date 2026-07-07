@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""Validate a CAM2/CAM3 camerad_capture_latest.py VFE PIX capture directory."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import statistics
+from pathlib import Path
+
+
+LOG_FILE = "latest-camerad-dual.log"
+VIPC_STATS_FILE = "latest-camerad-vipc-stats.json"
+
+CAMERA_NUMS = {
+  "cam1": "2",
+  "cam2": "1",
+  "cam3": "0",
+}
+
+STAT_FILES = {
+  "cam1": "latest-camerad-driver-raw-stats.json",
+  "cam2": "latest-camerad-road-raw-stats.json",
+  "cam3": "latest-camerad-wide-raw-stats.json",
+}
+
+FATAL_LOG_PATTERNS = [
+  "falling back to RDI",
+  "NV12 sw debayer",
+  "VFE PIX unavailable",
+]
+
+
+class Report:
+  def __init__(self) -> None:
+    self.failures: list[str] = []
+    self.warnings: list[str] = []
+
+  def pass_(self, text: str) -> None:
+    print(f"PASS {text}")
+
+  def fail(self, text: str) -> None:
+    self.failures.append(text)
+    print(f"FAIL {text}")
+
+  def warn(self, text: str) -> None:
+    self.warnings.append(text)
+    print(f"WARN {text}")
+
+
+def camera_list(selection: str) -> list[str]:
+  if selection == "all":
+    return ["cam1", "cam2", "cam3"]
+  if selection == "both":
+    return ["cam2", "cam3"]
+  return [selection]
+
+
+def load_json(path: Path, report: Report, label: str) -> dict | None:
+  if not path.exists():
+    report.fail(f"{label} missing: {path}")
+    return None
+  try:
+    with path.open() as f:
+      data = json.load(f)
+  except (OSError, json.JSONDecodeError) as e:
+    report.fail(f"{label} unreadable: {path}: {e}")
+    return None
+  report.pass_(f"{label} present: {path}")
+  return data
+
+
+def frame_times(log_text: str, cam: str) -> list[float]:
+  cam_num = CAMERA_NUMS[cam]
+  times: list[float] = []
+  pattern = re.compile(rf"^cam {re.escape(cam_num)} frame \d+ .* ts ([0-9.]+) ms .*VFE PIX", re.MULTILINE)
+  for match in pattern.finditer(log_text):
+    times.append(float(match.group(1)))
+  return times
+
+
+def validate_log(run_dir: Path, cams: list[str], args: argparse.Namespace, report: Report) -> str:
+  log_path = run_dir / LOG_FILE
+  if not log_path.exists():
+    report.fail(f"log missing: {log_path}")
+    return ""
+
+  log_text = log_path.read_text(errors="replace")
+  report.pass_(f"log present: {log_path}")
+
+  for pattern in FATAL_LOG_PATTERNS:
+    if pattern in log_text:
+      report.fail(f"log contains forbidden fallback marker: {pattern}")
+    else:
+      report.pass_(f"log has no fallback marker: {pattern}")
+
+  if args.require_dmabuf and "REQBUFS DMABUF failed" in log_text:
+    report.fail("log contains DMABUF fallback: REQBUFS DMABUF failed")
+  elif args.require_dmabuf:
+    report.pass_("log has no DMABUF fallback")
+
+  for cam in cams:
+    cam_num = CAMERA_NUMS[cam]
+    mode_pattern = rf"cam {re.escape(cam_num)}: VIPC buffers created \(VFE PIX V4L2"
+    if re.search(mode_pattern, log_text) is None:
+      report.fail(f"{cam}: missing VFE PIX V4L2 VIPC buffer creation")
+    else:
+      report.pass_(f"{cam}: VFE PIX V4L2 VIPC buffer creation found")
+
+    if args.require_dmabuf:
+      dmabuf_pattern = rf"cam {re.escape(cam_num)}: VIPC buffers created \(VFE PIX V4L2 DMABUF NV12"
+      if re.search(dmabuf_pattern, log_text) is None:
+        report.fail(f"{cam}: missing VFE PIX V4L2 DMABUF NV12 mode")
+      else:
+        report.pass_(f"{cam}: VFE PIX V4L2 DMABUF NV12 mode found")
+
+    times = frame_times(log_text, cam)
+    if args.min_frames > 0:
+      if len(times) < args.min_frames:
+        report.fail(f"{cam}: only {len(times)} debug frames, expected >= {args.min_frames}")
+      else:
+        report.pass_(f"{cam}: {len(times)} debug frames >= {args.min_frames}")
+
+    if len(times) >= 2:
+      intervals = [b - a for a, b in zip(times, times[1:])]
+      median_ms = statistics.median(intervals)
+      fps = 1000.0 / median_ms if median_ms > 0 else 0.0
+      slow_gaps = sum(1 for interval in intervals if interval > args.slow_gap_ms)
+      if fps < args.min_fps:
+        report.fail(f"{cam}: median FPS {fps:.2f} below {args.min_fps:.2f}")
+      else:
+        report.pass_(f"{cam}: median FPS {fps:.2f} >= {args.min_fps:.2f}")
+      if slow_gaps > args.max_slow_gaps:
+        report.fail(f"{cam}: slow gaps {slow_gaps} > {args.max_slow_gaps} over {args.slow_gap_ms:.1f} ms")
+      else:
+        report.pass_(f"{cam}: slow gaps {slow_gaps} <= {args.max_slow_gaps}")
+    elif args.min_frames > 0:
+      report.fail(f"{cam}: no usable VFE PIX debug frame timestamps; capture with --camerad-debug-frames")
+
+  return log_text
+
+
+def validate_vipc_stats(run_dir: Path, cams: list[str], args: argparse.Namespace, report: Report) -> None:
+  data = load_json(run_dir / VIPC_STATS_FILE, report, "VIPC stats")
+  if data is None:
+    return
+
+  for cam in cams:
+    stats = data.get(cam)
+    if not isinstance(stats, dict):
+      report.fail(f"{cam}: missing VIPC stats entry")
+      continue
+    width = int(stats.get("width", 0))
+    height = int(stats.get("height", 0))
+    stride = int(stats.get("stride", 0))
+    if width < args.min_width or height < args.min_height:
+      report.fail(f"{cam}: VIPC size {width}x{height} below {args.min_width}x{args.min_height}")
+    else:
+      report.pass_(f"{cam}: VIPC size {width}x{height}")
+    if stride < width:
+      report.fail(f"{cam}: VIPC stride {stride} below width {width}")
+    else:
+      report.pass_(f"{cam}: VIPC stride {stride} >= width {width}")
+
+
+def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespace, report: Report) -> None:
+  if args.no_raw_stats:
+    return
+
+  for cam in cams:
+    data = load_json(run_dir / STAT_FILES[cam], report, f"{cam} raw stats")
+    if data is None:
+      continue
+
+    width = int(data.get("width", 0))
+    height = int(data.get("height", 0))
+    if width < args.min_width or height < args.min_height:
+      report.fail(f"{cam}: raw stats size {width}x{height} below {args.min_width}x{args.min_height}")
+    else:
+      report.pass_(f"{cam}: raw stats size {width}x{height}")
+
+    checks = [
+      ("y_median", float(data.get("y_median", -1.0)), args.min_y_median, args.max_y_median),
+      ("luma_clip_hi_frac", float(data.get("luma_clip_hi_frac", 1.0)), 0.0, args.max_luma_clip_hi),
+      ("rgb_median_spread", float(data.get("rgb_median_spread", 999.0)), 0.0, args.max_rgb_spread),
+      ("mean_chroma", float(data.get("mean_chroma", -1.0)), args.min_mean_chroma, 999.0),
+      ("uv_abs_mean", float(data.get("uv_abs_mean", -1.0)), args.min_uv_abs, 999.0),
+    ]
+    for name, value, low, high in checks:
+      if value < low or value > high:
+        report.fail(f"{cam}: {name}={value:.3f} outside [{low:.3f}, {high:.3f}]")
+      else:
+        report.pass_(f"{cam}: {name}={value:.3f} inside [{low:.3f}, {high:.3f}]")
+
+
+def main() -> int:
+  parser = argparse.ArgumentParser()
+  parser.add_argument("run_dir", type=Path, help="output directory from camerad_capture_latest.py")
+  parser.add_argument("--cam", choices=("cam1", "cam2", "cam3", "both", "all"), default="both")
+  parser.add_argument("--require-dmabuf", action=argparse.BooleanOptionalAction, default=True)
+  parser.add_argument("--min-frames", type=int, default=20, help="minimum DEBUG_FRAMES lines per selected camera")
+  parser.add_argument("--min-fps", type=float, default=18.0)
+  parser.add_argument("--slow-gap-ms", type=float, default=75.0)
+  parser.add_argument("--max-slow-gaps", type=int, default=0)
+  parser.add_argument("--min-width", type=int, default=1280)
+  parser.add_argument("--min-height", type=int, default=720)
+  parser.add_argument("--no-raw-stats", action="store_true", help="skip raw-debug JSON image-stat checks")
+  parser.add_argument("--min-y-median", type=float, default=20.0)
+  parser.add_argument("--max-y-median", type=float, default=235.0)
+  parser.add_argument("--max-luma-clip-hi", type=float, default=0.30)
+  parser.add_argument("--max-rgb-spread", type=float, default=50.0)
+  parser.add_argument("--min-mean-chroma", type=float, default=1.0)
+  parser.add_argument("--min-uv-abs", type=float, default=1.0)
+  args = parser.parse_args()
+
+  report = Report()
+  cams = camera_list(args.cam)
+  if not args.run_dir.is_dir():
+    report.fail(f"run directory missing: {args.run_dir}")
+    return 1
+
+  validate_log(args.run_dir, cams, args, report)
+  validate_vipc_stats(args.run_dir, cams, args, report)
+  validate_image_stats(args.run_dir, cams, args, report)
+
+  print(f"summary: failures={len(report.failures)} warnings={len(report.warnings)}")
+  return 1 if report.failures else 0
+
+
+if __name__ == "__main__":
+  raise SystemExit(main())
