@@ -414,6 +414,7 @@ def main() -> int:
   parser.add_argument("--validate-min-fps", type=float, default=18.0, help="minimum median VFE FPS when --validate-vfe is set")
   parser.add_argument("--validate-max-slow-gaps", type=int, default=0, help="maximum slow VFE frame gaps when --validate-vfe is set")
   parser.add_argument("--validate-max-cpu-pct", type=float, default=10.0, help="maximum camerad single-core CPU percent during the monitor window when --validate-vfe is set")
+  parser.add_argument("--validate-quality-profile", choices=("bench", "road"), default="bench", help="image-stat threshold profile passed to validate_camerad_vfe.py")
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="extra remote camerad environment variable")
   args = parser.parse_args()
 
@@ -489,6 +490,7 @@ def main() -> int:
       str(validator),
       str(out_dir),
       "--cam", args.cam,
+      "--quality-profile", args.validate_quality_profile,
       "--min-frames", str(args.validate_min_frames),
       "--min-fps", str(args.validate_min_fps),
       "--max-slow-gaps", str(args.validate_max_slow_gaps),
