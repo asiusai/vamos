@@ -236,6 +236,64 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
       "cam3": ("wide", VisionStreamType.VISION_STREAM_WIDE_ROAD, "/tmp/asius-cam3-latest.jpg"),
     }}
 
+    def highfreq_abs_mean(plane):
+      if plane.shape[0] < 2 or plane.shape[1] < 2:
+        return 0.0
+      plane_i = plane.astype(np.int16)
+      dx = np.abs(np.diff(plane_i, axis=1)).mean()
+      dy = np.abs(np.diff(plane_i, axis=0)).mean()
+      return float((dx + dy) / 2.0)
+
+    def tile_frame_stats(y, u, v, rgb, rows=5, cols=5):
+      tiles = []
+      for row in range(rows):
+        y0 = rgb.shape[0] * row // rows
+        y1 = rgb.shape[0] * (row + 1) // rows
+        for col in range(cols):
+          x0 = rgb.shape[1] * col // cols
+          x1 = rgb.shape[1] * (col + 1) // cols
+          uy0 = max(0, y0 // 2)
+          uy1 = max(uy0 + 1, y1 // 2)
+          ux0 = max(0, x0 // 2)
+          ux1 = max(ux0 + 1, x1 // 2)
+
+          rgb_tile = rgb[y0:y1, x0:x1].reshape(-1, 3).astype(np.float32)
+          rgb_median = np.median(rgb_tile, axis=0)
+          tile = dict(
+            row=int(row),
+            col=int(col),
+            x0=int(x0),
+            y0=int(y0),
+            x1=int(x1),
+            y1=int(y1),
+            y_median=float(np.median(y[y0:y1, x0:x1])),
+            u_median=float(np.median(u[uy0:uy1, ux0:ux1])),
+            v_median=float(np.median(v[uy0:uy1, ux0:ux1])),
+            rgb_median=[float(x) for x in rgb_median],
+            rgb_median_spread=float(rgb_median.max() - rgb_median.min()),
+          )
+          tile["uv_median_offset"] = float(max(abs(tile["u_median"] - 128.0), abs(tile["v_median"] - 128.0)))
+          tiles.append(tile)
+
+      y_medians = np.array([tile["y_median"] for tile in tiles], dtype=np.float32)
+      u_medians = np.array([tile["u_median"] for tile in tiles], dtype=np.float32)
+      v_medians = np.array([tile["v_median"] for tile in tiles], dtype=np.float32)
+      rgb_spreads = np.array([tile["rgb_median_spread"] for tile in tiles], dtype=np.float32)
+      uv_offsets = np.array([tile["uv_median_offset"] for tile in tiles], dtype=np.float32)
+      return dict(
+        tile_rows=int(rows),
+        tile_cols=int(cols),
+        tiles=tiles,
+        tile_y_median_range=float(y_medians.max() - y_medians.min()),
+        tile_u_median_range=float(u_medians.max() - u_medians.min()),
+        tile_v_median_range=float(v_medians.max() - v_medians.min()),
+        tile_uv_median_range=float(max(u_medians.max() - u_medians.min(), v_medians.max() - v_medians.min())),
+        tile_max_uv_median_offset=float(uv_offsets.max()),
+        tile_p95_uv_median_offset=float(np.percentile(uv_offsets, 95.0)),
+        tile_max_rgb_median_spread=float(rgb_spreads.max()),
+        tile_p95_rgb_median_spread=float(np.percentile(rgb_spreads, 95.0)),
+      )
+
     def frame_stats(buf, rgb):
       y = np.array(buf.data[:buf.uv_offset], dtype=np.uint8).reshape((-1, buf.stride))[:buf.height, :buf.width]
       uv_height = ((buf.height // 2) + 15) // 16 * 16
@@ -251,7 +309,7 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
       flat_rgb = rgb.reshape(-1, 3).astype(np.float32)
       rgb_mean = flat_rgb.mean(axis=0)
       rgb_median = np.median(flat_rgb, axis=0)
-      return {{
+      stats = {{
         "width": int(buf.width),
         "height": int(buf.height),
         "stride": int(buf.stride),
@@ -282,7 +340,13 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
         "luma_median": float(np.median(luma)),
         "luma_clip_hi_frac": float((luma >= 250.0).mean()),
         "mean_chroma": float(chroma.mean()),
+        "y_hf_abs_mean": highfreq_abs_mean(y),
+        "u_hf_abs_mean": highfreq_abs_mean(u),
+        "v_hf_abs_mean": highfreq_abs_mean(v),
       }}
+      stats["uv_hf_abs_mean"] = float((stats["u_hf_abs_mean"] + stats["v_hf_abs_mean"]) / 2.0)
+      stats.update(tile_frame_stats(y, u, v, rgb))
+      return stats
 
     clients = {{}}
     unavailable = set()
@@ -441,7 +505,7 @@ def main() -> int:
   parser.add_argument("--validate-min-fps", type=float, default=18.0, help="minimum median VFE FPS when --validate-vfe is set")
   parser.add_argument("--validate-max-slow-gaps", type=int, default=0, help="maximum slow VFE frame gaps when --validate-vfe is set")
   parser.add_argument("--validate-max-cpu-pct", type=float, default=10.0, help="maximum camerad single-core CPU percent during the monitor window when --validate-vfe is set")
-  parser.add_argument("--validate-quality-profile", choices=("bench", "road"), default="bench", help="image-stat threshold profile passed to validate_camerad_vfe.py")
+  parser.add_argument("--validate-quality-profile", choices=("bench", "road", "road-spatial"), default="bench", help="image-stat threshold profile passed to validate_camerad_vfe.py")
   parser.add_argument("--check-dmesg", action="store_true", help="capture dmesg during the camerad run; with --validate-vfe, fail on CAMSS/VFE errors, stalls, or buffer-address spam")
   parser.add_argument("--validate-max-dmesg-matches", type=int, default=0, help="maximum forbidden dmesg matches allowed when --validate-vfe --check-dmesg is set")
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="extra remote camerad environment variable")
