@@ -78,7 +78,7 @@ diff --git a/drivers/media/platform/qcom/camss/camss-video.c b/drivers/media/pla
 +	     format->pixelformat == V4L2_PIX_FMT_NV21 ||
 +	     format->pixelformat == V4L2_PIX_FMT_NV16 ||
 +	     format->pixelformat == V4L2_PIX_FMT_NV61))
-+		dev_info(video->camss->dev,
++		dev_dbg(video->camss->dev,
 +			 "%s pix buf%u addr0=%pad addr1=%pad size0=%u bpl=%u height=%u\n",
 +			 video->vdev.name, vb->index, &buffer->addr[0],
 +			 &buffer->addr[1], format->plane_fmt[0].sizeimage,
