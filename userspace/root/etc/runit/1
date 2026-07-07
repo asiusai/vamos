@@ -32,6 +32,45 @@ if [ -d /sys/firmware/efi ]; then
     fi
 fi
 
+configure_efi_boot() {
+    [ -d /sys/firmware/efi/efivars ] || return 0
+
+    # Radxa's edk2 firmware has its own boot prompt timeout in addition to
+    # the standard UEFI Timeout variable. Keep the attributes header and set
+    # the uint32 payload to zero.
+    boot_ask="/sys/firmware/efi/efivars/BootAskTimeoutSecs-5f4065c9-d7bf-4555-b55d-820b3defd23a"
+    if [ -e "$boot_ask" ]; then
+        chattr -i "$boot_ask" 2>/dev/null || true
+        printf '\x07\x00\x00\x00\x00\x00\x00\x00' > "$boot_ask" 2>/dev/null || \
+            echo "WARN: failed to set EFI BootAskTimeoutSecs"
+        chattr +i "$boot_ask" 2>/dev/null || true
+    fi
+
+    command -v efibootmgr >/dev/null 2>&1 || return 0
+    efibootmgr -t 0 >/dev/null 2>&1 || echo "WARN: failed to set EFI boot timeout"
+
+    # Without BootOrder, edk2 enters recovery/fallback scanning on every boot,
+    # which leaves the firmware screen up for several seconds. Install a real
+    # NVRAM boot entry for the ESP fallback loader and make it first.
+    boot_num="$(efibootmgr -v 2>/dev/null | sed -n 's/^Boot\([0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]\).*[\\/][Ee][Ff][Ii][\\/][Bb][Oo][Oo][Tt][\\/][Bb][Oo][Oo][Tt][Aa][Aa]64\.[Ee][Ff][Ii].*/\1/p' | head -n 1)"
+    if [ -n "$boot_num" ]; then
+        efibootmgr 2>/dev/null | grep -q "^BootOrder:.*$boot_num" || \
+            efibootmgr -o "$boot_num" >/dev/null 2>&1 || echo "WARN: failed to set EFI BootOrder"
+        return 0
+    fi
+
+    esp_dev="$(readlink -f /dev/disk/by-partlabel/esp 2>/dev/null || true)"
+    [ -n "$esp_dev" ] || return 0
+
+    disk="/dev/$(lsblk -no PKNAME "$esp_dev" 2>/dev/null | head -n 1)"
+    part="$(lsblk -no PARTN "$esp_dev" 2>/dev/null | head -n 1)"
+    if [ -b "$disk" ] && [ -n "$part" ]; then
+        efibootmgr -c -d "$disk" -p "$part" -L "vamOS" -l '\EFI\BOOT\BOOTAA64.EFI' >/dev/null 2>&1 || \
+            echo "WARN: failed to create vamOS EFI boot entry"
+        efibootmgr -t 0 >/dev/null 2>&1 || true
+    fi
+}
+
 # Mount /var, /tmp, /rwtmp as tmpfs early (from fstab, but we need it before services start)
 mountpoint -q /var || mount -t tmpfs tmpfs /var -o rw,nosuid,nodev,size=128M,mode=755
 mountpoint -q /tmp || mount -t tmpfs tmpfs /tmp -o rw,nosuid,nodev,size=150M,mode=1777
@@ -94,6 +133,8 @@ else
     ls -la /usr/bin/udev* 2>/dev/null || true
     ls -la /sbin/udev* 2>/dev/null || true
 fi
+
+configure_efi_boot
 
 # Wait for a device to appear (up to timeout seconds)
 wait_for_dev() {
