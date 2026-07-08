@@ -90,6 +90,14 @@ def visual_check_artifacts_present(artifacts: dict) -> bool:
   )
 
 
+def visual_check_hash_matches(artifacts: dict, expected_sha256: str) -> bool:
+  expected = expected_sha256.strip().lower()
+  if not expected:
+    return False
+  actual = str(artifacts.get("host_montage", {}).get("sha256", "")).lower()
+  return actual == expected
+
+
 def camera_extract(snapshot: dict | None) -> dict:
   if not isinstance(snapshot, dict):
     return {}
@@ -170,6 +178,11 @@ def main() -> int:
   )
   parser.add_argument("--visual-check-note", default="", help="short note for the human visual check record")
   parser.add_argument(
+    "--visual-check-montage-sha256",
+    default="",
+    help="SHA256 of /tmp/asius-cams-latest.jpg that was reviewed for the visual pass",
+  )
+  parser.add_argument(
     "--visual-check-scene",
     default="unknown",
     choices=("unknown", "bench", "daylight-road"),
@@ -232,6 +245,7 @@ def main() -> int:
       "note_present": final_visual_note_present(args.visual_check_note),
       "scene": args.visual_check_scene,
       "host_montage": "/tmp/asius-cams-latest.jpg",
+      "expected_montage_sha256": args.visual_check_montage_sha256.strip().lower(),
       "artifacts": {},
       "requirement": "real daylight road scene reviewed by a human",
     },
@@ -283,6 +297,10 @@ def main() -> int:
     summary["snapshot"]["cameras"] = camera_extract(snapshot_json)
     summary["visual_check"]["artifacts"] = visual_check_artifacts(snapshot_dir)
     summary["visual_check"]["artifacts_present"] = visual_check_artifacts_present(summary["visual_check"]["artifacts"])
+    summary["visual_check"]["montage_sha256_matches"] = visual_check_hash_matches(
+      summary["visual_check"]["artifacts"],
+      summary["visual_check"]["expected_montage_sha256"],
+    )
 
   modeld_rc = 0
   if not args.skip_modeld:
@@ -350,6 +368,10 @@ def main() -> int:
     "visual_check_scene_is_daylight_road": args.visual_check_scene == "daylight-road",
     "visual_check_note_present": final_visual_note_present(args.visual_check_note),
     "visual_check_artifacts_present": visual_check_artifacts_present(summary["visual_check"].get("artifacts", {})),
+    "visual_check_montage_sha256_matches": visual_check_hash_matches(
+      summary["visual_check"].get("artifacts", {}),
+      summary["visual_check"].get("expected_montage_sha256", ""),
+    ),
   }
   summary["final_acceptance"] = final_acceptance_summary(final_acceptance_requirements)
   summary["final_acceptance"]["minimum_durations"] = {

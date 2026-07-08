@@ -79,6 +79,19 @@ class VisualArtifactTest(unittest.TestCase):
       "snapshot_images": {},
     }))
 
+  def test_visual_check_hash_matches_reviewed_montage(self) -> None:
+    artifacts = {
+      "host_montage": {
+        "exists": True,
+        "sha256": "abc123",
+      },
+    }
+
+    self.assertTrue(acceptance.visual_check_hash_matches(artifacts, " ABC123 \n"))
+    self.assertFalse(acceptance.visual_check_hash_matches(artifacts, "def456"))
+    self.assertFalse(acceptance.visual_check_hash_matches(artifacts, ""))
+    self.assertFalse(acceptance.visual_check_hash_matches({}, "abc123"))
+
 
 class FinalAcceptanceSummaryTest(unittest.TestCase):
   def test_lists_missing_requirements_when_not_final(self) -> None:
