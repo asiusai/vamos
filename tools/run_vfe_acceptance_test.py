@@ -8,6 +8,36 @@ import unittest
 import run_vfe_acceptance as acceptance
 
 
+class CameraExtractTest(unittest.TestCase):
+  def test_includes_raw_vfe_artifact_match(self) -> None:
+    summary = {
+      "cameras": {
+        "cam2": {
+          "vfe_pix_v4l2": True,
+          "dmabuf_nv12": True,
+          "artifacts": {
+            "latest_raw_match": True,
+            "latest_bytes": 123,
+            "raw_bytes": 123,
+            "latest_sha256": "abc",
+            "raw_sha256": "abc",
+          },
+          "image": {
+            "y_median": 100.0,
+          },
+        },
+        "cam3": {},
+      },
+    }
+
+    cameras = acceptance.camera_extract(summary)
+
+    self.assertTrue(cameras["cam2"]["latest_raw_match"])
+    self.assertEqual(123, cameras["cam2"]["latest_bytes"])
+    self.assertEqual("abc", cameras["cam2"]["raw_sha256"])
+    self.assertEqual(100.0, cameras["cam2"]["y_median"])
+
+
 class FinalAcceptanceSummaryTest(unittest.TestCase):
   def test_lists_missing_requirements_when_not_final(self) -> None:
     summary = acceptance.final_acceptance_summary({
