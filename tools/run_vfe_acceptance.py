@@ -69,6 +69,10 @@ def main() -> int:
   parser.add_argument("--modeld-settle", type=float, default=7.0)
   parser.add_argument("--target-grey", type=float, default=0.0, help="OS04 AE target grey fraction; 0 uses camerad defaults")
   parser.add_argument("--pull-timeout", type=float, default=60.0)
+  parser.add_argument("--require-ae-rgb-clip-guard", action=argparse.BooleanOptionalAction, default=True, help="require OS04 AE logs to prove the RGB clipping guard actively capped EV")
+  parser.add_argument("--min-ae-samples", type=int, default=3, help="minimum OS04 AE log samples per selected camera when requiring the RGB clipping guard")
+  parser.add_argument("--min-ae-rgb-clip", type=float, default=0.079, help="minimum AE rgb_clip fraction considered a guard-triggering highlight")
+  parser.add_argument("--min-ae-ev-cap", type=float, default=0.05, help="minimum unclipped_ev - desired_ev considered an active AE RGB clip cap")
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
   parser.add_argument("--skip-snapshot", action="store_true")
   parser.add_argument("--skip-modeld", action="store_true")
@@ -96,6 +100,10 @@ def main() -> int:
       "out_dir": str(snapshot_dir),
       "monitor_duration": args.snapshot_monitor_duration,
       "profile": args.snapshot_profile,
+      "require_ae_rgb_clip_guard": args.require_ae_rgb_clip_guard,
+      "min_ae_samples": args.min_ae_samples,
+      "min_ae_rgb_clip": args.min_ae_rgb_clip,
+      "min_ae_ev_cap": args.min_ae_ev_cap,
     },
     "modeld": {
       "skipped": bool(args.skip_modeld),
@@ -128,6 +136,13 @@ def main() -> int:
       "--pull-timeout", str(args.pull_timeout),
       *common_env_args,
     ]
+    if args.require_ae_rgb_clip_guard:
+      snapshot_cmd.extend([
+        "--validate-ae-rgb-clip-guard",
+        "--validate-min-ae-samples", str(args.min_ae_samples),
+        "--validate-min-ae-rgb-clip", str(args.min_ae_rgb_clip),
+        "--validate-min-ae-ev-cap", str(args.min_ae_ev_cap),
+      ])
     summary["snapshot"]["command"] = snapshot_cmd
     snapshot_rc = run_cmd(snapshot_cmd, args.dry_run)
     summary["snapshot"]["returncode"] = snapshot_rc

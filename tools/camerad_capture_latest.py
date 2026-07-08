@@ -532,6 +532,10 @@ def main() -> int:
   parser.add_argument("--validate-max-slow-gaps", type=int, default=0, help="maximum slow VFE frame gaps when --validate-vfe is set")
   parser.add_argument("--validate-max-cpu-pct", type=float, default=10.0, help="maximum camerad single-core CPU percent during the monitor window when --validate-vfe is set")
   parser.add_argument("--validate-quality-profile", choices=("bench", "road", "road-spatial", "daylight-road"), default="bench", help="image-stat threshold profile passed to validate_camerad_vfe.py")
+  parser.add_argument("--validate-ae-rgb-clip-guard", action="store_true", help="with --validate-vfe, require OS04 AE logs to show the RGB clipping guard actively capped EV")
+  parser.add_argument("--validate-min-ae-samples", type=int, default=3, help="minimum OS04 AE log samples per selected camera when --validate-ae-rgb-clip-guard is set")
+  parser.add_argument("--validate-min-ae-rgb-clip", type=float, default=0.079, help="minimum AE rgb_clip fraction considered a guard-triggering highlight")
+  parser.add_argument("--validate-min-ae-ev-cap", type=float, default=0.05, help="minimum unclipped_ev - desired_ev considered an active AE RGB clip cap")
   parser.add_argument("--check-dmesg", action="store_true", help="capture dmesg during the camerad run; with --validate-vfe, fail on CAMSS/VFE errors, stalls, or buffer-address spam")
   parser.add_argument("--validate-max-dmesg-matches", type=int, default=0, help="maximum forbidden dmesg matches allowed when --validate-vfe --check-dmesg is set")
   parser.add_argument("--pull-timeout", type=float, default=DEFAULT_PULL_TIMEOUT, help="seconds allowed for each SSH/SCP artifact pull before retrying")
@@ -631,6 +635,13 @@ def main() -> int:
     ]
     if args.check_dmesg:
       validator_cmd.extend(["--check-dmesg", "--max-dmesg-matches", str(args.validate_max_dmesg_matches)])
+    if args.validate_ae_rgb_clip_guard:
+      validator_cmd.extend([
+        "--require-ae-rgb-clip-guard",
+        "--min-ae-samples", str(args.validate_min_ae_samples),
+        "--min-ae-rgb-clip", str(args.validate_min_ae_rgb_clip),
+        "--min-ae-ev-cap", str(args.validate_min_ae_ev_cap),
+      ])
     ret = subprocess.run(validator_cmd)
     if ret.returncode != 0:
       return ret.returncode
