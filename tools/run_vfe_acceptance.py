@@ -83,6 +83,11 @@ def main() -> int:
     ),
   )
   parser.add_argument("--visual-check-note", default="", help="short note for the human visual check record")
+  parser.add_argument(
+    "--require-final-acceptance",
+    action="store_true",
+    help="return non-zero unless final_acceptance_passed is true",
+  )
   parser.add_argument("--skip-snapshot", action="store_true")
   parser.add_argument("--skip-modeld", action="store_true")
   parser.add_argument("--dry-run", action="store_true")
@@ -105,6 +110,7 @@ def main() -> int:
     "out_dir": str(out_dir),
     "openpilot_dir": args.openpilot_dir,
     "dry_run": bool(args.dry_run),
+    "require_final_acceptance": bool(args.require_final_acceptance),
     "snapshot": {
       "skipped": bool(args.skip_snapshot),
       "out_dir": str(snapshot_dir),
@@ -255,6 +261,8 @@ def main() -> int:
     f"final_acceptance_passed={summary['final_acceptance_passed']} "
     f"snapshot_rc={snapshot_rc} modeld_rc={modeld_rc}"
   )
+  if args.require_final_acceptance and not summary["final_acceptance_passed"]:
+    return 1
   return 0 if summary["passed"] else 1
 
 
