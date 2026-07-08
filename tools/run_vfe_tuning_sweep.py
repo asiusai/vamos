@@ -27,6 +27,47 @@ CONTACT_SHEET_FILE = "vfe-tuning-sweep-contact.jpg"
 BEST_ACCEPTANCE_SCRIPT_FILE = "run-best-vfe-acceptance.sh"
 BEST_FINALIZE_SCRIPT_FILE = "finalize-best-vfe-acceptance.sh"
 DEFAULT_MAX_CANDIDATES = 12
+
+
+def ccm_q12(value: float) -> int:
+  quantized = int(round(value * 256.0))
+  if quantized < -2048 or quantized > 2047:
+    raise ValueError(f"CCM coefficient {value} quantizes outside signed 12-bit range")
+  return quantized & 0xfff
+
+
+def vfe_ccm_override_env(matrix: tuple[float, ...]) -> str:
+  if len(matrix) != 9:
+    raise ValueError("CCM matrix must contain 9 coefficients")
+  values = [ccm_q12(value) for value in matrix] + [0, 0, 0, 0]
+  regs = [f"0x{0x760 + index * 4:x}=0x{value:08x}" for index, value in enumerate(values)]
+  return "ASIUS_CAM_VFE_REG_OVERRIDES=" + "\n".join(regs)
+
+
+# Public Espressif OS04C10 cfg/os04c10_default.json CCM entries, translated to
+# Titan VFE 8.8 signed 12-bit coefficient registers.
+PUBLIC_OS04_CCM = {
+  5000: (
+    1.6892, -0.1001, -0.5692,
+    -0.4242, 1.6144, -0.2302,
+    -0.0066, -0.8393, 1.8658,
+  ),
+  6500: (
+    1.4975, -0.1857, -0.2917,
+    -0.3500, 1.7127, -0.4027,
+    -0.0176, -0.6491, 1.6868,
+  ),
+}
+
+
+def public_os04_ccm_combo(color_temp: int, *, gamma: int | None = None) -> str:
+  suffix = f"-gamma{gamma}" if gamma is not None else ""
+  combo = f"pubccm{color_temp}{suffix}:{vfe_ccm_override_env(PUBLIC_OS04_CCM[color_temp])}"
+  if gamma is not None:
+    combo += f",ASIUS_CAM_GAMMA_K={gamma}"
+  return combo
+
+
 SWEEP_PRESETS = {
   "manual": {
     "target_greys": None,
@@ -42,6 +83,18 @@ SWEEP_PRESETS = {
       "split20-18:ASIUS_PHYS_CAM2_GAMMA_K=20,ASIUS_PHYS_CAM3_GAMMA_K=18",
     ),
     "description": "CAM2/CAM3 OS04 daylight-road candidates from current hardware-VFE bench evidence",
+  },
+  "os04-public-ccm-v1": {
+    "target_greys": (0.0, 0.45),
+    "env_combos": (
+      "default",
+      "gamma20:ASIUS_CAM_GAMMA_K=20",
+      public_os04_ccm_combo(5000),
+      public_os04_ccm_combo(6500),
+      public_os04_ccm_combo(5000, gamma=20),
+      public_os04_ccm_combo(6500, gamma=20),
+    ),
+    "description": "daylight-road sweep with public Espressif OS04C10 CCM candidates",
   },
 }
 
