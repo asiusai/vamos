@@ -45,6 +45,7 @@ def camera_extract(snapshot: dict | None) -> dict:
   for cam in ("cam2", "cam3"):
     cam_data = snapshot.get("cameras", {}).get(cam, {})
     image = cam_data.get("image", {})
+    artifacts = cam_data.get("artifacts", {})
     ret[cam] = {
       "vfe_pix_v4l2": cam_data.get("vfe_pix_v4l2"),
       "dmabuf_nv12": cam_data.get("dmabuf_nv12"),
@@ -54,6 +55,11 @@ def camera_extract(snapshot: dict | None) -> dict:
       "vfe_setup": cam_data.get("vfe_setup"),
       "ae": cam_data.get("ae"),
       "awb": cam_data.get("awb"),
+      "latest_raw_match": artifacts.get("latest_raw_match"),
+      "latest_bytes": artifacts.get("latest_bytes"),
+      "raw_bytes": artifacts.get("raw_bytes"),
+      "latest_sha256": artifacts.get("latest_sha256"),
+      "raw_sha256": artifacts.get("raw_sha256"),
       "y_median": image.get("y_median"),
       "rgb_median_spread": image.get("rgb_median_spread"),
       "max_uv_center_median_offset": image.get("max_uv_center_median_offset"),
@@ -216,6 +222,10 @@ def main() -> int:
     summary["snapshot"]["passed"] = bool(snapshot_json.get("passed", False)) if snapshot_json else False
     summary["snapshot"]["hardware_path_passed"] = bool(snapshot_json.get("hardware_path_passed", False)) if snapshot_json else False
     summary["snapshot"]["image_quality_passed"] = bool(snapshot_json.get("image_quality_passed", False)) if snapshot_json else False
+    summary["snapshot"]["raw_vfe_artifacts_passed"] = (
+      bool(snapshot_json.get("category_passed", {}).get("artifact", False)) if snapshot_json else False
+    )
+    summary["snapshot"]["artifacts"] = snapshot_json.get("artifacts", {}) if snapshot_json else {}
     summary["snapshot"]["failures"] = snapshot_json.get("failures", []) if snapshot_json else ["missing snapshot summary"]
     summary["snapshot"]["cameras"] = camera_extract(snapshot_json)
 
@@ -274,6 +284,7 @@ def main() -> int:
     "snapshot_ran": not args.skip_snapshot,
     "snapshot_passed": bool(summary["snapshot"].get("passed", False)),
     "snapshot_hardware_path_passed": bool(summary["snapshot"].get("hardware_path_passed", False)),
+    "snapshot_raw_vfe_artifacts_passed": bool(summary["snapshot"].get("raw_vfe_artifacts_passed", False)),
     "snapshot_image_quality_passed": bool(summary["snapshot"].get("image_quality_passed", False)),
     "snapshot_profile_is_daylight_road": args.snapshot_profile == "daylight-road",
     "snapshot_monitor_duration_long_enough": args.snapshot_monitor_duration >= args.min_final_snapshot_duration,
