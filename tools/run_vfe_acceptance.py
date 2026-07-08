@@ -31,6 +31,14 @@ VISUAL_SNAPSHOT_FILES = {
   "cam3_raw": "latest-camerad-wide-raw.jpg",
 }
 
+VISUAL_REVIEW_CHECKLIST = [
+  "scene is a real daylight road view, not bench, garage, desk, or lens cap",
+  "CAM2 road and CAM3 wide both show usable forward-facing images",
+  "road, lane, vehicle, and sky colors look plausible without gross purple or green cast",
+  "images are not too dark, grey, blown out, or dominated by clipped light panels",
+  "no obvious VFE artifacts such as tearing, duplicated rows, severe banding, or dominant chroma speckle",
+]
+
 
 def default_out_dir() -> Path:
   stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -192,6 +200,7 @@ def final_acceptance_review_hint(summary_path: Path, summary: dict) -> dict:
     "host_montage_sha256": montage_sha256,
     "finalize_command": command,
     "finalize_shell_command": shell_command(command),
+    "review_checklist": list(VISUAL_REVIEW_CHECKLIST),
     "note": "Inspect the montage from a real daylight-road scene, then replace <human-review-note>.",
   }
 
@@ -213,6 +222,11 @@ def print_review_hint(summary: dict) -> None:
   montage_sha256 = hint.get("host_montage_sha256", "")
   if montage_sha256:
     print(f"visual_review_montage: {hint.get('host_montage')} sha256={montage_sha256}")
+  checklist = hint.get("review_checklist", [])
+  if checklist:
+    print("visual_review_checklist:")
+    for item in checklist:
+      print("  - " + str(item))
   print("finalize_after_human_review:")
   print("  " + str(hint.get("finalize_shell_command", "")))
 
@@ -291,6 +305,7 @@ def apply_visual_check_review(summary: dict, passed: bool, note: str, scene: str
     "expected_montage_sha256": expected_sha256.strip().lower(),
     "reviewed_at": dt.datetime.now(dt.UTC).isoformat(),
     "requirement": "real daylight road scene reviewed by a human",
+    "review_checklist": list(VISUAL_REVIEW_CHECKLIST),
   })
   visual_check["artifacts_present"] = visual_check_artifacts_present(visual_check.get("artifacts", {}))
   visual_check["montage_sha256_matches"] = visual_check_hash_matches(
@@ -438,6 +453,7 @@ def main() -> int:
       "expected_montage_sha256": args.visual_check_montage_sha256.strip().lower(),
       "artifacts": {},
       "requirement": "real daylight road scene reviewed by a human",
+      "review_checklist": list(VISUAL_REVIEW_CHECKLIST),
     },
   }
 

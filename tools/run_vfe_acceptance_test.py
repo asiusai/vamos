@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+import io
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -193,6 +195,8 @@ class FinalAcceptanceSummaryTest(unittest.TestCase):
     self.assertIn("abc123", hint["finalize_command"])
     self.assertIn("<human-review-note>", hint["finalize_command"])
     self.assertIn("'<human-review-note>'", acceptance.shell_command(["echo", "<human-review-note>"]))
+    self.assertEqual(acceptance.VISUAL_REVIEW_CHECKLIST, hint["review_checklist"])
+    self.assertTrue(any("daylight road" in item for item in hint["review_checklist"]))
 
   def test_apply_visual_review_finalizes_existing_summary_with_matching_hash(self) -> None:
     summary = self.final_ready_summary()
@@ -210,6 +214,7 @@ class FinalAcceptanceSummaryTest(unittest.TestCase):
     self.assertTrue(summary["visual_check"]["artifacts_present"])
     self.assertEqual([], summary["final_acceptance"]["missing_requirements"])
     self.assertIn("reviewed_at", summary["visual_check"])
+    self.assertEqual(acceptance.VISUAL_REVIEW_CHECKLIST, summary["visual_check"]["review_checklist"])
 
   def test_apply_visual_review_rejects_wrong_hash(self) -> None:
     summary = self.final_ready_summary()
@@ -287,6 +292,20 @@ class FinalAcceptanceSummaryTest(unittest.TestCase):
       "visual_check_passed",
       summary["final_acceptance"]["review_hint"]["missing_requirements"],
     )
+
+  def test_print_review_hint_includes_visual_checklist(self) -> None:
+    summary = self.final_ready_summary()
+    acceptance.update_final_acceptance(summary)
+    acceptance.update_review_hint(Path("/tmp/summary.json"), summary)
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+      acceptance.print_review_hint(summary)
+
+    text = out.getvalue()
+    self.assertIn("visual_review_checklist:", text)
+    self.assertIn("daylight road", text)
+    self.assertIn("finalize_after_human_review:", text)
 
 
 if __name__ == "__main__":
