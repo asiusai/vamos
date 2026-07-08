@@ -40,8 +40,7 @@ def vfe_ccm_override_env(matrix: tuple[float, ...]) -> str:
   if len(matrix) != 9:
     raise ValueError("CCM matrix must contain 9 coefficients")
   values = [ccm_q12(value) for value in matrix] + [0, 0, 0, 0]
-  regs = [f"0x{0x760 + index * 4:x}=0x{value:08x}" for index, value in enumerate(values)]
-  return "ASIUS_CAM_VFE_REG_OVERRIDES=" + "\n".join(regs)
+  return vfe_reg_override_env(tuple((0x760 + index * 4, value) for index, value in enumerate(values)))
 
 
 def vfe_reg_override_env(regs: tuple[tuple[int, int], ...]) -> str:
@@ -66,6 +65,22 @@ PUBLIC_OS04_CCM = {
 }
 
 
+# Public Radxa Dragon Q6A Camera 8M 219 libcamera/simple IPA guidance. This is
+# IMX219/software-ISP data, not OS04C10 tuning, so keep it as a sweep seed only.
+RADXA_IMX219_SIMPLE_CCM = (
+  1.35, -0.25, -0.10,
+  -0.10, 0.80, -0.10,
+  -0.05, -0.30, 1.35,
+)
+
+
+RADXA_IMX219_SIMPLE_WB = {
+  "blue": int(round(1.4 * 256.0)),
+  "green": int(round(1.0 * 256.0)),
+  "red": int(round(1.8 * 256.0)),
+}
+
+
 VFE_CST_CHROMA_REGS = {
   "cst1p0": (
     (0xf30, 0x00680208), (0xf34, 0x00000108), (0xf38, 0x00400000), (0xf3c, 0x03ff0000),
@@ -80,9 +95,38 @@ VFE_CST_CHROMA_REGS = {
 }
 
 
+def vfe_wb_reg_pairs(blue: int, green: int, red: int) -> tuple[tuple[int, int], ...]:
+  return (
+    (0x6fc, ((blue & 0xffff) << 16) | (green & 0xffff)),
+    (0x700, red & 0xffff),
+    (0x704, 0x00000000),
+    (0x708, 0x00000000),
+  )
+
+
+def vfe_ccm_reg_pairs(matrix: tuple[float, ...]) -> tuple[tuple[int, int], ...]:
+  if len(matrix) != 9:
+    raise ValueError("CCM matrix must contain 9 coefficients")
+  values = [ccm_q12(value) for value in matrix] + [0, 0, 0, 0]
+  return tuple((0x760 + index * 4, value) for index, value in enumerate(values))
+
+
 def public_os04_ccm_combo(color_temp: int, *, gamma: int | None = None) -> str:
   suffix = f"-gamma{gamma}" if gamma is not None else ""
   combo = f"pubccm{color_temp}{suffix}:{vfe_ccm_override_env(PUBLIC_OS04_CCM[color_temp])}"
+  if gamma is not None:
+    combo += f",ASIUS_CAM_GAMMA_K={gamma}"
+  return combo
+
+
+def radxa_simple_combo(*, wb: bool = False, gamma: int | None = None) -> str:
+  suffix = "-wbccm" if wb else "-ccm"
+  if gamma is not None:
+    suffix += f"-gamma{gamma}"
+  regs = vfe_ccm_reg_pairs(RADXA_IMX219_SIMPLE_CCM)
+  if wb:
+    regs = vfe_wb_reg_pairs(**RADXA_IMX219_SIMPLE_WB) + regs
+  combo = f"radxa{suffix}:{vfe_reg_override_env(regs)}"
   if gamma is not None:
     combo += f",ASIUS_CAM_GAMMA_K={gamma}"
   return combo
@@ -135,6 +179,18 @@ SWEEP_PRESETS = {
       cst_chroma_combo("cst1p2", gamma=20),
     ),
     "description": "daylight-road sweep for less gray OS04 VFE CST chroma rows",
+  },
+  "os04-radxa-simple-v1": {
+    "target_greys": (0.0, 0.55),
+    "env_combos": (
+      "default",
+      "gamma20:ASIUS_CAM_GAMMA_K=20",
+      radxa_simple_combo(),
+      radxa_simple_combo(wb=True),
+      radxa_simple_combo(gamma=20),
+      radxa_simple_combo(wb=True, gamma=20),
+    ),
+    "description": "daylight-road sweep using public Radxa IMX219 simple-IPA CCM/WB seeds",
   },
 }
 
