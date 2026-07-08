@@ -73,6 +73,15 @@ ROAD_SPATIAL_QUALITY_PROFILE = {
   "max_uv_hf_abs_mean": 6.25,
 }
 
+DAYLIGHT_ROAD_QUALITY_PROFILE = {
+  **ROAD_SPATIAL_QUALITY_PROFILE,
+  # Reject bench/indoor captures with large clipped light panels. A real road
+  # scene may have a small clipped sky/sign tile, so gate on clipped area
+  # instead of forbidding every clipped tile.
+  "max_tile_luma_clip_hi_area_frac_gt_10pct": 0.12,
+  "max_tile_luma_clip_hi_area_frac_gt_50pct": 0.04,
+}
+
 QUALITY_PROFILES = {
   "bench": {},
   "road": {
@@ -89,7 +98,7 @@ QUALITY_PROFILES = {
     "min_uv_abs": 4.0,
   },
   "road-spatial": ROAD_SPATIAL_QUALITY_PROFILE,
-  "daylight-road": ROAD_SPATIAL_QUALITY_PROFILE,
+  "daylight-road": DAYLIGHT_ROAD_QUALITY_PROFILE,
 }
 
 
@@ -468,6 +477,8 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
       ("tile_max_uv_median_offset", image_summary["tile_max_uv_median_offset"], 0.0, args.max_tile_uv_median_offset),
       ("tile_uv_median_range", image_summary["tile_uv_median_range"], 0.0, args.max_tile_uv_median_range),
       ("tile_max_rgb_median_spread", image_summary["tile_max_rgb_median_spread"], 0.0, args.max_tile_rgb_spread),
+      ("tile_luma_clip_hi_area_frac_gt_10pct", image_summary["tile_luma_clip_hi_area_frac_gt_10pct"], 0.0, args.max_tile_luma_clip_hi_area_frac_gt_10pct),
+      ("tile_luma_clip_hi_area_frac_gt_50pct", image_summary["tile_luma_clip_hi_area_frac_gt_50pct"], 0.0, args.max_tile_luma_clip_hi_area_frac_gt_50pct),
       ("uv_hf_abs_mean", image_summary["uv_hf_abs_mean"], 0.0, args.max_uv_hf_abs_mean),
     ]
     for name, value, low, high in checks:
@@ -567,6 +578,8 @@ def main() -> int:
   parser.add_argument("--max-tile-uv-median-offset", type=float, default=999.0, help="maximum per-tile absolute U/V median offset from 128")
   parser.add_argument("--max-tile-uv-median-range", type=float, default=999.0, help="maximum range of per-tile U or V medians")
   parser.add_argument("--max-tile-rgb-spread", type=float, default=999.0, help="maximum per-tile RGB median channel spread")
+  parser.add_argument("--max-tile-luma-clip-hi-area-frac-gt-10pct", type=float, default=999.0, help="maximum fraction of tiles with >10%% RGB-luma clipping")
+  parser.add_argument("--max-tile-luma-clip-hi-area-frac-gt-50pct", type=float, default=999.0, help="maximum fraction of tiles with >50%% RGB-luma clipping")
   parser.add_argument("--max-uv-hf-abs-mean", type=float, default=999.0, help="maximum mean high-frequency U/V absolute delta")
   parser.add_argument("--require-ae-rgb-clip-guard", action="store_true", help="fail unless OS04 AE logs show the RGB clipping guard actively capped EV")
   parser.add_argument("--min-ae-samples", type=int, default=3, help="minimum OS04 AE log samples per selected camera when --require-ae-rgb-clip-guard is set")
@@ -609,6 +622,8 @@ def main() -> int:
       "max_tile_uv_median_offset": args.max_tile_uv_median_offset,
       "max_tile_uv_median_range": args.max_tile_uv_median_range,
       "max_tile_rgb_spread": args.max_tile_rgb_spread,
+      "max_tile_luma_clip_hi_area_frac_gt_10pct": args.max_tile_luma_clip_hi_area_frac_gt_10pct,
+      "max_tile_luma_clip_hi_area_frac_gt_50pct": args.max_tile_luma_clip_hi_area_frac_gt_50pct,
       "max_uv_hf_abs_mean": args.max_uv_hf_abs_mean,
       "require_ae_rgb_clip_guard": args.require_ae_rgb_clip_guard,
       "min_ae_samples": args.min_ae_samples,

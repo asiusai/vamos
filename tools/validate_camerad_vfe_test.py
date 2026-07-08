@@ -11,6 +11,47 @@ import unittest
 import validate_camerad_vfe as validator
 
 
+class QualityProfileTest(unittest.TestCase):
+  def _args(self) -> SimpleNamespace:
+    return SimpleNamespace(
+      min_y_median=20.0,
+      max_y_median=235.0,
+      min_y_range=30.0,
+      max_y_clip_lo=0.30,
+      max_y_clip_hi=0.30,
+      max_luma_clip_hi=0.30,
+      max_rgb_spread=50.0,
+      max_uv_median_offset=999.0,
+      max_uv_center_median_offset=999.0,
+      min_mean_chroma=1.0,
+      min_uv_abs=1.0,
+      max_tile_uv_median_offset=999.0,
+      max_tile_uv_median_range=999.0,
+      max_tile_rgb_spread=999.0,
+      max_tile_luma_clip_hi_area_frac_gt_10pct=999.0,
+      max_tile_luma_clip_hi_area_frac_gt_50pct=999.0,
+      max_uv_hf_abs_mean=999.0,
+    )
+
+  def test_daylight_road_adds_area_clipping_limits(self) -> None:
+    args = self._args()
+    args.quality_profile = "daylight-road"
+
+    validator.apply_quality_profile(args)
+
+    self.assertEqual(0.12, args.max_tile_luma_clip_hi_area_frac_gt_10pct)
+    self.assertEqual(0.04, args.max_tile_luma_clip_hi_area_frac_gt_50pct)
+
+  def test_road_spatial_does_not_gate_clipped_tile_area(self) -> None:
+    args = self._args()
+    args.quality_profile = "road-spatial"
+
+    validator.apply_quality_profile(args)
+
+    self.assertEqual(999.0, args.max_tile_luma_clip_hi_area_frac_gt_10pct)
+    self.assertEqual(999.0, args.max_tile_luma_clip_hi_area_frac_gt_50pct)
+
+
 class AeRgbClipGuardTest(unittest.TestCase):
   def _args(self, require: bool = True) -> SimpleNamespace:
     return SimpleNamespace(
