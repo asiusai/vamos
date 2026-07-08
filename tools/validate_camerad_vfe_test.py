@@ -133,5 +133,38 @@ class AwbSummaryTest(unittest.TestCase):
     self.assertIs(summary["cameras"]["cam2"]["awb"], summary["awb"]["cameras"]["cam2"])
 
 
+class VfeSetupSummaryTest(unittest.TestCase):
+  def test_summarizes_vfe_setup_from_startup_log(self) -> None:
+    log_text = "\n".join([
+      "cam 1: VFE PIX source format 1344x760 code=0x2004",
+      "cam 1: VIPC buffers created (VFE PIX V4L2 DMABUF NV12, 1344x760, scale=2, 2428928 bytes, stride=2048)",
+      "cam 1: OS04 AWB enabled start=40 interval=20 deadband=1 response=2 step=8 y=40-235 chroma=24 min_samples=64 blue=0xfc red=0x100 range=0x40",
+      "cam 1: wrote 15 poststart overrides VFE regs",
+      "cam 1: wrote OS04 gamma DMI override g=18.00 b=18.00 r=18.00",
+      "cam 0: VFE PIX source format 1344x760 code=0x2004",
+      "cam 0: VIPC buffers created (VFE PIX V4L2 DMABUF NV12, 1344x760, scale=2, 2428928 bytes, stride=2048)",
+      "cam 0: OS04 AWB enabled start=40 interval=20 deadband=1 response=2 step=8 y=40-235 chroma=24 min_samples=64 blue=0x100 red=0x100 range=0x40",
+      "cam 0: wrote 15 poststart overrides VFE regs",
+      "cam 0: wrote OS04 gamma DMI override g=15.00 b=15.00 r=15.00",
+    ])
+    report = validator.Report()
+    summary: dict = {}
+
+    with redirect_stdout(io.StringIO()):
+      validator.summarize_vfe_setup_log(log_text, ["cam2", "cam3"], report, summary)
+
+    cam2 = summary["vfe_setup"]["cameras"]["cam2"]
+    cam3 = summary["vfe_setup"]["cameras"]["cam3"]
+    self.assertEqual("VFE PIX V4L2 DMABUF NV12", cam2["vipc"]["mode"])
+    self.assertEqual(1344, cam2["source_format"]["width"])
+    self.assertEqual("0x2004", cam2["source_format"]["code_hex"])
+    self.assertEqual(15, cam2["poststart_reg_count"])
+    self.assertEqual(18.0, cam2["gamma"]["g"])
+    self.assertEqual(0xfc, cam2["awb_config"]["blue"])
+    self.assertEqual(0x40, cam2["awb_config"]["range"])
+    self.assertEqual(15.0, cam3["gamma"]["g"])
+    self.assertIs(summary["cameras"]["cam2"]["vfe_setup"], cam2)
+
+
 if __name__ == "__main__":
   unittest.main()

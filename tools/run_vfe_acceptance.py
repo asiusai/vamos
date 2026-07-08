@@ -49,6 +49,7 @@ def camera_extract(snapshot: dict | None) -> dict:
       "debug_frames": cam_data.get("debug_frames"),
       "median_fps": cam_data.get("median_fps"),
       "slow_gaps": cam_data.get("slow_gaps"),
+      "vfe_setup": cam_data.get("vfe_setup"),
       "ae": cam_data.get("ae"),
       "awb": cam_data.get("awb"),
       "y_median": image.get("y_median"),

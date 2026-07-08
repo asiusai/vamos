@@ -55,6 +55,36 @@ AWB_LOG_PATTERN = re.compile(
   r"blue=0x(?P<blue>[0-9a-fA-F]+) red=0x(?P<red>[0-9a-fA-F]+)",
 )
 
+VFE_SOURCE_FORMAT_PATTERN = re.compile(
+  r"cam (?P<cam_num>\d+): VFE PIX source format "
+  r"(?P<width>\d+)x(?P<height>\d+) code=0x(?P<code>[0-9a-fA-F]+)",
+)
+
+VFE_VIPC_PATTERN = re.compile(
+  r"cam (?P<cam_num>\d+): VIPC buffers created "
+  r"\((?P<mode>VFE PIX [^,]+), (?P<width>\d+)x(?P<height>\d+), "
+  r"scale=(?P<scale>\d+), (?P<size>\d+) bytes, stride=(?P<stride>\d+)\)",
+)
+
+VFE_POSTSTART_REGS_PATTERN = re.compile(
+  r"cam (?P<cam_num>\d+): wrote (?P<count>\d+) poststart overrides VFE regs",
+)
+
+VFE_GAMMA_PATTERN = re.compile(
+  r"cam (?P<cam_num>\d+): wrote OS04 gamma DMI override "
+  r"g=(?P<g>[-+0-9.eE]+) b=(?P<b>[-+0-9.eE]+) r=(?P<r>[-+0-9.eE]+)",
+)
+
+AWB_CONFIG_PATTERN = re.compile(
+  r"cam (?P<cam_num>\d+): OS04 AWB enabled "
+  r"start=(?P<start>\d+) interval=(?P<interval>\d+) "
+  r"deadband=(?P<deadband>\d+) response=(?P<response>\d+) "
+  r"step=(?P<step>\d+) y=(?P<y_min>\d+)-(?P<y_max>\d+) "
+  r"chroma=(?P<chroma>\d+) min_samples=(?P<min_samples>\d+) "
+  r"blue=0x(?P<blue>[0-9a-fA-F]+) red=0x(?P<red>[0-9a-fA-F]+) "
+  r"range=0x(?P<range>[0-9a-fA-F]+)",
+)
+
 OS04_DIAG_WINDOW = 20
 
 DMESG_FORBIDDEN_PATTERNS = [
@@ -281,6 +311,62 @@ def summarize_awb_samples(samples: list[dict]) -> dict:
   }
 
 
+def parse_vfe_setup(log_text: str, cam: str) -> dict:
+  cam_num = CAMERA_NUMS[cam]
+  setup: dict = {
+    "camera_num": cam_num,
+  }
+  for match in VFE_SOURCE_FORMAT_PATTERN.finditer(log_text):
+    if match.group("cam_num") == cam_num:
+      setup["source_format"] = {
+        "width": int(match.group("width")),
+        "height": int(match.group("height")),
+        "code": int(match.group("code"), 16),
+        "code_hex": f"0x{int(match.group('code'), 16):x}",
+      }
+
+  for match in VFE_VIPC_PATTERN.finditer(log_text):
+    if match.group("cam_num") == cam_num:
+      setup["vipc"] = {
+        "mode": match.group("mode"),
+        "width": int(match.group("width")),
+        "height": int(match.group("height")),
+        "scale": int(match.group("scale")),
+        "size_bytes": int(match.group("size")),
+        "stride": int(match.group("stride")),
+      }
+
+  for match in VFE_POSTSTART_REGS_PATTERN.finditer(log_text):
+    if match.group("cam_num") == cam_num:
+      setup["poststart_reg_count"] = int(match.group("count"))
+
+  for match in VFE_GAMMA_PATTERN.finditer(log_text):
+    if match.group("cam_num") == cam_num:
+      setup["gamma"] = {
+        "g": float(match.group("g")),
+        "b": float(match.group("b")),
+        "r": float(match.group("r")),
+      }
+
+  for match in AWB_CONFIG_PATTERN.finditer(log_text):
+    if match.group("cam_num") == cam_num:
+      setup["awb_config"] = {
+        "start": int(match.group("start")),
+        "interval": int(match.group("interval")),
+        "deadband": int(match.group("deadband")),
+        "response": int(match.group("response")),
+        "step": int(match.group("step")),
+        "y_min": int(match.group("y_min")),
+        "y_max": int(match.group("y_max")),
+        "chroma": int(match.group("chroma")),
+        "min_samples": int(match.group("min_samples")),
+        "blue": int(match.group("blue"), 16),
+        "red": int(match.group("red"), 16),
+        "range": int(match.group("range"), 16),
+      }
+  return setup
+
+
 def validate_log(run_dir: Path, cams: list[str], args: argparse.Namespace, report: Report, summary: dict) -> str:
   log_path = run_dir / LOG_FILE
   if not log_path.exists():
@@ -356,6 +442,29 @@ def validate_log(run_dir: Path, cams: list[str], args: argparse.Namespace, repor
       report.fail(f"{cam}: no usable VFE PIX debug frame timestamps; capture with --camerad-debug-frames", "transport")
 
   return log_text
+
+
+def summarize_vfe_setup_log(log_text: str, cams: list[str], report: Report, summary: dict) -> None:
+  if not log_text:
+    return
+
+  vfe_setup = {
+    "cameras": {},
+  }
+  summary["vfe_setup"] = vfe_setup
+  camera_summaries = summary.setdefault("cameras", {})
+
+  for cam in cams:
+    cam_setup = parse_vfe_setup(log_text, cam)
+    vfe_setup["cameras"][cam] = cam_setup
+    camera_summaries.setdefault(cam, {})["vfe_setup"] = cam_setup
+    if "vipc" in cam_setup and "gamma" in cam_setup:
+      report.pass_(
+        f"{cam}: VFE setup parsed mode={cam_setup['vipc']['mode']} "
+        f"gamma_g={cam_setup['gamma']['g']:.2f}"
+      )
+    elif "vipc" in cam_setup:
+      report.pass_(f"{cam}: VFE setup parsed mode={cam_setup['vipc']['mode']}")
 
 
 def validate_ae_rgb_clip_guard(log_text: str, cams: list[str], args: argparse.Namespace, report: Report, summary: dict) -> None:
@@ -744,6 +853,7 @@ def main() -> int:
     return 1
 
   log_text = validate_log(args.run_dir, cams, args, report, summary)
+  summarize_vfe_setup_log(log_text, cams, report, summary)
   validate_ae_rgb_clip_guard(log_text, cams, args, report, summary)
   summarize_awb_log(log_text, cams, report, summary)
   validate_vipc_stats(args.run_dir, cams, args, report, summary)
