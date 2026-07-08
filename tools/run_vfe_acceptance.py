@@ -251,6 +251,25 @@ def final_acceptance_minimum_durations(summary: dict) -> dict:
   }
 
 
+def apply_final_daylight_road_preset(args: argparse.Namespace, parser: argparse.ArgumentParser | None = None) -> bool:
+  if not bool(getattr(args, "final_daylight_road", False)):
+    return False
+  if args.skip_snapshot or args.skip_modeld:
+    message = "--final-daylight-road requires both snapshot and modeld gates"
+    if parser is not None:
+      parser.error(message)
+    raise ValueError(message)
+  args.snapshot_profile = "daylight-road"
+  args.snapshot_monitor_duration = max(args.snapshot_monitor_duration, DEFAULT_MIN_FINAL_SNAPSHOT_DURATION)
+  args.modeld_duration = max(args.modeld_duration, DEFAULT_MIN_FINAL_MODELD_DURATION)
+  args.min_final_snapshot_duration = max(args.min_final_snapshot_duration, DEFAULT_MIN_FINAL_SNAPSHOT_DURATION)
+  args.min_final_modeld_duration = max(args.min_final_modeld_duration, DEFAULT_MIN_FINAL_MODELD_DURATION)
+  args.require_final_acceptance = True
+  if args.finalize_existing_summary is not None:
+    args.visual_check_scene = "daylight-road"
+  return True
+
+
 def final_acceptance_requirements(summary: dict, minimum_durations: dict | None = None) -> dict[str, bool]:
   snapshot = summary.get("snapshot", {})
   modeld = summary.get("modeld", {})
@@ -394,10 +413,20 @@ def main() -> int:
     action="store_true",
     help="return non-zero unless final_acceptance_passed is true",
   )
+  parser.add_argument(
+    "--final-daylight-road",
+    action="store_true",
+    help=(
+      "apply final acceptance defaults: daylight-road profile, 120s snapshot, "
+      "120s modeld, no skipped gates, and require final acceptance"
+    ),
+  )
   parser.add_argument("--skip-snapshot", action="store_true")
   parser.add_argument("--skip-modeld", action="store_true")
   parser.add_argument("--dry-run", action="store_true")
   args = parser.parse_args()
+
+  final_daylight_road_preset_applied = apply_final_daylight_road_preset(args, parser)
 
   if args.target_grey < 0.0:
     parser.error("--target-grey must be non-negative")
@@ -426,6 +455,7 @@ def main() -> int:
     "openpilot_dir": args.openpilot_dir,
     "dry_run": bool(args.dry_run),
     "require_final_acceptance": bool(args.require_final_acceptance),
+    "final_daylight_road_preset": bool(final_daylight_road_preset_applied),
     "snapshot": {
       "skipped": bool(args.skip_snapshot),
       "out_dir": str(snapshot_dir),
