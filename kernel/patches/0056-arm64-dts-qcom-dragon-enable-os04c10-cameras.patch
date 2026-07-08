@@ -84,7 +84,7 @@ index 1e793de87..f07c711ab 100644
 +
 +		port {
 +			os04c10_cam1_ep: endpoint {
-+				link-frequencies = /bits/ 64 <360000000>;
++				link-frequencies = /bits/ 64 <456000000>;
 +				data-lanes = <1 2>;
 +				remote-endpoint = <&csiphy0_ep>;
 +			};
@@ -110,7 +110,7 @@ index 1e793de87..f07c711ab 100644
 +
 +		port {
 +			os04c10_cam2_ep: endpoint {
-+				link-frequencies = /bits/ 64 <360000000>;
++				link-frequencies = /bits/ 64 <456000000>;
 +				data-lanes = <1 2>;
 +				remote-endpoint = <&csiphy2_ep>;
 +			};
@@ -132,7 +132,7 @@ index 1e793de87..f07c711ab 100644
 +
 +		port {
 +			os04c10_cam3_ep: endpoint {
-+				link-frequencies = /bits/ 64 <360000000>;
++				link-frequencies = /bits/ 64 <456000000>;
 +				data-lanes = <1 2>;
 +				remote-endpoint = <&csiphy3_ep>;
 +			};
@@ -690,7 +690,7 @@ index 702a520d4..89b2c10b7 100644
 +					       cam1_mclk_suspend_phandle,
 +					       1,
 +					       tlmm_phandle, 20, 36,
-+					       360000000ULL,
++					       456000000ULL,
 +					       &cam1_sensor_phandle) ?:
 +		 asius_configure_camera_sensor(fdt, ASIUS_CAM2_PATH,
 +					       ASIUS_CAM2_PORT_PATH,
@@ -699,7 +699,7 @@ index 702a520d4..89b2c10b7 100644
 +					       cam2_ext_clk_phandle,
 +					       0, 0, 0, 0,
 +					       tlmm_phandle, 77, 0,
-+					       360000000ULL,
++					       456000000ULL,
 +					       &cam2_sensor_phandle) ?:
 +		 asius_configure_camera_sensor(fdt, ASIUS_CAM3_PATH,
 +					       ASIUS_CAM3_PORT_PATH,
@@ -708,7 +708,7 @@ index 702a520d4..89b2c10b7 100644
 +					       cam3_ext_clk_phandle,
 +					       0, 0, 0, 0,
 +					       tlmm_phandle, 78, 0,
-+					       360000000ULL,
++					       456000000ULL,
 +					       &cam3_sensor_phandle) ?:
 +		 fdt_setprop_u32(fdt, fdt_path_offset(fdt,
 +				 ASIUS_CAMSS_PORT0_EP_PATH), "remote-endpoint",
@@ -814,8 +814,8 @@ index 000000000..e8c61ac96
 +#include <uapi/linux/qcom-camss-vfe.h>
 +
 +#define OS04C10_XCLK_FREQ		24000000
-+#define OS04C10_LINK_FREQ		360000000ULL
-+#define OS04C10_PIXEL_RATE		144000000ULL
++#define OS04C10_LINK_FREQ		456000000ULL
++#define OS04C10_PIXEL_RATE		182400000ULL
 +
 +#define OS04C10_REG_CHIP_ID_H		CCI_REG8(0x300a)
 +#define OS04C10_REG_CHIP_ID_L		CCI_REG8(0x300b)
