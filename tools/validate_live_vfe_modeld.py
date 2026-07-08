@@ -74,6 +74,27 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
   return subprocess.run(cmd, check=True, **kwargs)
 
 
+def bash_env_word(word: str) -> str:
+  if "\n" not in word and "\r" not in word:
+    return shlex.quote(word)
+
+  escaped = []
+  for char in word:
+    if char == "\\":
+      escaped.append("\\\\")
+    elif char == "'":
+      escaped.append("\\'")
+    elif char == "\n":
+      escaped.append("\\n")
+    elif char == "\r":
+      escaped.append("\\r")
+    elif char == "\t":
+      escaped.append("\\t")
+    else:
+      escaped.append(char)
+  return "$'" + "".join(escaped) + "'"
+
+
 def remote_env(target_grey: float, extra_env: list[str]) -> list[str]:
   env = [
     "ASIUS=1",
@@ -92,7 +113,7 @@ def remote_env(target_grey: float, extra_env: list[str]) -> list[str]:
 def remote_script(openpilot_dir: str, duration: float, settle: float, target_grey: float, extra_env: list[str],
                   isolate: bool, ignore_initial_model_frames: int,
                   capture_dmesg: bool) -> str:
-  env_exports = " ".join(shlex.quote(e) for e in remote_env(target_grey, extra_env))
+  env_exports = " ".join(bash_env_word(e) for e in remote_env(target_grey, extra_env))
   openpilot_dir_q = shlex.quote(openpilot_dir)
   capture_dmesg_value = "1" if capture_dmesg else "0"
   isolate_cmds = textwrap.dedent("""\
