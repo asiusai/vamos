@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,12 @@ SUMMARY_FILE = "vfe-acceptance-summary.json"
 DEFAULT_MIN_FINAL_SNAPSHOT_DURATION = 120.0
 DEFAULT_MIN_FINAL_MODELD_DURATION = 120.0
 HOST_MONTAGE = Path("/tmp/asius-cams-latest.jpg")
+VISUAL_NOTE_PLACEHOLDERS = {
+  "<human-review-note>",
+  "replace-with-human-review-note",
+  "replace_with_human_review_note",
+  "replace_with_human_daylight_road_review_note",
+}
 
 VISUAL_SNAPSHOT_FILES = {
   "cam2_latest": "latest-camerad-road.jpg",
@@ -152,7 +159,62 @@ def final_acceptance_summary(requirements: dict[str, bool]) -> dict:
 
 
 def final_visual_note_present(note: str) -> bool:
-  return bool(note.strip())
+  stripped = note.strip()
+  return bool(stripped) and stripped.lower() not in VISUAL_NOTE_PLACEHOLDERS
+
+
+def shell_command(cmd: list[str]) -> str:
+  return " ".join(shlex.quote(part) for part in cmd)
+
+
+def visual_finalize_command(summary_path: Path, montage_sha256: str) -> list[str]:
+  return [
+    sys.executable,
+    str(Path(__file__).resolve()),
+    "--finalize-existing-summary", str(summary_path),
+    "--visual-check-pass",
+    "--visual-check-scene", "daylight-road",
+    "--visual-check-note", "<human-review-note>",
+    "--visual-check-montage-sha256", montage_sha256 or "<reviewed-montage-sha256>",
+    "--require-final-acceptance",
+  ]
+
+
+def final_acceptance_review_hint(summary_path: Path, summary: dict) -> dict:
+  visual_check = summary.get("visual_check", {})
+  artifacts = visual_check.get("artifacts", {})
+  host_montage = artifacts.get("host_montage", {})
+  montage_sha256 = str(host_montage.get("sha256", ""))
+  command = visual_finalize_command(summary_path, montage_sha256)
+  return {
+    "missing_requirements": summary.get("final_acceptance", {}).get("missing_requirements", []),
+    "host_montage": str(host_montage.get("path", HOST_MONTAGE)),
+    "host_montage_sha256": montage_sha256,
+    "finalize_command": command,
+    "finalize_shell_command": shell_command(command),
+    "note": "Inspect the montage from a real daylight-road scene, then replace <human-review-note>.",
+  }
+
+
+def update_review_hint(summary_path: Path, summary: dict) -> None:
+  if summary.get("final_acceptance_passed", False):
+    summary.get("final_acceptance", {}).pop("review_hint", None)
+    return
+  summary.setdefault("final_acceptance", {})["review_hint"] = final_acceptance_review_hint(summary_path, summary)
+
+
+def print_review_hint(summary: dict) -> None:
+  hint = summary.get("final_acceptance", {}).get("review_hint", {})
+  if not hint:
+    return
+  missing = hint.get("missing_requirements", [])
+  if missing:
+    print("final_acceptance_missing: " + ",".join(str(item) for item in missing))
+  montage_sha256 = hint.get("host_montage_sha256", "")
+  if montage_sha256:
+    print(f"visual_review_montage: {hint.get('host_montage')} sha256={montage_sha256}")
+  print("finalize_after_human_review:")
+  print("  " + str(hint.get("finalize_shell_command", "")))
 
 
 def final_acceptance_minimum_durations(summary: dict) -> dict:
@@ -251,6 +313,7 @@ def finalize_existing_summary(args: argparse.Namespace) -> int:
     args.visual_check_scene,
     args.visual_check_montage_sha256,
   )
+  update_review_hint(summary_path, summary)
   summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
   print(f"summary_json: {summary_path}")
   print(
@@ -258,6 +321,7 @@ def finalize_existing_summary(args: argparse.Namespace) -> int:
     f"passed={summary.get('passed', False)} "
     f"final_acceptance_passed={summary['final_acceptance_passed']}"
   )
+  print_review_hint(summary)
   if args.require_final_acceptance and not summary["final_acceptance_passed"]:
     return 1
   return 0 if summary.get("passed", False) else 1
@@ -491,6 +555,7 @@ def main() -> int:
   )
 
   summary_path = out_dir / SUMMARY_FILE
+  update_review_hint(summary_path, summary)
   summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
   print(f"summary_json: {summary_path}")
   print(
@@ -499,6 +564,7 @@ def main() -> int:
     f"final_acceptance_passed={summary['final_acceptance_passed']} "
     f"snapshot_rc={snapshot_rc} modeld_rc={modeld_rc}"
   )
+  print_review_hint(summary)
   if args.require_final_acceptance and not summary["final_acceptance_passed"]:
     return 1
   return 0 if summary["passed"] else 1
