@@ -53,6 +53,22 @@ class PublicCcmTest(unittest.TestCase):
     self.assertEqual("ASIUS_CAM_GAMMA_K=20", combo.env[1])
 
 
+class RadxaSimpleTest(unittest.TestCase):
+  def test_radxa_simple_combo_can_include_manual_wb_and_ccm(self) -> None:
+    combo = sweep.parse_env_combo(sweep.radxa_simple_combo(wb=True, gamma=20))
+
+    self.assertEqual("radxa-wbccm-gamma20", combo.name)
+    self.assertEqual(2, len(combo.env))
+    self.assertTrue(combo.env[0].startswith("ASIUS_CAM_VFE_REG_OVERRIDES="))
+    self.assertIn("0x6fc=0x01660100", combo.env[0])
+    self.assertIn("\n0x700=0x000001cd", combo.env[0])
+    self.assertIn("\n0x760=0x0000015a", combo.env[0])
+    self.assertIn("\n0x780=0x0000015a", combo.env[0])
+    self.assertEqual(17, len(combo.env[0].split("=", 1)[1].splitlines()))
+    self.assertNotIn(",", combo.env[0])
+    self.assertEqual("ASIUS_CAM_GAMMA_K=20", combo.env[1])
+
+
 class CstChromaTest(unittest.TestCase):
   def test_cst_chroma_combo_uses_one_multiline_vfe_override(self) -> None:
     combo = sweep.parse_env_combo(sweep.cst_chroma_combo("cst1p2", gamma=20))
@@ -131,6 +147,22 @@ class CandidateTest(unittest.TestCase):
     self.assertTrue(any("cst1p0" in spec for spec in env_combo_specs))
     self.assertTrue(any("cst1p2" in spec for spec in env_combo_specs))
     self.assertTrue(any("0xf40=0x01c01ed8" in spec for spec in env_combo_specs))
+
+  def test_select_sweep_inputs_expands_radxa_simple_preset(self) -> None:
+    args = SimpleNamespace(
+      preset="os04-radxa-simple-v1",
+      target_greys=None,
+      env_combo=None,
+    )
+
+    target_greys, env_combo_specs = sweep.select_sweep_inputs(args)
+
+    self.assertEqual([0.0, 0.55], target_greys)
+    self.assertEqual(6, len(env_combo_specs))
+    self.assertIn("gamma20:ASIUS_CAM_GAMMA_K=20", env_combo_specs)
+    self.assertTrue(any("radxa-ccm" in spec for spec in env_combo_specs))
+    self.assertTrue(any("radxa-wbccm" in spec for spec in env_combo_specs))
+    self.assertTrue(any("0x6fc=0x01660100" in spec for spec in env_combo_specs))
 
   def test_select_sweep_inputs_allows_explicit_preset_overrides(self) -> None:
     args = SimpleNamespace(
