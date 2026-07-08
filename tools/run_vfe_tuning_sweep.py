@@ -44,6 +44,12 @@ def vfe_ccm_override_env(matrix: tuple[float, ...]) -> str:
   return "ASIUS_CAM_VFE_REG_OVERRIDES=" + "\n".join(regs)
 
 
+def vfe_reg_override_env(regs: tuple[tuple[int, int], ...]) -> str:
+  return "ASIUS_CAM_VFE_REG_OVERRIDES=" + "\n".join(
+    f"0x{addr:x}=0x{value:08x}" for addr, value in regs
+  )
+
+
 # Public Espressif OS04C10 cfg/os04c10_default.json CCM entries, translated to
 # Titan VFE 8.8 signed 12-bit coefficient registers.
 PUBLIC_OS04_CCM = {
@@ -60,9 +66,31 @@ PUBLIC_OS04_CCM = {
 }
 
 
+VFE_CST_CHROMA_REGS = {
+  "cst1p0": (
+    (0xf30, 0x00680208), (0xf34, 0x00000108), (0xf38, 0x00400000), (0xf3c, 0x03ff0000),
+    (0xf40, 0x01c01ed8), (0xf44, 0x00001f68), (0xf48, 0x02000000), (0xf4c, 0x03ff0000),
+    (0xf50, 0x1fb81e88), (0xf54, 0x000001c0), (0xf58, 0x02000000), (0xf5c, 0x03ff0000),
+  ),
+  "cst1p2": (
+    (0xf30, 0x00680208), (0xf34, 0x00000108), (0xf38, 0x00400000), (0xf3c, 0x03ff0000),
+    (0xf40, 0x021a1e9d), (0xf44, 0x00001f4a), (0xf48, 0x02000000), (0xf4c, 0x03ff0000),
+    (0xf50, 0x1faa1e3d), (0xf54, 0x0000021a), (0xf58, 0x02000000), (0xf5c, 0x03ff0000),
+  ),
+}
+
+
 def public_os04_ccm_combo(color_temp: int, *, gamma: int | None = None) -> str:
   suffix = f"-gamma{gamma}" if gamma is not None else ""
   combo = f"pubccm{color_temp}{suffix}:{vfe_ccm_override_env(PUBLIC_OS04_CCM[color_temp])}"
+  if gamma is not None:
+    combo += f",ASIUS_CAM_GAMMA_K={gamma}"
+  return combo
+
+
+def cst_chroma_combo(name: str, *, gamma: int | None = None) -> str:
+  suffix = f"-gamma{gamma}" if gamma is not None else ""
+  combo = f"{name}{suffix}:{vfe_reg_override_env(VFE_CST_CHROMA_REGS[name])}"
   if gamma is not None:
     combo += f",ASIUS_CAM_GAMMA_K={gamma}"
   return combo
@@ -95,6 +123,18 @@ SWEEP_PRESETS = {
       public_os04_ccm_combo(6500, gamma=20),
     ),
     "description": "daylight-road sweep with public Espressif OS04C10 CCM candidates",
+  },
+  "os04-cst-chroma-v1": {
+    "target_greys": (0.0, 0.45),
+    "env_combos": (
+      "default",
+      "gamma20:ASIUS_CAM_GAMMA_K=20",
+      cst_chroma_combo("cst1p0"),
+      cst_chroma_combo("cst1p2"),
+      cst_chroma_combo("cst1p0", gamma=20),
+      cst_chroma_combo("cst1p2", gamma=20),
+    ),
+    "description": "daylight-road sweep for less gray OS04 VFE CST chroma rows",
   },
 }
 
