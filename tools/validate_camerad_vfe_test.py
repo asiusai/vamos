@@ -166,5 +166,18 @@ class VfeSetupSummaryTest(unittest.TestCase):
     self.assertIs(summary["cameras"]["cam2"]["vfe_setup"], cam2)
 
 
+class DmesgForbiddenPatternTest(unittest.TestCase):
+  def test_flags_vfe_pix_stall_and_recovery_warnings(self) -> None:
+    dmesg_text = "\n".join([
+      "[  42.000000] qcom-camss ac5a000.camss: vfe0 pix recovering missing PIX wm done mask=0x1 missing=1 seq=20 sof=21 wm3=21 wm4=20",
+      "[  43.000000] qcom-camss ac5a000.camss: vfe1 pix stall? sof=40 reg=40 comp=39 dual=0 wm3=39 wm4=39 gap=20",
+    ])
+
+    matches = validator.forbidden_dmesg_matches(dmesg_text)
+
+    self.assertEqual(2, len(matches))
+    self.assertTrue(all(match["kind"] == "VFE PIX stall/recovery warning" for match in matches))
+
+
 if __name__ == "__main__":
   unittest.main()
