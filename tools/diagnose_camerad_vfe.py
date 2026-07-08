@@ -189,6 +189,7 @@ def wb_hint(tiles: list[dict]) -> dict:
 def print_cam(cam: str, data: dict, args: argparse.Namespace, log_text: str) -> None:
   cam_data = data.get("cameras", {}).get(cam, {})
   image = cam_data.get("image", {})
+  vfe_setup = cam_data.get("vfe_setup", {})
   tiles = image.get("tiles", [])
   if not isinstance(tiles, list):
     tiles = []
@@ -197,6 +198,22 @@ def print_cam(cam: str, data: dict, args: argparse.Namespace, log_text: str) -> 
   fps = cam_data.get("median_fps", None)
   fps_text = "?" if fps is None else f"{float(fps):.2f}"
   print(f"{cam}: frames={frames} fps={fps_text}")
+  if isinstance(vfe_setup, dict) and vfe_setup:
+    vipc = vfe_setup.get("vipc", {})
+    gamma = vfe_setup.get("gamma", {})
+    awb_config = vfe_setup.get("awb_config", {})
+    if isinstance(vipc, dict) and isinstance(gamma, dict):
+      print(
+        f"  vfe_setup: mode={vipc.get('mode', '?')} "
+        f"{vipc.get('width', '?')}x{vipc.get('height', '?')} "
+        f"stride={vipc.get('stride', '?')} "
+        f"regs={vfe_setup.get('poststart_reg_count', '?')} "
+        f"gamma={float(gamma.get('g', -1.0)):.2f}/"
+        f"{float(gamma.get('b', -1.0)):.2f}/"
+        f"{float(gamma.get('r', -1.0)):.2f} "
+        f"awb0=0x{int(awb_config.get('blue', 0)):x}/"
+        f"0x{int(awb_config.get('red', 0)):x}"
+      )
   print(
     f"  image: y_median={float(image.get('y_median', -1.0)):.1f} "
     f"y_range={float(image.get('y_range_p99_p01', -1.0)):.1f} "
