@@ -7,6 +7,7 @@ from contextlib import redirect_stdout
 import io
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 
 import run_vfe_acceptance as acceptance
@@ -306,6 +307,61 @@ class FinalAcceptanceSummaryTest(unittest.TestCase):
     self.assertIn("visual_review_checklist:", text)
     self.assertIn("daylight road", text)
     self.assertIn("finalize_after_human_review:", text)
+
+
+class FinalDaylightRoadPresetTest(unittest.TestCase):
+  def _args(self) -> SimpleNamespace:
+    return SimpleNamespace(
+      final_daylight_road=True,
+      skip_snapshot=False,
+      skip_modeld=False,
+      snapshot_profile="bench",
+      snapshot_monitor_duration=15.0,
+      modeld_duration=25.0,
+      min_final_snapshot_duration=30.0,
+      min_final_modeld_duration=30.0,
+      require_final_acceptance=False,
+      finalize_existing_summary=None,
+      visual_check_scene="unknown",
+    )
+
+  def test_applies_final_daylight_defaults(self) -> None:
+    args = self._args()
+
+    applied = acceptance.apply_final_daylight_road_preset(args)
+
+    self.assertTrue(applied)
+    self.assertEqual("daylight-road", args.snapshot_profile)
+    self.assertEqual(120.0, args.snapshot_monitor_duration)
+    self.assertEqual(120.0, args.modeld_duration)
+    self.assertEqual(120.0, args.min_final_snapshot_duration)
+    self.assertEqual(120.0, args.min_final_modeld_duration)
+    self.assertTrue(args.require_final_acceptance)
+
+  def test_preserves_longer_requested_durations(self) -> None:
+    args = self._args()
+    args.snapshot_monitor_duration = 180.0
+    args.modeld_duration = 150.0
+
+    acceptance.apply_final_daylight_road_preset(args)
+
+    self.assertEqual(180.0, args.snapshot_monitor_duration)
+    self.assertEqual(150.0, args.modeld_duration)
+
+  def test_rejects_skipped_gates(self) -> None:
+    args = self._args()
+    args.skip_modeld = True
+
+    with self.assertRaises(ValueError):
+      acceptance.apply_final_daylight_road_preset(args)
+
+  def test_sets_daylight_scene_when_finalizing(self) -> None:
+    args = self._args()
+    args.finalize_existing_summary = Path("/tmp/summary.json")
+
+    acceptance.apply_final_daylight_road_preset(args)
+
+    self.assertEqual("daylight-road", args.visual_check_scene)
 
 
 if __name__ == "__main__":
