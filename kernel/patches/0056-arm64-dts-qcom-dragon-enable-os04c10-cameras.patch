@@ -2,10 +2,28 @@ diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/
 index 1e793de87..f07c711ab 100644
 --- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
 +++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
-@@ -1571,3 +1571,172 @@ user_led: user-led-state {
+@@ -1571,3 +1571,166 @@ user_led: user-led-state {
  		bias-pull-up;
  	};
  };
++
++&{/} {
++	ext_cam_clk_os04_cam2: ext-cam-clk-os04-cam2 {
++		status = "okay";
++		compatible = "fixed-clock";
++		clock-frequency = <24000000>;
++		clock-output-names = "ext_cam_clk_os04_cam2";
++		#clock-cells = <0>;
++	};
++
++	ext_cam_clk_os04_cam3: ext-cam-clk-os04-cam3 {
++		status = "okay";
++		compatible = "fixed-clock";
++		clock-frequency = <24000000>;
++		clock-output-names = "ext_cam_clk_os04_cam3";
++		#clock-cells = <0>;
++	};
++};
 +
 +&camss {
 +	vdda-phy-supply = <&vreg_l10c_0p88>;
@@ -86,6 +104,8 @@ index 1e793de87..f07c711ab 100644
 +	os04c10_cam2: camera@36 {
 +		compatible = "ovti,os04c10";
 +		reg = <0x36>;
++		clocks = <&ext_cam_clk_os04_cam2>;
++		clock-names = "xclk";
 +		reset-gpios = <&tlmm 77 0>;
 +
 +		port {
@@ -106,6 +126,8 @@ index 1e793de87..f07c711ab 100644
 +	os04c10_cam3: camera@36 {
 +		compatible = "ovti,os04c10";
 +		reg = <0x36>;
++		clocks = <&ext_cam_clk_os04_cam3>;
++		clock-names = "xclk";
 +		reset-gpios = <&tlmm 78 0>;
 +
 +		port {
@@ -128,34 +150,6 @@ index 1e793de87..f07c711ab 100644
 +
 +	cam1_mclk_suspend: cam1-mclk-suspend-state {
 +		pins = "gpio64";
-+		function = "cam_mclk";
-+		drive-strength = <2>;
-+		bias-pull-down;
-+	};
-+
-+	cam2_mclk_default: cam2-mclk-default-state {
-+		pins = "gpio66";
-+		function = "cam_mclk";
-+		drive-strength = <2>;
-+		bias-disable;
-+	};
-+
-+	cam2_mclk_suspend: cam2-mclk-suspend-state {
-+		pins = "gpio66";
-+		function = "cam_mclk";
-+		drive-strength = <2>;
-+		bias-pull-down;
-+	};
-+
-+	cam3_mclk_default: cam3-mclk-default-state {
-+		pins = "gpio67";
-+		function = "cam_mclk";
-+		drive-strength = <2>;
-+		bias-disable;
-+	};
-+
-+	cam3_mclk_suspend: cam3-mclk-suspend-state {
-+		pins = "gpio67";
 +		function = "cam_mclk";
 +		drive-strength = <2>;
 +		bias-pull-down;
@@ -210,7 +204,7 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 index 702a520d4..89b2c10b7 100644
 --- a/drivers/firmware/efi/libstub/fdt.c
 +++ b/drivers/firmware/efi/libstub/fdt.c
-@@ -83,6 +83,516 @@ static void asius_enable_panda_spi(void *fdt)
+@@ -83,6 +83,535 @@ static void asius_enable_panda_spi(void *fdt)
  			 status);
  }
  
@@ -237,19 +231,15 @@ index 702a520d4..89b2c10b7 100644
 +#define ASIUS_CAM1_EP_PATH		ASIUS_CAM1_PORT_PATH "/endpoint"
 +#define ASIUS_CAM2_EP_PATH		ASIUS_CAM2_PORT_PATH "/endpoint"
 +#define ASIUS_CAM3_EP_PATH		ASIUS_CAM3_PORT_PATH "/endpoint"
++#define ASIUS_CAM2_EXT_CLK_PATH		"/ext-cam-clk-os04-cam2"
++#define ASIUS_CAM3_EXT_CLK_PATH		"/ext-cam-clk-os04-cam3"
 +#define ASIUS_TLMM_PATH			"/soc@0/pinctrl@f100000"
 +#define ASIUS_CAM1_MCLK_DEFAULT_PATH	ASIUS_TLMM_PATH "/cam1-mclk-default-state"
 +#define ASIUS_CAM1_MCLK_SUSPEND_PATH	ASIUS_TLMM_PATH "/cam1-mclk-suspend-state"
-+#define ASIUS_CAM2_MCLK_DEFAULT_PATH	ASIUS_TLMM_PATH "/cam2-mclk-default-state"
-+#define ASIUS_CAM2_MCLK_SUSPEND_PATH	ASIUS_TLMM_PATH "/cam2-mclk-suspend-state"
-+#define ASIUS_CAM3_MCLK_DEFAULT_PATH	ASIUS_TLMM_PATH "/cam3-mclk-default-state"
-+#define ASIUS_CAM3_MCLK_SUSPEND_PATH	ASIUS_TLMM_PATH "/cam3-mclk-suspend-state"
 +#define ASIUS_VREG_L6B_1P2_PATH		"/soc@0/rsc@18200000/regulators-0/ldo6"
 +#define ASIUS_VREG_L10C_0P88_PATH	"/soc@0/rsc@18200000/regulators-1/ldo10"
 +
 +#define ASIUS_CAM_CC_MCLK0_CLK		92
-+#define ASIUS_CAM_CC_MCLK2_CLK		96
-+#define ASIUS_CAM_CC_MCLK3_CLK		98
 +
 +#define ASIUS_MAX_FDT_CELLS		4
 +
@@ -342,6 +332,17 @@ index 702a520d4..89b2c10b7 100644
 +	return fdt_setprop(fdt, node, name, cells, sizeof(cells[0]) * count);
 +}
 +
++static int asius_fdt_delprop_optional(void *fdt, int node, const char *name)
++{
++	int status;
++
++	status = fdt_delprop(fdt, node, name);
++	if (status == -FDT_ERR_NOTFOUND)
++		return 0;
++
++	return status;
++}
++
 +static int asius_fdt_setprop_string_path(void *fdt, const char *path,
 +					 const char *name, const char *value)
 +{
@@ -395,6 +396,27 @@ index 702a520d4..89b2c10b7 100644
 +	       fdt_setprop(fdt, node, bias, NULL, 0);
 +}
 +
++static int asius_configure_fixed_clock(void *fdt, const char *path,
++				       const char *name, u32 frequency,
++				       u32 *phandle)
++{
++	int node;
++	int status;
++
++	node = fdt_path_offset(fdt, path);
++	if (node < 0)
++		return node;
++
++	status = fdt_setprop_string(fdt, node, "status", "okay") ?:
++		 fdt_setprop_string(fdt, node, "compatible", "fixed-clock") ?:
++		 fdt_setprop_u32(fdt, node, "clock-frequency", frequency) ?:
++		 fdt_setprop_string(fdt, node, "clock-output-names", name) ?:
++		 fdt_setprop_u32(fdt, node, "#clock-cells", 0) ?:
++		 asius_fdt_node_phandle(fdt, path, phandle);
++
++	return status;
++}
++
 +static int asius_configure_camss_port(void *fdt, int index,
 +				      const char *port_path,
 +				      const char *endpoint_path,
@@ -438,6 +460,7 @@ index 702a520d4..89b2c10b7 100644
 +					 u32 camcc_phandle, u32 mclk,
 +					 u32 mclk_default_phandle,
 +					 u32 mclk_suspend_phandle,
++					 int use_camcc_mclk,
 +					 u32 reset_phandle, u32 reset_gpio,
 +					 u32 enable_gpio,
 +					 u64 link_frequency,
@@ -461,20 +484,40 @@ index 702a520d4..89b2c10b7 100644
 +	status = fdt_setprop_string(fdt, sensor, "compatible", compatible) ?:
 +		 fdt_setprop_u32(fdt, sensor, "reg", i2c_addr) ?:
 +		 asius_fdt_setprop_u32_array(fdt, sensor, "clocks",
-+					     clock_cells, ARRAY_SIZE(clock_cells)) ?:
++					     clock_cells,
++					     use_camcc_mclk ? ARRAY_SIZE(clock_cells) : 1) ?:
 +		 fdt_setprop_string(fdt, sensor, "clock-names", "xclk") ?:
-+		 asius_fdt_setprop_u32_array(fdt, sensor, "assigned-clocks",
-+					     clock_cells, ARRAY_SIZE(clock_cells)) ?:
-+		 fdt_setprop_u32(fdt, sensor, "assigned-clock-rates",
-+				 24000000) ?:
-+		 fdt_setprop(fdt, sensor, "pinctrl-names", pinctrl_names,
-+			     sizeof(pinctrl_names)) ?:
-+		 asius_fdt_setprop_u32_array(fdt, sensor, "pinctrl-0",
-+					     pinctrl0_cells, ARRAY_SIZE(pinctrl0_cells)) ?:
-+		 asius_fdt_setprop_u32_array(fdt, sensor, "pinctrl-1",
-+					     pinctrl1_cells, ARRAY_SIZE(pinctrl1_cells)) ?:
 +		 asius_fdt_setprop_u32_array(fdt, sensor, "reset-gpios",
 +					     reset_cells, ARRAY_SIZE(reset_cells));
++	if (status)
++		return status;
++
++	if (use_camcc_mclk) {
++		status = asius_fdt_setprop_u32_array(fdt, sensor, "assigned-clocks",
++						     clock_cells,
++						     ARRAY_SIZE(clock_cells)) ?:
++			 fdt_setprop_u32(fdt, sensor, "assigned-clock-rates",
++					 24000000) ?:
++			 fdt_setprop(fdt, sensor, "pinctrl-names",
++				     pinctrl_names, sizeof(pinctrl_names)) ?:
++			 asius_fdt_setprop_u32_array(fdt, sensor, "pinctrl-0",
++						     pinctrl0_cells,
++						     ARRAY_SIZE(pinctrl0_cells)) ?:
++			 asius_fdt_setprop_u32_array(fdt, sensor, "pinctrl-1",
++						     pinctrl1_cells,
++						     ARRAY_SIZE(pinctrl1_cells));
++	} else {
++		status = asius_fdt_delprop_optional(fdt, sensor,
++						    "assigned-clocks") ?:
++			 asius_fdt_delprop_optional(fdt, sensor,
++						    "assigned-clock-rates") ?:
++			 asius_fdt_delprop_optional(fdt, sensor,
++						    "pinctrl-names") ?:
++			 asius_fdt_delprop_optional(fdt, sensor,
++						    "pinctrl-0") ?:
++			 asius_fdt_delprop_optional(fdt, sensor,
++						    "pinctrl-1");
++	}
 +	if (status)
 +		return status;
 +
@@ -512,8 +555,7 @@ index 702a520d4..89b2c10b7 100644
 +	u32 cam2_csi_phandle, cam2_sensor_phandle;
 +	u32 cam3_csi_phandle, cam3_sensor_phandle;
 +	u32 cam1_mclk_default_phandle, cam1_mclk_suspend_phandle;
-+	u32 cam2_mclk_default_phandle, cam2_mclk_suspend_phandle;
-+	u32 cam3_mclk_default_phandle, cam3_mclk_suspend_phandle;
++	u32 cam2_ext_clk_phandle, cam3_ext_clk_phandle;
 +	u32 camss_vdda_phy_phandle, camss_vdda_pll_phandle;
 +	u32 camcc_phandle, tlmm_phandle;
 +	int camss, cci0, cci1;
@@ -531,6 +573,16 @@ index 702a520d4..89b2c10b7 100644
 +		efi_warn("Failed to add Asius camera ports node: %d\n", status);
 +		return;
 +	}
++
++	status = asius_fdt_ensure_child(fdt, "/", "ext-cam-clk-os04-cam2",
++				       ASIUS_CAM2_EXT_CLK_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, "/", "ext-cam-clk-os04-cam3",
++				       ASIUS_CAM3_EXT_CLK_PATH);
++	if (status < 0)
++		goto fail;
 +
 +	status = asius_fdt_ensure_child(fdt, ASIUS_CAMSS_PORTS_PATH, "port@0",
 +				       ASIUS_CAMSS_PORT0_PATH);
@@ -574,30 +626,6 @@ index 702a520d4..89b2c10b7 100644
 +	if (status < 0)
 +		goto fail;
 +
-+	status = asius_fdt_ensure_child(fdt, ASIUS_TLMM_PATH,
-+				       "cam2-mclk-default-state",
-+				       ASIUS_CAM2_MCLK_DEFAULT_PATH);
-+	if (status < 0)
-+		goto fail;
-+
-+	status = asius_fdt_ensure_child(fdt, ASIUS_TLMM_PATH,
-+				       "cam2-mclk-suspend-state",
-+				       ASIUS_CAM2_MCLK_SUSPEND_PATH);
-+	if (status < 0)
-+		goto fail;
-+
-+	status = asius_fdt_ensure_child(fdt, ASIUS_TLMM_PATH,
-+				       "cam3-mclk-default-state",
-+				       ASIUS_CAM3_MCLK_DEFAULT_PATH);
-+	if (status < 0)
-+		goto fail;
-+
-+	status = asius_fdt_ensure_child(fdt, ASIUS_TLMM_PATH,
-+				       "cam3-mclk-suspend-state",
-+				       ASIUS_CAM3_MCLK_SUSPEND_PATH);
-+	if (status < 0)
-+		goto fail;
-+
 +	status = asius_fdt_node_phandle(fdt, ASIUS_CAMCC_PATH,
 +					&camcc_phandle) ?:
 +		 asius_fdt_node_phandle(fdt, ASIUS_TLMM_PATH,
@@ -612,30 +640,18 @@ index 702a520d4..89b2c10b7 100644
 +		 asius_configure_cam_mclk_pinctrl(fdt,
 +						  ASIUS_CAM1_MCLK_SUSPEND_PATH,
 +						  "gpio64", "bias-pull-down") ?:
-+		 asius_configure_cam_mclk_pinctrl(fdt,
-+						  ASIUS_CAM2_MCLK_DEFAULT_PATH,
-+						  "gpio66", "bias-disable") ?:
-+		 asius_configure_cam_mclk_pinctrl(fdt,
-+						  ASIUS_CAM2_MCLK_SUSPEND_PATH,
-+						  "gpio66", "bias-pull-down") ?:
-+		 asius_configure_cam_mclk_pinctrl(fdt,
-+						  ASIUS_CAM3_MCLK_DEFAULT_PATH,
-+						  "gpio67", "bias-disable") ?:
-+		 asius_configure_cam_mclk_pinctrl(fdt,
-+						  ASIUS_CAM3_MCLK_SUSPEND_PATH,
-+						  "gpio67", "bias-pull-down") ?:
++		 asius_configure_fixed_clock(fdt, ASIUS_CAM2_EXT_CLK_PATH,
++					      "ext_cam_clk_os04_cam2",
++					      24000000,
++					      &cam2_ext_clk_phandle) ?:
++		 asius_configure_fixed_clock(fdt, ASIUS_CAM3_EXT_CLK_PATH,
++					      "ext_cam_clk_os04_cam3",
++					      24000000,
++					      &cam3_ext_clk_phandle) ?:
 +		 asius_fdt_node_phandle(fdt, ASIUS_CAM1_MCLK_DEFAULT_PATH,
 +					&cam1_mclk_default_phandle) ?:
 +		 asius_fdt_node_phandle(fdt, ASIUS_CAM1_MCLK_SUSPEND_PATH,
 +					&cam1_mclk_suspend_phandle) ?:
-+		 asius_fdt_node_phandle(fdt, ASIUS_CAM2_MCLK_DEFAULT_PATH,
-+					&cam2_mclk_default_phandle) ?:
-+		 asius_fdt_node_phandle(fdt, ASIUS_CAM2_MCLK_SUSPEND_PATH,
-+					&cam2_mclk_suspend_phandle) ?:
-+		 asius_fdt_node_phandle(fdt, ASIUS_CAM3_MCLK_DEFAULT_PATH,
-+					&cam3_mclk_default_phandle) ?:
-+		 asius_fdt_node_phandle(fdt, ASIUS_CAM3_MCLK_SUSPEND_PATH,
-+					&cam3_mclk_suspend_phandle) ?:
 +		 asius_fdt_setprop_string_path(fdt, ASIUS_CAMSS_PATH,
 +					       "status", "okay") ?:
 +		 asius_fdt_setprop_u32_path(fdt, ASIUS_CAMSS_PATH,
@@ -672,6 +688,7 @@ index 702a520d4..89b2c10b7 100644
 +					       ASIUS_CAM_CC_MCLK0_CLK,
 +					       cam1_mclk_default_phandle,
 +					       cam1_mclk_suspend_phandle,
++					       1,
 +					       tlmm_phandle, 20, 36,
 +					       360000000ULL,
 +					       &cam1_sensor_phandle) ?:
@@ -679,10 +696,8 @@ index 702a520d4..89b2c10b7 100644
 +					       ASIUS_CAM2_PORT_PATH,
 +					       ASIUS_CAM2_EP_PATH,
 +					       "ovti,os04c10", 0x36,
-+					       camcc_phandle,
-+					       ASIUS_CAM_CC_MCLK2_CLK,
-+					       cam2_mclk_default_phandle,
-+					       cam2_mclk_suspend_phandle,
++					       cam2_ext_clk_phandle,
++					       0, 0, 0, 0,
 +					       tlmm_phandle, 77, 0,
 +					       360000000ULL,
 +					       &cam2_sensor_phandle) ?:
@@ -690,10 +705,8 @@ index 702a520d4..89b2c10b7 100644
 +					       ASIUS_CAM3_PORT_PATH,
 +					       ASIUS_CAM3_EP_PATH,
 +					       "ovti,os04c10", 0x36,
-+					       camcc_phandle,
-+					       ASIUS_CAM_CC_MCLK3_CLK,
-+					       cam3_mclk_default_phandle,
-+					       cam3_mclk_suspend_phandle,
++					       cam3_ext_clk_phandle,
++					       0, 0, 0, 0,
 +					       tlmm_phandle, 78, 0,
 +					       360000000ULL,
 +					       &cam3_sensor_phandle) ?:
@@ -727,7 +740,7 @@ index 702a520d4..89b2c10b7 100644
  static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
  			       void *fdt, int new_fdt_size, char *cmdline_ptr)
  {
-@@ -149,6 +659,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+@@ -149,6 +678,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
  	}
  
  	asius_enable_panda_spi(fdt);
