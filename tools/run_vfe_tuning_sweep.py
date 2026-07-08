@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import json
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -23,6 +24,8 @@ from run_vfe_acceptance import (
 
 SUMMARY_FILE = "vfe-tuning-sweep-summary.json"
 CONTACT_SHEET_FILE = "vfe-tuning-sweep-contact.jpg"
+BEST_ACCEPTANCE_SCRIPT_FILE = "run-best-vfe-acceptance.sh"
+BEST_FINALIZE_SCRIPT_FILE = "finalize-best-vfe-acceptance.sh"
 DEFAULT_MAX_CANDIDATES = 12
 SWEEP_PRESETS = {
   "manual": {
@@ -198,6 +201,71 @@ def build_finalize_cmd_template(out_dir: Path) -> list[str]:
     "--visual-check-montage-sha256", "<reviewed-montage-sha256>",
     "--require-final-acceptance",
   ]
+
+
+def executable_script(path: Path, text: str) -> str:
+  path.write_text(text)
+  path.chmod(0o755)
+  return str(path)
+
+
+def build_acceptance_script_text(command: list[str]) -> str:
+  return (
+    "#!/usr/bin/env bash\n"
+    "set -euo pipefail\n\n"
+    "# Full CAM2/CAM3 hardware VFE acceptance for the best-ranked sweep candidate.\n"
+    f"exec {shlex.join(command)}\n"
+  )
+
+
+def build_finalize_script_text(acceptance_out_dir: Path) -> str:
+  command_prefix = [
+    sys.executable,
+    str(Path(__file__).resolve().with_name("run_vfe_acceptance.py")),
+    "--finalize-existing-summary", str(acceptance_out_dir / ACCEPTANCE_SUMMARY_FILE),
+    "--visual-check-pass",
+    "--visual-check-scene", "daylight-road",
+    "--visual-check-note",
+  ]
+  command_suffix = [
+    "--visual-check-montage-sha256",
+    "--require-final-acceptance",
+  ]
+  return (
+    "#!/usr/bin/env bash\n"
+    "set -euo pipefail\n\n"
+    "if [[ $# -lt 2 ]]; then\n"
+    '  echo "usage: $0 <reviewed-montage-sha256> <human-review-note>" >&2\n'
+    "  exit 2\n"
+    "fi\n\n"
+    'reviewed_montage_sha256="$1"\n'
+    "shift\n"
+    'human_review_note="$*"\n\n'
+    "# Finalize the existing acceptance summary after reviewing /tmp/asius-cams-latest.jpg.\n"
+    f"exec {shlex.join(command_prefix)} \"$human_review_note\" "
+    f"{shlex.join(command_suffix[:1])} \"$reviewed_montage_sha256\" {shlex.join(command_suffix[1:])}\n"
+  )
+
+
+def write_best_candidate_scripts(out_dir: Path, best_result: dict | None) -> dict:
+  if not best_result:
+    return {
+      "acceptance_script": None,
+      "finalize_script": None,
+    }
+
+  acceptance_script = executable_script(
+    out_dir / BEST_ACCEPTANCE_SCRIPT_FILE,
+    build_acceptance_script_text(best_result["acceptance_command"]),
+  )
+  finalize_script = executable_script(
+    out_dir / BEST_FINALIZE_SCRIPT_FILE,
+    build_finalize_script_text(Path(str(best_result["acceptance_out_dir"]))),
+  )
+  return {
+    "acceptance_script": acceptance_script,
+    "finalize_script": finalize_script,
+  }
 
 
 def run_cmd(cmd: list[str], dry_run: bool) -> int:
@@ -471,6 +539,9 @@ def main() -> int:
   summary["best_candidate"] = ranked[0]["name"] if ranked else None
   summary["best_candidate_acceptance_command"] = ranked[0]["acceptance_command"] if ranked else None
   summary["best_candidate_finalize_command_template"] = ranked[0]["finalize_command_template"] if ranked else None
+  scripts = write_best_candidate_scripts(out_dir, ranked[0] if ranked else None)
+  summary["best_candidate_acceptance_script"] = scripts["acceptance_script"]
+  summary["best_candidate_finalize_script"] = scripts["finalize_script"]
   contact_sheet = build_contact_sheet(ranked, out_dir)
   summary["contact_sheet"] = str(contact_sheet) if contact_sheet else None
 
@@ -479,6 +550,10 @@ def main() -> int:
   print(f"summary_json: {summary_path}")
   if contact_sheet:
     print(f"contact_sheet: {contact_sheet}")
+  if summary["best_candidate_acceptance_script"]:
+    print(f"best_acceptance_script: {summary['best_candidate_acceptance_script']}")
+  if summary["best_candidate_finalize_script"]:
+    print(f"best_finalize_script: {summary['best_candidate_finalize_script']}")
   print(f"best_candidate: {summary['best_candidate']}")
   return 0 if all(candidate["returncode"] == 0 for candidate in summary["candidates"]) else 1
 
