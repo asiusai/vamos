@@ -136,11 +136,12 @@ class LabelTest(unittest.TestCase):
           "uv_hf_abs_mean": 3.382821843,
           "tile_luma_clip_hi_area_frac_gt_10pct": 0.04,
           "tile_luma_clip_hi_area_frac_gt_50pct": 0.0,
+          "latest_raw_match": True,
         },
       },
     })
 
-    self.assertIn("cam2: y=101.00 rgb=6.00 uvhf=3.38 clip=0.04/0.00", label)
+    self.assertIn("cam2: y=101.00 rgb=6.00 uvhf=3.38 clip=0.04/0.00 raw=True", label)
 
 
 class ContactSheetTest(unittest.TestCase):
