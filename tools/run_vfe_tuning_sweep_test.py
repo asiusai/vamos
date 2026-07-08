@@ -84,9 +84,11 @@ class RankingTest(unittest.TestCase):
       "failures": [],
       "cameras": {
         "cam2": {"y_median": 100, "rgb_median_spread": 20, "uv_hf_abs_mean": 5.0,
+                 "mean_chroma": 4.0, "max_uv_center_median_offset": 8.0,
                  "tile_luma_clip_hi_area_frac_gt_10pct": 0.08,
                  "tile_luma_clip_hi_area_frac_gt_50pct": 0.02},
         "cam3": {"y_median": 100, "rgb_median_spread": 20, "uv_hf_abs_mean": 5.0,
+                 "mean_chroma": 4.0, "max_uv_center_median_offset": 8.0,
                  "tile_luma_clip_hi_area_frac_gt_10pct": 0.08,
                  "tile_luma_clip_hi_area_frac_gt_50pct": 0.02},
       },
@@ -99,9 +101,11 @@ class RankingTest(unittest.TestCase):
       "failures": [],
       "cameras": {
         "cam2": {"y_median": 115, "rgb_median_spread": 5, "uv_hf_abs_mean": 2.0,
+                 "mean_chroma": 10.0, "max_uv_center_median_offset": 1.0,
                  "tile_luma_clip_hi_area_frac_gt_10pct": 0.01,
                  "tile_luma_clip_hi_area_frac_gt_50pct": 0.0},
         "cam3": {"y_median": 116, "rgb_median_spread": 5, "uv_hf_abs_mean": 2.0,
+                 "mean_chroma": 10.0, "max_uv_center_median_offset": 1.0,
                  "tile_luma_clip_hi_area_frac_gt_10pct": 0.01,
                  "tile_luma_clip_hi_area_frac_gt_50pct": 0.0},
       },
@@ -119,6 +123,80 @@ class RankingTest(unittest.TestCase):
 
     self.assertEqual(["cleaner", "noisy", "failing"], [candidate["name"] for candidate in ranked])
 
+  def test_candidate_sort_key_penalizes_grey_or_color_cast_candidates(self) -> None:
+    grey = {
+      "name": "grey",
+      "passed": True,
+      "hardware_path_passed": True,
+      "image_quality_passed": True,
+      "failures": [],
+      "cameras": {
+        "cam2": {"y_median": 115, "rgb_median_spread": 5, "uv_hf_abs_mean": 2.0,
+                 "mean_chroma": 2.0, "max_uv_center_median_offset": 1.0,
+                 "tile_luma_clip_hi_area_frac_gt_10pct": 0.0,
+                 "tile_luma_clip_hi_area_frac_gt_50pct": 0.0},
+        "cam3": {"y_median": 115, "rgb_median_spread": 5, "uv_hf_abs_mean": 2.0,
+                 "mean_chroma": 2.0, "max_uv_center_median_offset": 1.0,
+                 "tile_luma_clip_hi_area_frac_gt_10pct": 0.0,
+                 "tile_luma_clip_hi_area_frac_gt_50pct": 0.0},
+      },
+    }
+    cast = {
+      "name": "cast",
+      "passed": True,
+      "hardware_path_passed": True,
+      "image_quality_passed": True,
+      "failures": [],
+      "cameras": {
+        "cam2": {"y_median": 115, "rgb_median_spread": 5, "uv_hf_abs_mean": 2.0,
+                 "mean_chroma": 10.0, "max_uv_center_median_offset": 12.0,
+                 "tile_luma_clip_hi_area_frac_gt_10pct": 0.0,
+                 "tile_luma_clip_hi_area_frac_gt_50pct": 0.0},
+        "cam3": {"y_median": 115, "rgb_median_spread": 5, "uv_hf_abs_mean": 2.0,
+                 "mean_chroma": 10.0, "max_uv_center_median_offset": 12.0,
+                 "tile_luma_clip_hi_area_frac_gt_10pct": 0.0,
+                 "tile_luma_clip_hi_area_frac_gt_50pct": 0.0},
+      },
+    }
+    balanced = {
+      "name": "balanced",
+      "passed": True,
+      "hardware_path_passed": True,
+      "image_quality_passed": True,
+      "failures": [],
+      "cameras": {
+        "cam2": {"y_median": 115, "rgb_median_spread": 8, "uv_hf_abs_mean": 2.5,
+                 "mean_chroma": 10.0, "max_uv_center_median_offset": 1.0,
+                 "tile_luma_clip_hi_area_frac_gt_10pct": 0.0,
+                 "tile_luma_clip_hi_area_frac_gt_50pct": 0.0},
+        "cam3": {"y_median": 115, "rgb_median_spread": 8, "uv_hf_abs_mean": 2.5,
+                 "mean_chroma": 10.0, "max_uv_center_median_offset": 1.0,
+                 "tile_luma_clip_hi_area_frac_gt_10pct": 0.0,
+                 "tile_luma_clip_hi_area_frac_gt_50pct": 0.0},
+      },
+    }
+
+    ranked = sorted([grey, cast, balanced], key=sweep.candidate_sort_key)
+
+    self.assertEqual("balanced", ranked[0]["name"])
+    self.assertEqual("grey", ranked[-1]["name"])
+
+  def test_candidate_quality_metrics_are_saved_for_explanation(self) -> None:
+    result = {
+      "cameras": {
+        "cam2": {"y_median": 115, "rgb_median_spread": 5, "uv_hf_abs_mean": 2.0,
+                 "mean_chroma": 10.0, "max_uv_center_median_offset": 1.0,
+                 "tile_luma_clip_hi_area_frac_gt_10pct": 0.0,
+                 "tile_luma_clip_hi_area_frac_gt_50pct": 0.0},
+      },
+    }
+
+    metrics = sweep.candidate_quality_metrics(result)
+
+    self.assertIn("color_defect", metrics)
+    self.assertIn("chroma_weakness", metrics)
+    self.assertIn("center_color_cast", metrics)
+
 
 class LabelTest(unittest.TestCase):
   def test_candidate_label_rounds_float_metrics(self) -> None:
@@ -133,6 +211,8 @@ class LabelTest(unittest.TestCase):
         "cam2": {
           "y_median": 101.0,
           "rgb_median_spread": 6.0,
+          "mean_chroma": 9.0,
+          "max_uv_center_median_offset": 2.0,
           "uv_hf_abs_mean": 3.382821843,
           "tile_luma_clip_hi_area_frac_gt_10pct": 0.04,
           "tile_luma_clip_hi_area_frac_gt_50pct": 0.0,
@@ -141,7 +221,10 @@ class LabelTest(unittest.TestCase):
       },
     })
 
-    self.assertIn("cam2: y=101.00 rgb=6.00 uvhf=3.38 clip=0.04/0.00 raw=True", label)
+    self.assertIn(
+      "cam2: y=101.00 rgb=6.00 chroma=9.00 centerUV=2.00 uvhf=3.38 clip=0.04/0.00 raw=True",
+      label,
+    )
 
 
 class ContactSheetTest(unittest.TestCase):
@@ -167,9 +250,11 @@ class ContactSheetTest(unittest.TestCase):
         "failures": [],
         "cameras": {
           "cam2": {"y_median": 115, "rgb_median_spread": 5, "uv_hf_abs_mean": 2.0,
+                   "mean_chroma": 10.0, "max_uv_center_median_offset": 1.0,
                    "tile_luma_clip_hi_area_frac_gt_10pct": 0.01,
                    "tile_luma_clip_hi_area_frac_gt_50pct": 0.0},
           "cam3": {"y_median": 116, "rgb_median_spread": 5, "uv_hf_abs_mean": 2.0,
+                   "mean_chroma": 10.0, "max_uv_center_median_offset": 1.0,
                    "tile_luma_clip_hi_area_frac_gt_10pct": 0.01,
                    "tile_luma_clip_hi_area_frac_gt_50pct": 0.0},
         },
