@@ -125,33 +125,52 @@ def numeric(value: object, default: float) -> float:
   return float(value) if isinstance(value, (int, float)) else default
 
 
-def candidate_sort_key(result: dict) -> tuple:
+def candidate_quality_metrics(result: dict) -> dict[str, float]:
   cameras = result.get("cameras", {})
   clip_area = 0.0
-  color_noise = 0.0
+  chroma_weakness = 0.0
+  center_color_cast = 0.0
   luma_error = 0.0
+  texture_noise = 0.0
   metric_count = 0
   for cam in ("cam2", "cam3"):
     cam_data = cameras.get(cam, {})
     clip_area += numeric(cam_data.get("tile_luma_clip_hi_area_frac_gt_10pct"), 1.0)
     clip_area += numeric(cam_data.get("tile_luma_clip_hi_area_frac_gt_50pct"), 1.0)
-    color_noise += numeric(cam_data.get("rgb_median_spread"), 60.0) / 60.0
-    color_noise += numeric(cam_data.get("uv_hf_abs_mean"), 6.25) / 6.25
+    chroma_weakness += max(0.0, 8.0 - numeric(cam_data.get("mean_chroma"), 0.0)) / 8.0
+    center_color_cast += numeric(cam_data.get("max_uv_center_median_offset"), 32.0) / 32.0
+    texture_noise += numeric(cam_data.get("rgb_median_spread"), 60.0) / 60.0
+    texture_noise += numeric(cam_data.get("uv_hf_abs_mean"), 6.25) / 6.25
     y_median = cam_data.get("y_median")
     if isinstance(y_median, (int, float)):
       luma_error += abs(float(y_median) - 115.0) / 115.0
       metric_count += 1
   if metric_count == 0:
     luma_error = 2.0
+  return {
+    "clip_area": clip_area,
+    "luma_error": luma_error,
+    "color_defect": center_color_cast + chroma_weakness,
+    "center_color_cast": center_color_cast,
+    "chroma_weakness": chroma_weakness,
+    "texture_noise": texture_noise,
+  }
+
+
+def candidate_sort_key(result: dict) -> tuple:
+  metrics = candidate_quality_metrics(result)
   failures = result.get("failures") or []
   return (
     not bool(result.get("passed")),
     not bool(result.get("hardware_path_passed")),
     not bool(result.get("image_quality_passed")),
     len(failures),
-    clip_area,
-    color_noise,
-    luma_error,
+    metrics["clip_area"],
+    metrics["luma_error"],
+    metrics["color_defect"],
+    metrics["center_color_cast"],
+    metrics["chroma_weakness"],
+    metrics["texture_noise"],
     result.get("name", ""),
   )
 
@@ -172,6 +191,7 @@ def summarize_result(candidate: Candidate, out_dir: Path, returncode: int) -> di
     "failures": capture_summary.get("failures", []) if capture_summary else ["missing capture summary"],
     "cameras": camera_extract(capture_summary),
   }
+  result["quality_metrics"] = candidate_quality_metrics(result)
   result["sort_key"] = list(candidate_sort_key(result))
   return result
 
@@ -195,11 +215,14 @@ def candidate_label(result: dict) -> list[str]:
     y = cam_data.get("y_median")
     rgb = cam_data.get("rgb_median_spread")
     uvhf = cam_data.get("uv_hf_abs_mean")
+    chroma = cam_data.get("mean_chroma")
+    center_uv = cam_data.get("max_uv_center_median_offset")
     clip10 = cam_data.get("tile_luma_clip_hi_area_frac_gt_10pct")
     clip50 = cam_data.get("tile_luma_clip_hi_area_frac_gt_50pct")
     raw = cam_data.get("latest_raw_match")
     lines.append(
       f"{cam}: y={metric_text(y)} rgb={metric_text(rgb)} "
+      f"chroma={metric_text(chroma)} centerUV={metric_text(center_uv)} "
       f"uvhf={metric_text(uvhf)} clip={metric_text(clip10)}/{metric_text(clip50)} "
       f"raw={raw if raw is not None else 'n/a'}"
     )
