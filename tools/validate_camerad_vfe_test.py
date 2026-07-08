@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from contextlib import redirect_stdout
 import io
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 
@@ -177,6 +179,45 @@ class DmesgForbiddenPatternTest(unittest.TestCase):
 
     self.assertEqual(2, len(matches))
     self.assertTrue(all(match["kind"] == "VFE PIX stall/recovery warning" for match in matches))
+
+
+class LatestRawMatchTest(unittest.TestCase):
+  def _args(self) -> SimpleNamespace:
+    return SimpleNamespace(require_latest_raw_match=True)
+
+  def _write_pair(self, run_dir: Path, cam: str, latest: bytes, raw: bytes) -> None:
+    (run_dir / validator.IMAGE_FILES[cam]).write_bytes(latest)
+    (run_dir / validator.RAW_IMAGE_FILES[cam]).write_bytes(raw)
+
+  def test_passes_when_latest_matches_raw_vfe_jpeg(self) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+      run_dir = Path(tmp)
+      self._write_pair(run_dir, "cam2", b"same-jpeg-bytes", b"same-jpeg-bytes")
+      report = validator.Report()
+      summary: dict = {}
+
+      with redirect_stdout(io.StringIO()):
+        validator.validate_latest_raw_match(run_dir, ["cam2"], self._args(), report, summary)
+
+      self.assertEqual([], report.failures)
+      self.assertTrue(summary["artifacts"]["cameras"]["cam2"]["latest_raw_match"])
+      self.assertEqual(
+        summary["artifacts"]["cameras"]["cam2"],
+        summary["cameras"]["cam2"]["artifacts"],
+      )
+
+  def test_fails_when_latest_differs_from_raw_vfe_jpeg(self) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+      run_dir = Path(tmp)
+      self._write_pair(run_dir, "cam3", b"preview-enhanced", b"raw-vfe")
+      report = validator.Report()
+      summary: dict = {}
+
+      with redirect_stdout(io.StringIO()):
+        validator.validate_latest_raw_match(run_dir, ["cam3"], self._args(), report, summary)
+
+      self.assertFalse(summary["artifacts"]["cameras"]["cam3"]["latest_raw_match"])
+      self.assertTrue(any("latest JPEG differs from raw VFE JPEG" in failure for failure in report.failures))
 
 
 if __name__ == "__main__":
