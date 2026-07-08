@@ -12,6 +12,8 @@ from pathlib import Path
 
 
 SUMMARY_FILE = "vfe-acceptance-summary.json"
+DEFAULT_MIN_FINAL_SNAPSHOT_DURATION = 120.0
+DEFAULT_MIN_FINAL_MODELD_DURATION = 120.0
 
 
 def default_out_dir() -> Path:
@@ -76,6 +78,10 @@ def final_acceptance_summary(requirements: dict[str, bool]) -> dict:
   }
 
 
+def final_visual_note_present(note: str) -> bool:
+  return bool(note.strip())
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--openpilot-dir", default="/data/openpilot_hw_vfe")
@@ -85,6 +91,10 @@ def main() -> int:
   parser.add_argument("--snapshot-profile", default="daylight-road", choices=("bench", "road", "road-spatial", "daylight-road"))
   parser.add_argument("--modeld-duration", type=float, default=25.0)
   parser.add_argument("--modeld-settle", type=float, default=7.0)
+  parser.add_argument("--min-final-snapshot-duration", type=float, default=DEFAULT_MIN_FINAL_SNAPSHOT_DURATION,
+                      help="minimum snapshot monitor seconds required for final acceptance")
+  parser.add_argument("--min-final-modeld-duration", type=float, default=DEFAULT_MIN_FINAL_MODELD_DURATION,
+                      help="minimum modeld seconds required for final acceptance")
   parser.add_argument("--target-grey", type=float, default=0.0, help="OS04 AE target grey fraction; 0 uses camerad defaults")
   parser.add_argument("--pull-timeout", type=float, default=60.0)
   parser.add_argument("--require-ae-rgb-clip-guard", action=argparse.BooleanOptionalAction, default=True, help="require OS04 AE logs to prove the RGB clipping guard actively capped EV")
@@ -123,6 +133,12 @@ def main() -> int:
     parser.error("--pull-timeout must be positive")
   if args.snapshot_monitor_duration <= 0.0:
     parser.error("--snapshot-monitor-duration must be positive")
+  if args.modeld_duration <= 0.0:
+    parser.error("--modeld-duration must be positive")
+  if args.min_final_snapshot_duration <= 0.0:
+    parser.error("--min-final-snapshot-duration must be positive")
+  if args.min_final_modeld_duration <= 0.0:
+    parser.error("--min-final-modeld-duration must be positive")
 
   out_dir = args.out_dir or default_out_dir()
   snapshot_dir = out_dir / "snapshot"
@@ -155,6 +171,7 @@ def main() -> int:
       "required_for_final_acceptance": True,
       "passed": bool(args.visual_check_pass),
       "note": args.visual_check_note,
+      "note_present": final_visual_note_present(args.visual_check_note),
       "scene": args.visual_check_scene,
       "host_montage": "/tmp/asius-cams-latest.jpg",
       "requirement": "real daylight road scene reviewed by a human",
@@ -259,12 +276,21 @@ def main() -> int:
     "snapshot_hardware_path_passed": bool(summary["snapshot"].get("hardware_path_passed", False)),
     "snapshot_image_quality_passed": bool(summary["snapshot"].get("image_quality_passed", False)),
     "snapshot_profile_is_daylight_road": args.snapshot_profile == "daylight-road",
+    "snapshot_monitor_duration_long_enough": args.snapshot_monitor_duration >= args.min_final_snapshot_duration,
     "modeld_ran": not args.skip_modeld,
     "modeld_passed": bool(summary["modeld"].get("passed", False)),
+    "modeld_duration_long_enough": args.modeld_duration >= args.min_final_modeld_duration,
     "visual_check_passed": bool(args.visual_check_pass),
     "visual_check_scene_is_daylight_road": args.visual_check_scene == "daylight-road",
+    "visual_check_note_present": final_visual_note_present(args.visual_check_note),
   }
   summary["final_acceptance"] = final_acceptance_summary(final_acceptance_requirements)
+  summary["final_acceptance"]["minimum_durations"] = {
+    "snapshot_monitor_duration": args.snapshot_monitor_duration,
+    "min_snapshot_monitor_duration": args.min_final_snapshot_duration,
+    "modeld_duration": args.modeld_duration,
+    "min_modeld_duration": args.min_final_modeld_duration,
+  }
   summary["final_acceptance_passed"] = summary["final_acceptance"]["passed"]
   summary["note"] = (
     "Use passed=true for repeatable machine gates. Use final_acceptance_passed=true "
