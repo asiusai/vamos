@@ -42,8 +42,20 @@ AE_LOG_PATTERN = re.compile(
   r"rgb_clip=(?P<rgb_clip>[-+0-9.eE]+) "
   r"cur_ev=(?P<cur_ev>[-+0-9.eE]+) "
   r"desired_ev=(?P<desired_ev>[-+0-9.eE]+) "
-  r"unclipped_ev=(?P<unclipped_ev>[-+0-9.eE]+)",
+  r"unclipped_ev=(?P<unclipped_ev>[-+0-9.eE]+)"
+  r"(?: exp (?P<old_exp>\d+)->(?P<exp>\d+) "
+  r"gain_idx (?P<old_gain>\d+)->(?P<gain>\d+) "
+  r"gain (?P<gain_factor>[-+0-9.eE]+))?",
 )
+
+AWB_LOG_PATTERN = re.compile(
+  r"cam (?P<cam_num>\d+): OS04 AWB (?P<stable>stable )?"
+  r"U=(?P<u>\d+) V=(?P<v>\d+) "
+  r"samples=(?P<samples>\d+) neutral=(?P<neutral>\d+) "
+  r"blue=0x(?P<blue>[0-9a-fA-F]+) red=0x(?P<red>[0-9a-fA-F]+)",
+)
+
+OS04_DIAG_WINDOW = 20
 
 DMESG_FORBIDDEN_PATTERNS = [
   ("normal VFE PIX buffer-address spam", re.compile(r"\bpix buf\d+ addr0=", re.IGNORECASE)),
@@ -168,6 +180,107 @@ def frame_times(log_text: str, cam: str) -> list[float]:
   return times
 
 
+def parse_ae_samples(log_text: str, cam: str) -> list[dict]:
+  cam_num = CAMERA_NUMS[cam]
+  samples = []
+  for match in AE_LOG_PATTERN.finditer(log_text):
+    if match.group("cam_num") != cam_num:
+      continue
+    try:
+      desired_ev = float(match.group("desired_ev"))
+      unclipped_ev = float(match.group("unclipped_ev"))
+      sample = {
+        "grey": float(match.group("grey")),
+        "target": float(match.group("target")),
+        "rgb_clip": float(match.group("rgb_clip")),
+        "cur_ev": float(match.group("cur_ev")),
+        "desired_ev": desired_ev,
+        "unclipped_ev": unclipped_ev,
+        "ev_cap": unclipped_ev - desired_ev,
+      }
+      if match.group("exp") is not None:
+        sample.update({
+          "old_exp": int(match.group("old_exp")),
+          "exp": int(match.group("exp")),
+          "old_gain": int(match.group("old_gain")),
+          "gain": int(match.group("gain")),
+          "gain_factor": float(match.group("gain_factor")),
+        })
+    except ValueError:
+      continue
+    samples.append(sample)
+  return samples
+
+
+def parse_awb_samples(log_text: str, cam: str) -> list[dict]:
+  cam_num = CAMERA_NUMS[cam]
+  samples = []
+  for match in AWB_LOG_PATTERN.finditer(log_text):
+    if match.group("cam_num") != cam_num:
+      continue
+    try:
+      samples.append({
+        "stable": match.group("stable") is not None,
+        "u": int(match.group("u")),
+        "v": int(match.group("v")),
+        "samples": int(match.group("samples")),
+        "neutral": int(match.group("neutral")),
+        "blue": int(match.group("blue"), 16),
+        "red": int(match.group("red"), 16),
+      })
+    except ValueError:
+      continue
+  return samples
+
+
+def median_field(samples: list[dict], key: str) -> float | None:
+  values = [float(sample[key]) for sample in samples if key in sample and sample[key] is not None]
+  return float(statistics.median(values)) if values else None
+
+
+def summarize_ae_samples(samples: list[dict], args: argparse.Namespace) -> dict:
+  active_samples = [
+    sample for sample in samples
+    if sample["rgb_clip"] >= args.min_ae_rgb_clip and sample["ev_cap"] >= args.min_ae_ev_cap
+  ]
+  window = samples[-OS04_DIAG_WINDOW:]
+  window_summary = {
+    "samples": len(window),
+    "grey_median": median_field(window, "grey"),
+    "target_median": median_field(window, "target"),
+    "rgb_clip_median": median_field(window, "rgb_clip"),
+    "ev_cap_median": median_field(window, "ev_cap"),
+    "exp_median": median_field(window, "exp"),
+    "gain_median": median_field(window, "gain"),
+    "gain_factor_median": median_field(window, "gain_factor"),
+  }
+  return {
+    "samples": len(samples),
+    "guard_active_samples": len(active_samples),
+    "max_rgb_clip": max((sample["rgb_clip"] for sample in samples), default=0.0),
+    "max_ev_cap": max((sample["ev_cap"] for sample in samples), default=0.0),
+    "last": samples[-1] if samples else None,
+    "window": window_summary,
+  }
+
+
+def summarize_awb_samples(samples: list[dict]) -> dict:
+  window = samples[-OS04_DIAG_WINDOW:]
+  window_summary = {
+    "samples": len(window),
+    "u_median": median_field(window, "u"),
+    "v_median": median_field(window, "v"),
+    "blue_median": median_field(window, "blue"),
+    "red_median": median_field(window, "red"),
+  }
+  return {
+    "samples": len(samples),
+    "stable_samples": sum(1 for sample in samples if sample.get("stable")),
+    "last": samples[-1] if samples else None,
+    "window": window_summary,
+  }
+
+
 def validate_log(run_dir: Path, cams: list[str], args: argparse.Namespace, report: Report, summary: dict) -> str:
   log_path = run_dir / LOG_FILE
   if not log_path.exists():
@@ -260,45 +373,18 @@ def validate_ae_rgb_clip_guard(log_text: str, cams: list[str], args: argparse.Na
     "cameras": {},
   }
   summary["ae"] = ae_summary
+  camera_summaries = summary.setdefault("cameras", {})
 
   any_guard_active = False
   for cam in cams:
     cam_num = CAMERA_NUMS[cam]
-    samples: list[dict[str, float]] = []
-    for match in AE_LOG_PATTERN.finditer(log_text):
-      if match.group("cam_num") != cam_num:
-        continue
-      try:
-        desired_ev = float(match.group("desired_ev"))
-        unclipped_ev = float(match.group("unclipped_ev"))
-        sample = {
-          "grey": float(match.group("grey")),
-          "target": float(match.group("target")),
-          "rgb_clip": float(match.group("rgb_clip")),
-          "cur_ev": float(match.group("cur_ev")),
-          "desired_ev": desired_ev,
-          "unclipped_ev": unclipped_ev,
-          "ev_cap": unclipped_ev - desired_ev,
-        }
-      except ValueError:
-        continue
-      samples.append(sample)
-
-    active_samples = [
-      sample for sample in samples
-      if sample["rgb_clip"] >= args.min_ae_rgb_clip and sample["ev_cap"] >= args.min_ae_ev_cap
-    ]
-    cam_summary = {
-      "camera_num": cam_num,
-      "samples": len(samples),
-      "guard_active_samples": len(active_samples),
-      "max_rgb_clip": max((sample["rgb_clip"] for sample in samples), default=0.0),
-      "max_ev_cap": max((sample["ev_cap"] for sample in samples), default=0.0),
-      "last": samples[-1] if samples else None,
-    }
+    samples = parse_ae_samples(log_text, cam)
+    cam_summary = summarize_ae_samples(samples, args)
+    cam_summary["camera_num"] = cam_num
     ae_summary["cameras"][cam] = cam_summary
-    ae_summary["guard_active_samples"] += len(active_samples)
-    any_guard_active = any_guard_active or bool(active_samples)
+    camera_summaries.setdefault(cam, {})["ae"] = cam_summary
+    ae_summary["guard_active_samples"] += cam_summary["guard_active_samples"]
+    any_guard_active = any_guard_active or bool(cam_summary["guard_active_samples"])
 
     if args.require_ae_rgb_clip_guard:
       if len(samples) < args.min_ae_samples:
@@ -322,6 +408,26 @@ def validate_ae_rgb_clip_guard(log_text: str, cams: list[str], args: argparse.Na
       f"(need rgb_clip >= {args.min_ae_rgb_clip:.4f} and EV cap >= {args.min_ae_ev_cap:.3f})",
       "ae",
     )
+
+
+def summarize_awb_log(log_text: str, cams: list[str], report: Report, summary: dict) -> None:
+  if not log_text:
+    return
+
+  awb_summary = {
+    "cameras": {},
+  }
+  summary["awb"] = awb_summary
+  camera_summaries = summary.setdefault("cameras", {})
+
+  for cam in cams:
+    samples = parse_awb_samples(log_text, cam)
+    cam_summary = summarize_awb_samples(samples)
+    cam_summary["camera_num"] = CAMERA_NUMS[cam]
+    awb_summary["cameras"][cam] = cam_summary
+    camera_summaries.setdefault(cam, {})["awb"] = cam_summary
+    if samples:
+      report.pass_(f"{cam}: {len(samples)} OS04 AWB samples parsed")
 
 
 def validate_vipc_stats(run_dir: Path, cams: list[str], args: argparse.Namespace, report: Report, summary: dict) -> None:
@@ -639,6 +745,7 @@ def main() -> int:
 
   log_text = validate_log(args.run_dir, cams, args, report, summary)
   validate_ae_rgb_clip_guard(log_text, cams, args, report, summary)
+  summarize_awb_log(log_text, cams, report, summary)
   validate_vipc_stats(args.run_dir, cams, args, report, summary)
   validate_cpu_stats(args.run_dir, args, report, summary)
   validate_image_stats(args.run_dir, cams, args, report, summary)

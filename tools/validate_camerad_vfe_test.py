@@ -81,8 +81,8 @@ class AeRgbClipGuardTest(unittest.TestCase):
 
   def test_passes_when_any_selected_camera_caps_highlight_ev(self) -> None:
     log_text = "\n".join([
-      "cam 1: OS04 AE grey=0.4023 target=0.3800 rgb_clip=0.0600 cur_ev=18.00 desired_ev=17.50 unclipped_ev=17.00",
-      "cam 1: OS04 AE grey=0.4023 target=0.3800 rgb_clip=0.0610 cur_ev=18.00 desired_ev=17.50 unclipped_ev=17.00",
+      "cam 1: OS04 AE grey=0.4023 target=0.3800 rgb_clip=0.0600 cur_ev=18.00 desired_ev=17.50 unclipped_ev=17.00 exp 14->13 gain_idx 0->0 gain 1.000",
+      "cam 1: OS04 AE grey=0.4023 target=0.3800 rgb_clip=0.0610 cur_ev=18.00 desired_ev=17.50 unclipped_ev=17.00 exp 13->13 gain_idx 0->0 gain 1.000",
       "cam 0: OS04 AE grey=0.4102 target=0.4200 rgb_clip=0.0800 cur_ev=36.00 desired_ev=35.90 unclipped_ev=36.20",
       "cam 0: OS04 AE grey=0.4102 target=0.4200 rgb_clip=0.0820 cur_ev=36.00 desired_ev=35.70 unclipped_ev=36.40",
     ])
@@ -90,6 +90,10 @@ class AeRgbClipGuardTest(unittest.TestCase):
     report, summary = self._validate(log_text)
 
     self.assertEqual([], report.failures)
+    self.assertEqual(13, summary["ae"]["cameras"]["cam2"]["last"]["exp"])
+    self.assertEqual(0, summary["ae"]["cameras"]["cam2"]["last"]["gain"])
+    self.assertEqual(1.0, summary["ae"]["cameras"]["cam2"]["window"]["gain_factor_median"])
+    self.assertIs(summary["cameras"]["cam2"]["ae"], summary["ae"]["cameras"]["cam2"])
     self.assertEqual(2, summary["ae"]["cameras"]["cam3"]["guard_active_samples"])
     self.assertEqual(2, summary["ae"]["guard_active_samples"])
 
@@ -105,6 +109,28 @@ class AeRgbClipGuardTest(unittest.TestCase):
 
     self.assertEqual(0, summary["ae"]["guard_active_samples"])
     self.assertTrue(any("never capped EV" in failure for failure in report.failures))
+
+
+class AwbSummaryTest(unittest.TestCase):
+  def test_summarizes_awb_samples_per_camera(self) -> None:
+    log_text = "\n".join([
+      "cam 1: OS04 AWB stable U=127 V=126 samples=3917 neutral=3917 blue=0x12c red=0x130",
+      "cam 1: OS04 AWB stable U=128 V=127 samples=3920 neutral=3920 blue=0x12e red=0x132",
+      "cam 0: OS04 AWB U=129 V=128 samples=3900 neutral=3900 blue=0x116 red=0x11a",
+    ])
+    report = validator.Report()
+    summary: dict = {}
+
+    with redirect_stdout(io.StringIO()):
+      validator.summarize_awb_log(log_text, ["cam2", "cam3"], report, summary)
+
+    self.assertEqual(2, summary["awb"]["cameras"]["cam2"]["samples"])
+    self.assertEqual(2, summary["awb"]["cameras"]["cam2"]["stable_samples"])
+    self.assertEqual(302, summary["awb"]["cameras"]["cam2"]["last"]["blue"])
+    self.assertEqual(301.0, summary["awb"]["cameras"]["cam2"]["window"]["blue_median"])
+    self.assertEqual(1, summary["awb"]["cameras"]["cam3"]["samples"])
+    self.assertEqual(0, summary["awb"]["cameras"]["cam3"]["stable_samples"])
+    self.assertIs(summary["cameras"]["cam2"]["awb"], summary["awb"]["cameras"]["cam2"])
 
 
 if __name__ == "__main__":

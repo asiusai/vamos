@@ -49,11 +49,15 @@ def camera_extract(snapshot: dict | None) -> dict:
       "debug_frames": cam_data.get("debug_frames"),
       "median_fps": cam_data.get("median_fps"),
       "slow_gaps": cam_data.get("slow_gaps"),
+      "ae": cam_data.get("ae"),
+      "awb": cam_data.get("awb"),
       "y_median": image.get("y_median"),
       "rgb_median_spread": image.get("rgb_median_spread"),
       "max_uv_center_median_offset": image.get("max_uv_center_median_offset"),
       "uv_hf_abs_mean": image.get("uv_hf_abs_mean"),
       "mean_chroma": image.get("mean_chroma"),
+      "tile_luma_clip_hi_area_frac_gt_10pct": image.get("tile_luma_clip_hi_area_frac_gt_10pct"),
+      "tile_luma_clip_hi_area_frac_gt_50pct": image.get("tile_luma_clip_hi_area_frac_gt_50pct"),
     }
   return ret
 
