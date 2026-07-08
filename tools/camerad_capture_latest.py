@@ -85,6 +85,27 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
   return subprocess.run(cmd, check=True, **kwargs)
 
 
+def bash_env_word(word: str) -> str:
+  if "\n" not in word and "\r" not in word:
+    return shlex.quote(word)
+
+  escaped = []
+  for char in word:
+    if char == "\\":
+      escaped.append("\\\\")
+    elif char == "'":
+      escaped.append("\\'")
+    elif char == "\n":
+      escaped.append("\\n")
+    elif char == "\r":
+      escaped.append("\\r")
+    elif char == "\t":
+      escaped.append("\\t")
+    else:
+      escaped.append(char)
+  return "$'" + "".join(escaped) + "'"
+
+
 def camera_list(selection: str) -> list[str]:
   if selection == "all":
     return ["cam1", "cam2", "cam3"]
@@ -134,7 +155,7 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
   targets_literal = repr(cameras)
   raw_images_literal = repr(REMOTE_RAW_IMAGES)
   raw_stats_literal = repr(REMOTE_RAW_STATS)
-  env_words = " ".join(shlex.quote(word) for word in remote_env(
+  env_words = " ".join(bash_env_word(word) for word in remote_env(
     selection, exposure_lines, target_grey, preview_saturation, preview_median,
     pix_ioctl, debug_frames, log_awb, log_ae, extra_env))
   openpilot_dir_q = shlex.quote(openpilot_dir)
