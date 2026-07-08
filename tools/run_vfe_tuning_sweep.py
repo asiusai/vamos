@@ -16,7 +16,13 @@ from run_vfe_acceptance import camera_extract, load_json
 
 
 SUMMARY_FILE = "vfe-tuning-sweep-summary.json"
+CONTACT_SHEET_FILE = "vfe-tuning-sweep-contact.jpg"
 DEFAULT_MAX_CANDIDATES = 12
+
+CAMERA_IMAGE_FILES = {
+  "cam2": "latest-camerad-road.jpg",
+  "cam3": "latest-camerad-wide.jpg",
+}
 
 
 @dataclass(frozen=True)
@@ -170,6 +176,97 @@ def summarize_result(candidate: Candidate, out_dir: Path, returncode: int) -> di
   return result
 
 
+def metric_text(value: object) -> str:
+  if isinstance(value, float):
+    return f"{value:.2f}"
+  if isinstance(value, int):
+    return str(value)
+  return "n/a"
+
+
+def candidate_label(result: dict) -> list[str]:
+  lines = [
+    result.get("name", "candidate"),
+    f"pass={bool(result.get('passed'))} hw={bool(result.get('hardware_path_passed'))} iq={bool(result.get('image_quality_passed'))}",
+    f"target={result.get('target_grey')} failures={len(result.get('failures') or [])}",
+  ]
+  for cam in ("cam2", "cam3"):
+    cam_data = result.get("cameras", {}).get(cam, {})
+    y = cam_data.get("y_median")
+    rgb = cam_data.get("rgb_median_spread")
+    uvhf = cam_data.get("uv_hf_abs_mean")
+    clip10 = cam_data.get("tile_luma_clip_hi_area_frac_gt_10pct")
+    clip50 = cam_data.get("tile_luma_clip_hi_area_frac_gt_50pct")
+    lines.append(
+      f"{cam}: y={metric_text(y)} rgb={metric_text(rgb)} "
+      f"uvhf={metric_text(uvhf)} clip={metric_text(clip10)}/{metric_text(clip50)}"
+    )
+  return lines
+
+
+def load_candidate_image(result: dict, cam: str, width: int):
+  from PIL import Image
+
+  path = Path(str(result.get("out_dir", ""))) / CAMERA_IMAGE_FILES[cam]
+  if not path.exists():
+    return None
+  image = Image.open(path).convert("RGB")
+  ratio = width / image.width
+  height = max(1, int(image.height * ratio))
+  resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
+  return image.resize((width, height), resampling)
+
+
+def build_contact_sheet(ranked_results: list[dict], out_dir: Path, image_width: int = 420) -> Path | None:
+  try:
+    from PIL import Image, ImageDraw, ImageFont
+  except ImportError:
+    return None
+
+  rows = []
+  for result in ranked_results:
+    cam2 = load_candidate_image(result, "cam2", image_width)
+    cam3 = load_candidate_image(result, "cam3", image_width)
+    if cam2 is None and cam3 is None:
+      continue
+    rows.append((result, cam2, cam3))
+  if not rows:
+    return None
+
+  label_width = 360
+  pad = 14
+  row_gap = 18
+  font = ImageFont.load_default()
+  row_height = max(image.height for _, cam2, cam3 in rows for image in (cam2, cam3) if image is not None)
+  width = label_width + pad * 4 + image_width * 2
+  height = pad + len(rows) * row_height + (len(rows) - 1) * row_gap + pad
+  sheet = Image.new("RGB", (width, height), "white")
+  draw = ImageDraw.Draw(sheet)
+
+  y = pad
+  for result, cam2, cam3 in rows:
+    x = pad
+    label_lines = candidate_label(result)
+    for line in label_lines:
+      draw.text((x, y), line, fill="black", font=font)
+      y += 14
+    y -= 14 * len(label_lines)
+
+    image_x = label_width + pad * 2
+    if cam2 is not None:
+      sheet.paste(cam2, (image_x, y))
+      draw.text((image_x, y + cam2.height + 3), "CAM2 road", fill="black", font=font)
+    image_x += image_width + pad
+    if cam3 is not None:
+      sheet.paste(cam3, (image_x, y))
+      draw.text((image_x, y + cam3.height + 3), "CAM3 wide", fill="black", font=font)
+    y += row_height + row_gap
+
+  path = out_dir / CONTACT_SHEET_FILE
+  sheet.save(path, "JPEG", quality=92)
+  return path
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--openpilot-dir", default="/data/openpilot_hw_vfe")
@@ -240,10 +337,14 @@ def main() -> int:
   ranked = sorted(summary["candidates"], key=candidate_sort_key)
   summary["ranked_candidates"] = [result["name"] for result in ranked]
   summary["best_candidate"] = ranked[0]["name"] if ranked else None
+  contact_sheet = build_contact_sheet(ranked, out_dir)
+  summary["contact_sheet"] = str(contact_sheet) if contact_sheet else None
 
   summary_path = out_dir / SUMMARY_FILE
   summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
   print(f"summary_json: {summary_path}")
+  if contact_sheet:
+    print(f"contact_sheet: {contact_sheet}")
   print(f"best_candidate: {summary['best_candidate']}")
   return 0 if all(candidate["returncode"] == 0 for candidate in summary["candidates"]) else 1
 
