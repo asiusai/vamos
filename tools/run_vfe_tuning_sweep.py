@@ -12,7 +12,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from run_vfe_acceptance import camera_extract, load_json
+from run_vfe_acceptance import (
+  DEFAULT_MIN_FINAL_MODELD_DURATION,
+  DEFAULT_MIN_FINAL_SNAPSHOT_DURATION,
+  SUMMARY_FILE as ACCEPTANCE_SUMMARY_FILE,
+  camera_extract,
+  load_json,
+)
 
 
 SUMMARY_FILE = "vfe-tuning-sweep-summary.json"
@@ -152,6 +158,46 @@ def build_capture_cmd(args: argparse.Namespace, candidate: Candidate, out_dir: P
   for env in candidate.env:
     cmd.extend(["--env", env])
   return cmd
+
+
+def build_acceptance_cmd(args: argparse.Namespace, candidate: Candidate, out_dir: Path) -> list[str]:
+  cmd = [
+    sys.executable,
+    str(Path(__file__).resolve().with_name("run_vfe_acceptance.py")),
+    "--openpilot-dir", args.openpilot_dir,
+    "--out-dir", str(out_dir),
+    "--snapshot-profile", "daylight-road",
+    "--snapshot-settle", str(args.acceptance_snapshot_settle),
+    "--snapshot-monitor-duration", str(args.acceptance_snapshot_duration),
+    "--modeld-settle", str(args.acceptance_modeld_settle),
+    "--modeld-duration", str(args.acceptance_modeld_duration),
+    "--target-grey", str(candidate.target_grey),
+    "--pull-timeout", str(args.pull_timeout),
+  ]
+  if args.require_ae_rgb_clip_guard:
+    cmd.extend([
+      "--min-ae-samples", str(args.min_ae_samples),
+      "--min-ae-rgb-clip", str(args.min_ae_rgb_clip),
+      "--min-ae-ev-cap", str(args.min_ae_ev_cap),
+    ])
+  else:
+    cmd.append("--no-require-ae-rgb-clip-guard")
+  for env in candidate.env:
+    cmd.extend(["--env", env])
+  return cmd
+
+
+def build_finalize_cmd_template(out_dir: Path) -> list[str]:
+  return [
+    sys.executable,
+    str(Path(__file__).resolve().with_name("run_vfe_acceptance.py")),
+    "--finalize-existing-summary", str(out_dir / ACCEPTANCE_SUMMARY_FILE),
+    "--visual-check-pass",
+    "--visual-check-scene", "daylight-road",
+    "--visual-check-note", "<human-review-note>",
+    "--visual-check-montage-sha256", "<reviewed-montage-sha256>",
+    "--require-final-acceptance",
+  ]
 
 
 def run_cmd(cmd: list[str], dry_run: bool) -> int:
@@ -356,6 +402,10 @@ def main() -> int:
   parser.add_argument("--min-ae-rgb-clip", type=float, default=0.079)
   parser.add_argument("--min-ae-ev-cap", type=float, default=0.05)
   parser.add_argument("--max-candidates", type=int, default=DEFAULT_MAX_CANDIDATES)
+  parser.add_argument("--acceptance-snapshot-settle", type=float, default=7.0)
+  parser.add_argument("--acceptance-snapshot-duration", type=float, default=DEFAULT_MIN_FINAL_SNAPSHOT_DURATION)
+  parser.add_argument("--acceptance-modeld-settle", type=float, default=7.0)
+  parser.add_argument("--acceptance-modeld-duration", type=float, default=DEFAULT_MIN_FINAL_MODELD_DURATION)
   parser.add_argument("--dry-run", action="store_true")
   args = parser.parse_args()
 
@@ -363,6 +413,14 @@ def main() -> int:
     parser.error("--monitor-duration must be positive")
   if args.pull_timeout <= 0.0:
     parser.error("--pull-timeout must be positive")
+  if args.acceptance_snapshot_settle <= 0.0:
+    parser.error("--acceptance-snapshot-settle must be positive")
+  if args.acceptance_snapshot_duration <= 0.0:
+    parser.error("--acceptance-snapshot-duration must be positive")
+  if args.acceptance_modeld_settle <= 0.0:
+    parser.error("--acceptance-modeld-settle must be positive")
+  if args.acceptance_modeld_duration <= 0.0:
+    parser.error("--acceptance-modeld-duration must be positive")
 
   target_greys, env_combo_specs = select_sweep_inputs(args)
   if any(value < 0.0 for value in target_greys):
@@ -398,15 +456,21 @@ def main() -> int:
 
   for candidate in candidates:
     candidate_dir = out_dir / candidate.name
+    acceptance_dir = out_dir / f"acceptance-{candidate.name}"
     cmd = build_capture_cmd(args, candidate, candidate_dir)
     rc = run_cmd(cmd, args.dry_run)
     result = summarize_result(candidate, candidate_dir, rc)
     result["command"] = cmd
+    result["acceptance_out_dir"] = str(acceptance_dir)
+    result["acceptance_command"] = build_acceptance_cmd(args, candidate, acceptance_dir)
+    result["finalize_command_template"] = build_finalize_cmd_template(acceptance_dir)
     summary["candidates"].append(result)
 
   ranked = sorted(summary["candidates"], key=candidate_sort_key)
   summary["ranked_candidates"] = [result["name"] for result in ranked]
   summary["best_candidate"] = ranked[0]["name"] if ranked else None
+  summary["best_candidate_acceptance_command"] = ranked[0]["acceptance_command"] if ranked else None
+  summary["best_candidate_finalize_command_template"] = ranked[0]["finalize_command_template"] if ranked else None
   contact_sheet = build_contact_sheet(ranked, out_dir)
   summary["contact_sheet"] = str(contact_sheet) if contact_sheet else None
 

@@ -101,6 +101,68 @@ class CandidateTest(unittest.TestCase):
     self.assertIn("ASIUS_PHYS_CAM2_GAMMA_K=18", cmd)
     self.assertIn("ASIUS_PHYS_CAM3_GAMMA_K=15", cmd)
 
+  def test_build_acceptance_cmd_preserves_candidate_knobs(self) -> None:
+    args = SimpleNamespace(
+      openpilot_dir="/data/openpilot_hw_vfe",
+      pull_timeout=60.0,
+      require_ae_rgb_clip_guard=True,
+      min_ae_samples=3,
+      min_ae_rgb_clip=0.079,
+      min_ae_ev_cap=0.05,
+      acceptance_snapshot_settle=7.0,
+      acceptance_snapshot_duration=120.0,
+      acceptance_modeld_settle=7.0,
+      acceptance_modeld_duration=120.0,
+    )
+    candidate = sweep.Candidate(
+      "split20-18-tg0p45",
+      0.45,
+      ("ASIUS_PHYS_CAM2_GAMMA_K=20", "ASIUS_PHYS_CAM3_GAMMA_K=18"),
+    )
+
+    cmd = sweep.build_acceptance_cmd(args, candidate, Path("/tmp/acceptance"))
+
+    self.assertIn("run_vfe_acceptance.py", cmd[1])
+    self.assertIn("--snapshot-profile", cmd)
+    self.assertIn("daylight-road", cmd)
+    self.assertIn("--snapshot-monitor-duration", cmd)
+    self.assertIn("120.0", cmd)
+    self.assertIn("--modeld-duration", cmd)
+    self.assertIn("--target-grey", cmd)
+    self.assertIn("0.45", cmd)
+    self.assertIn("ASIUS_PHYS_CAM2_GAMMA_K=20", cmd)
+    self.assertIn("ASIUS_PHYS_CAM3_GAMMA_K=18", cmd)
+    self.assertIn("--min-ae-samples", cmd)
+
+  def test_build_acceptance_cmd_can_disable_ae_clip_guard(self) -> None:
+    args = SimpleNamespace(
+      openpilot_dir="/data/openpilot_hw_vfe",
+      pull_timeout=60.0,
+      require_ae_rgb_clip_guard=False,
+      min_ae_samples=3,
+      min_ae_rgb_clip=0.079,
+      min_ae_ev_cap=0.05,
+      acceptance_snapshot_settle=7.0,
+      acceptance_snapshot_duration=120.0,
+      acceptance_modeld_settle=7.0,
+      acceptance_modeld_duration=120.0,
+    )
+    candidate = sweep.Candidate("default", 0.0, ())
+
+    cmd = sweep.build_acceptance_cmd(args, candidate, Path("/tmp/acceptance"))
+
+    self.assertIn("--no-require-ae-rgb-clip-guard", cmd)
+    self.assertNotIn("--min-ae-samples", cmd)
+
+  def test_finalize_command_template_points_at_acceptance_summary(self) -> None:
+    cmd = sweep.build_finalize_cmd_template(Path("/tmp/acceptance"))
+
+    self.assertIn("--finalize-existing-summary", cmd)
+    self.assertIn("/tmp/acceptance/vfe-acceptance-summary.json", cmd)
+    self.assertIn("--visual-check-montage-sha256", cmd)
+    self.assertIn("<reviewed-montage-sha256>", cmd)
+    self.assertIn("--require-final-acceptance", cmd)
+
 
 class RankingTest(unittest.TestCase):
   def test_candidate_sort_key_prefers_passing_cleaner_candidate(self) -> None:
