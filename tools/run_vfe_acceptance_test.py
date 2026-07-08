@@ -102,6 +102,7 @@ class FinalAcceptanceSummaryTest(unittest.TestCase):
         "skipped": False,
         "passed": True,
         "hardware_path_passed": True,
+        "no_cpu_image_path_verified": True,
         "raw_vfe_artifacts_passed": True,
         "image_quality_passed": True,
         "profile": "daylight-road",
@@ -224,6 +225,24 @@ class FinalAcceptanceSummaryTest(unittest.TestCase):
     self.assertFalse(summary["final_acceptance_passed"])
     self.assertIn(
       "visual_check_montage_sha256_matches",
+      summary["final_acceptance"]["missing_requirements"],
+    )
+
+  def test_apply_visual_review_requires_no_cpu_image_path(self) -> None:
+    summary = self.final_ready_summary()
+    summary["snapshot"]["no_cpu_image_path_verified"] = False
+
+    acceptance.apply_visual_check_review(
+      summary,
+      True,
+      "daylight road image looks acceptable",
+      "daylight-road",
+      "abc123",
+    )
+
+    self.assertFalse(summary["final_acceptance_passed"])
+    self.assertIn(
+      "snapshot_no_cpu_image_path_verified",
       summary["final_acceptance"]["missing_requirements"],
     )
 

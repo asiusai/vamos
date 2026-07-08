@@ -168,6 +168,78 @@ class VfeSetupSummaryTest(unittest.TestCase):
     self.assertIs(summary["cameras"]["cam2"]["vfe_setup"], cam2)
 
 
+class NoCpuImagePathSummaryTest(unittest.TestCase):
+  def _args(self) -> SimpleNamespace:
+    return SimpleNamespace(max_camerad_cpu_pct=10.0)
+
+  def _summary(self) -> dict:
+    return {
+      "log": {
+        "fallback_markers": {
+          "falling back to RDI": False,
+          "NV12 sw debayer": False,
+          "VFE PIX unavailable": False,
+          "falling back to V4L2 MMAP CPU-copy path": False,
+        },
+        "dmabuf_fallback": False,
+      },
+      "category_passed": {
+        "cpu": True,
+      },
+      "artifacts": {
+        "require_latest_raw_match": True,
+      },
+      "cpu": {
+        "available": True,
+        "single_core_cpu_pct": 1.2,
+      },
+      "cameras": {
+        "cam2": {
+          "vfe_pix_v4l2": True,
+          "dmabuf_nv12": True,
+          "vfe_setup": {
+            "vipc": {
+              "mode": "VFE PIX V4L2 DMABUF NV12",
+            },
+          },
+          "artifacts": {
+            "latest_raw_match": True,
+          },
+        },
+        "cam3": {
+          "vfe_pix_v4l2": True,
+          "dmabuf_nv12": True,
+          "vfe_setup": {
+            "vipc": {
+              "mode": "VFE PIX V4L2 DMABUF NV12",
+            },
+          },
+          "artifacts": {
+            "latest_raw_match": True,
+          },
+        },
+      },
+    }
+
+  def test_verifies_complete_vfe_dmabuf_path(self) -> None:
+    path = validator.summarize_no_cpu_image_path(self._summary(), ["cam2", "cam3"], self._args())
+
+    self.assertTrue(path["verified"])
+    self.assertIn("VFE PIX", path["name"])
+    self.assertTrue(path["requirements"]["latest_images_are_raw_vfe_jpegs"])
+    self.assertEqual("VFE PIX V4L2 DMABUF NV12", path["cameras"]["cam2"]["vipc_mode"])
+    self.assertEqual(1.2, path["cpu"]["single_core_cpu_pct"])
+
+  def test_requires_raw_vfe_artifact_match(self) -> None:
+    summary = self._summary()
+    summary["cameras"]["cam3"]["artifacts"]["latest_raw_match"] = False
+
+    path = validator.summarize_no_cpu_image_path(summary, ["cam2", "cam3"], self._args())
+
+    self.assertFalse(path["verified"])
+    self.assertFalse(path["requirements"]["latest_images_are_raw_vfe_jpegs"])
+
+
 class DmesgForbiddenPatternTest(unittest.TestCase):
   def test_flags_vfe_pix_stall_and_recovery_warnings(self) -> None:
     dmesg_text = "\n".join([

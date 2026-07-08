@@ -16,6 +16,7 @@ VIPC_STATS_FILE = "latest-camerad-vipc-stats.json"
 CPU_STATS_FILE = "latest-camerad-cpu-stats.json"
 DMESG_LOG_FILE = "latest-camerad-dmesg.log"
 SUMMARY_FILE = "latest-camerad-vfe-summary.json"
+NO_CPU_IMAGE_PATH_NAME = "OS04C10 -> CSIPHY -> CSID PIX -> VFE PIX -> NV12 DMABUF -> VisionIPC"
 
 CAMERA_NUMS = {
   "cam1": "2",
@@ -813,6 +814,61 @@ def validate_dmesg(run_dir: Path, args: argparse.Namespace, report: Report, summ
     report.pass_(f"dmesg forbidden matches {len(matches)} <= {args.max_dmesg_matches}")
 
 
+def summarize_no_cpu_image_path(summary: dict, cams: list[str], args: argparse.Namespace) -> dict:
+  """Record the exact evidence that the capture did not use CPU image processing."""
+  log_summary = summary.get("log", {})
+  fallback_markers = log_summary.get("fallback_markers", {})
+  camera_summaries = summary.get("cameras", {})
+  camera_evidence = {}
+  for cam in cams:
+    cam_summary = camera_summaries.get(cam, {})
+    artifacts = cam_summary.get("artifacts", {})
+    vfe_setup = cam_summary.get("vfe_setup", {})
+    vipc_setup = vfe_setup.get("vipc", {}) if isinstance(vfe_setup, dict) else {}
+    camera_evidence[cam] = {
+      "vfe_pix_v4l2": bool(cam_summary.get("vfe_pix_v4l2", False)),
+      "dmabuf_nv12": bool(cam_summary.get("dmabuf_nv12", False)),
+      "latest_raw_match": artifacts.get("latest_raw_match"),
+      "vipc_mode": vipc_setup.get("mode"),
+    }
+
+  artifacts_summary = summary.get("artifacts", {})
+  cpu_summary = summary.get("cpu", {})
+  category_passed = summary.get("category_passed", {})
+  requirements = {
+    "log_parsed": bool(log_summary),
+    "no_forbidden_cpu_fallback_markers": (
+      bool(fallback_markers) and not any(bool(value) for value in fallback_markers.values())
+    ),
+    "no_dmabuf_fallback": log_summary.get("dmabuf_fallback") is False,
+    "selected_cameras_vfe_pix_v4l2": (
+      bool(cams) and all(camera_evidence[cam]["vfe_pix_v4l2"] for cam in cams)
+    ),
+    "selected_cameras_dmabuf_nv12": (
+      bool(cams) and all(camera_evidence[cam]["dmabuf_nv12"] for cam in cams)
+    ),
+    "latest_images_are_raw_vfe_jpegs": (
+      bool(artifacts_summary.get("require_latest_raw_match", False)) and
+      all(camera_evidence[cam]["latest_raw_match"] is True for cam in cams)
+    ),
+    "cpu_stats_available": cpu_summary.get("available") is True,
+    "camerad_cpu_within_limit": (
+      cpu_summary.get("available") is True and bool(category_passed.get("cpu", False))
+    ),
+  }
+  return {
+    "name": NO_CPU_IMAGE_PATH_NAME,
+    "verified": all(requirements.values()),
+    "requirements": requirements,
+    "cameras": camera_evidence,
+    "cpu": {
+      "available": cpu_summary.get("available"),
+      "single_core_cpu_pct": cpu_summary.get("single_core_cpu_pct"),
+      "max_allowed_single_core_cpu_pct": args.max_camerad_cpu_pct,
+    },
+  }
+
+
 def apply_quality_profile(args: argparse.Namespace) -> dict[str, dict[str, float]]:
   profile = QUALITY_PROFILES[args.quality_profile]
   applied: dict[str, dict[str, float]] = {}
@@ -944,12 +1000,16 @@ def main() -> int:
     category: not any(detail["category"] == category for detail in report.failure_details)
     for category in categories
   }
-  summary["hardware_path_passed"] = (
+  legacy_hardware_path_passed = (
     summary["category_passed"]["transport"] and
     summary["category_passed"]["cpu"] and
     summary["category_passed"]["dmesg"] and
     summary["category_passed"]["artifact"] and
     summary["category_passed"]["general"]
+  )
+  summary["no_cpu_image_path"] = summarize_no_cpu_image_path(summary, cams, args)
+  summary["hardware_path_passed"] = (
+    legacy_hardware_path_passed and summary["no_cpu_image_path"]["verified"]
   )
   summary["image_quality_passed"] = summary["category_passed"]["image"]
   summary["failures"] = report.failures

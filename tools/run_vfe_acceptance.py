@@ -249,6 +249,7 @@ def final_acceptance_requirements(summary: dict, minimum_durations: dict | None 
     "snapshot_ran": not bool(snapshot.get("skipped", False)),
     "snapshot_passed": bool(snapshot.get("passed", False)),
     "snapshot_hardware_path_passed": bool(snapshot.get("hardware_path_passed", False)),
+    "snapshot_no_cpu_image_path_verified": bool(snapshot.get("no_cpu_image_path_verified", False)),
     "snapshot_raw_vfe_artifacts_passed": bool(snapshot.get("raw_vfe_artifacts_passed", False)),
     "snapshot_image_quality_passed": bool(snapshot.get("image_quality_passed", False)),
     "snapshot_profile_is_daylight_road": snapshot.get("profile") == "daylight-road",
@@ -477,6 +478,10 @@ def main() -> int:
     summary["snapshot"]["summary_json"] = str(snapshot_dir / "latest-camerad-vfe-summary.json")
     summary["snapshot"]["passed"] = bool(snapshot_json.get("passed", False)) if snapshot_json else False
     summary["snapshot"]["hardware_path_passed"] = bool(snapshot_json.get("hardware_path_passed", False)) if snapshot_json else False
+    summary["snapshot"]["no_cpu_image_path"] = snapshot_json.get("no_cpu_image_path", {}) if snapshot_json else {}
+    summary["snapshot"]["no_cpu_image_path_verified"] = (
+      bool(summary["snapshot"]["no_cpu_image_path"].get("verified", False))
+    )
     summary["snapshot"]["image_quality_passed"] = bool(snapshot_json.get("image_quality_passed", False)) if snapshot_json else False
     summary["snapshot"]["raw_vfe_artifacts_passed"] = (
       bool(snapshot_json.get("category_passed", {}).get("artifact", False)) if snapshot_json else False
@@ -530,6 +535,8 @@ def main() -> int:
       gate_failures.append("snapshot summary did not pass")
     if not summary["snapshot"].get("hardware_path_passed", False):
       gate_failures.append("snapshot hardware path gate did not pass")
+    if not summary["snapshot"].get("no_cpu_image_path_verified", False):
+      gate_failures.append("snapshot no-CPU image path was not verified")
     if not summary["snapshot"].get("image_quality_passed", False):
       gate_failures.append("snapshot image quality gate did not pass")
   if not args.skip_modeld:
