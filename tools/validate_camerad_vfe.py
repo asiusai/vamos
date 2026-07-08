@@ -35,6 +35,16 @@ FATAL_LOG_PATTERNS = [
   "falling back to V4L2 MMAP CPU-copy path",
 ]
 
+AE_LOG_PATTERN = re.compile(
+  r"cam (?P<cam_num>\d+): OS04 AE "
+  r"grey=(?P<grey>[-+0-9.eE]+) "
+  r"target=(?P<target>[-+0-9.eE]+) "
+  r"rgb_clip=(?P<rgb_clip>[-+0-9.eE]+) "
+  r"cur_ev=(?P<cur_ev>[-+0-9.eE]+) "
+  r"desired_ev=(?P<desired_ev>[-+0-9.eE]+) "
+  r"unclipped_ev=(?P<unclipped_ev>[-+0-9.eE]+)",
+)
+
 DMESG_FORBIDDEN_PATTERNS = [
   ("normal VFE PIX buffer-address spam", re.compile(r"\bpix buf\d+ addr0=", re.IGNORECASE)),
   ("VFE PIX stall/recovery warning", re.compile(r"\bvfe\d+ pix .*\b(stall|recovering)\b", re.IGNORECASE)),
@@ -224,6 +234,85 @@ def validate_log(run_dir: Path, cams: list[str], args: argparse.Namespace, repor
       report.fail(f"{cam}: no usable VFE PIX debug frame timestamps; capture with --camerad-debug-frames", "transport")
 
   return log_text
+
+
+def validate_ae_rgb_clip_guard(log_text: str, cams: list[str], args: argparse.Namespace, report: Report, summary: dict) -> None:
+  if not log_text:
+    if args.require_ae_rgb_clip_guard:
+      report.fail("AE RGB clip guard required but log is unavailable", "ae")
+    return
+
+  ae_summary = {
+    "required": bool(args.require_ae_rgb_clip_guard),
+    "min_samples": args.min_ae_samples,
+    "min_rgb_clip": args.min_ae_rgb_clip,
+    "min_ev_cap": args.min_ae_ev_cap,
+    "guard_active_samples": 0,
+    "cameras": {},
+  }
+  summary["ae"] = ae_summary
+
+  any_guard_active = False
+  for cam in cams:
+    cam_num = CAMERA_NUMS[cam]
+    samples: list[dict[str, float]] = []
+    for match in AE_LOG_PATTERN.finditer(log_text):
+      if match.group("cam_num") != cam_num:
+        continue
+      try:
+        desired_ev = float(match.group("desired_ev"))
+        unclipped_ev = float(match.group("unclipped_ev"))
+        sample = {
+          "grey": float(match.group("grey")),
+          "target": float(match.group("target")),
+          "rgb_clip": float(match.group("rgb_clip")),
+          "cur_ev": float(match.group("cur_ev")),
+          "desired_ev": desired_ev,
+          "unclipped_ev": unclipped_ev,
+          "ev_cap": unclipped_ev - desired_ev,
+        }
+      except ValueError:
+        continue
+      samples.append(sample)
+
+    active_samples = [
+      sample for sample in samples
+      if sample["rgb_clip"] >= args.min_ae_rgb_clip and sample["ev_cap"] >= args.min_ae_ev_cap
+    ]
+    cam_summary = {
+      "camera_num": cam_num,
+      "samples": len(samples),
+      "guard_active_samples": len(active_samples),
+      "max_rgb_clip": max((sample["rgb_clip"] for sample in samples), default=0.0),
+      "max_ev_cap": max((sample["ev_cap"] for sample in samples), default=0.0),
+      "last": samples[-1] if samples else None,
+    }
+    ae_summary["cameras"][cam] = cam_summary
+    ae_summary["guard_active_samples"] += len(active_samples)
+    any_guard_active = any_guard_active or bool(active_samples)
+
+    if args.require_ae_rgb_clip_guard:
+      if len(samples) < args.min_ae_samples:
+        report.fail(f"{cam}: only {len(samples)} OS04 AE samples, expected >= {args.min_ae_samples}", "ae")
+      else:
+        report.pass_(f"{cam}: {len(samples)} OS04 AE samples >= {args.min_ae_samples}")
+    elif samples:
+      report.pass_(f"{cam}: {len(samples)} OS04 AE samples parsed")
+
+  if not args.require_ae_rgb_clip_guard:
+    return
+
+  if any_guard_active:
+    report.pass_(
+      f"AE RGB clip guard active: {ae_summary['guard_active_samples']} samples "
+      f"with rgb_clip >= {args.min_ae_rgb_clip:.4f} and EV cap >= {args.min_ae_ev_cap:.3f}"
+    )
+  else:
+    report.fail(
+      "AE RGB clip guard never capped EV in the captured scene "
+      f"(need rgb_clip >= {args.min_ae_rgb_clip:.4f} and EV cap >= {args.min_ae_ev_cap:.3f})",
+      "ae",
+    )
 
 
 def validate_vipc_stats(run_dir: Path, cams: list[str], args: argparse.Namespace, report: Report, summary: dict) -> None:
@@ -479,6 +568,10 @@ def main() -> int:
   parser.add_argument("--max-tile-uv-median-range", type=float, default=999.0, help="maximum range of per-tile U or V medians")
   parser.add_argument("--max-tile-rgb-spread", type=float, default=999.0, help="maximum per-tile RGB median channel spread")
   parser.add_argument("--max-uv-hf-abs-mean", type=float, default=999.0, help="maximum mean high-frequency U/V absolute delta")
+  parser.add_argument("--require-ae-rgb-clip-guard", action="store_true", help="fail unless OS04 AE logs show the RGB clipping guard actively capped EV")
+  parser.add_argument("--min-ae-samples", type=int, default=3, help="minimum OS04 AE log samples per selected camera when --require-ae-rgb-clip-guard is set")
+  parser.add_argument("--min-ae-rgb-clip", type=float, default=0.079, help="minimum AE rgb_clip fraction considered a guard-triggering highlight")
+  parser.add_argument("--min-ae-ev-cap", type=float, default=0.05, help="minimum unclipped_ev - desired_ev considered an active AE RGB clip cap")
   parser.add_argument("--check-dmesg", action="store_true", help=f"fail on CAMSS/VFE errors, stalls, or buffer-address spam in {DMESG_LOG_FILE}")
   parser.add_argument("--dmesg-log", type=Path, help=f"dmesg log to check; default is RUN_DIR/{DMESG_LOG_FILE}")
   parser.add_argument("--max-dmesg-matches", type=int, default=0)
@@ -517,6 +610,10 @@ def main() -> int:
       "max_tile_uv_median_range": args.max_tile_uv_median_range,
       "max_tile_rgb_spread": args.max_tile_rgb_spread,
       "max_uv_hf_abs_mean": args.max_uv_hf_abs_mean,
+      "require_ae_rgb_clip_guard": args.require_ae_rgb_clip_guard,
+      "min_ae_samples": args.min_ae_samples,
+      "min_ae_rgb_clip": args.min_ae_rgb_clip,
+      "min_ae_ev_cap": args.min_ae_ev_cap,
       "check_dmesg": args.check_dmesg,
       "max_dmesg_matches": args.max_dmesg_matches,
     },
@@ -525,14 +622,15 @@ def main() -> int:
     report.fail(f"run directory missing: {args.run_dir}", "general")
     return 1
 
-  validate_log(args.run_dir, cams, args, report, summary)
+  log_text = validate_log(args.run_dir, cams, args, report, summary)
+  validate_ae_rgb_clip_guard(log_text, cams, args, report, summary)
   validate_vipc_stats(args.run_dir, cams, args, report, summary)
   validate_cpu_stats(args.run_dir, args, report, summary)
   validate_image_stats(args.run_dir, cams, args, report, summary)
   validate_dmesg(args.run_dir, args, report, summary)
 
   summary["passed"] = not report.failures
-  categories = ("transport", "cpu", "dmesg", "image", "general")
+  categories = ("transport", "cpu", "dmesg", "image", "ae", "general")
   summary["category_passed"] = {
     category: not any(detail["category"] == category for detail in report.failure_details)
     for category in categories
