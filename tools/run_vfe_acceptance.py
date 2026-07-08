@@ -84,6 +84,12 @@ def main() -> int:
   )
   parser.add_argument("--visual-check-note", default="", help="short note for the human visual check record")
   parser.add_argument(
+    "--visual-check-scene",
+    default="unknown",
+    choices=("unknown", "bench", "daylight-road"),
+    help="scene reviewed for the human visual check",
+  )
+  parser.add_argument(
     "--require-final-acceptance",
     action="store_true",
     help="return non-zero unless final_acceptance_passed is true",
@@ -131,6 +137,7 @@ def main() -> int:
       "required_for_final_acceptance": True,
       "passed": bool(args.visual_check_pass),
       "note": args.visual_check_note,
+      "scene": args.visual_check_scene,
       "host_montage": "/tmp/asius-cams-latest.jpg",
       "requirement": "real daylight road scene reviewed by a human",
     },
@@ -237,6 +244,7 @@ def main() -> int:
     "modeld_ran": not args.skip_modeld,
     "modeld_passed": bool(summary["modeld"].get("passed", False)),
     "visual_check_passed": bool(args.visual_check_pass),
+    "visual_check_scene_is_daylight_road": args.visual_check_scene == "daylight-road",
   }
   summary["final_acceptance"] = {
     "passed": all(final_acceptance_requirements.values()),
