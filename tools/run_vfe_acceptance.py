@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import subprocess
 import sys
@@ -14,6 +15,14 @@ from pathlib import Path
 SUMMARY_FILE = "vfe-acceptance-summary.json"
 DEFAULT_MIN_FINAL_SNAPSHOT_DURATION = 120.0
 DEFAULT_MIN_FINAL_MODELD_DURATION = 120.0
+HOST_MONTAGE = Path("/tmp/asius-cams-latest.jpg")
+
+VISUAL_SNAPSHOT_FILES = {
+  "cam2_latest": "latest-camerad-road.jpg",
+  "cam2_raw": "latest-camerad-road-raw.jpg",
+  "cam3_latest": "latest-camerad-wide.jpg",
+  "cam3_raw": "latest-camerad-wide-raw.jpg",
+}
 
 
 def default_out_dir() -> Path:
@@ -36,6 +45,49 @@ def load_json(path: Path) -> dict | None:
       return json.load(f)
   except (OSError, json.JSONDecodeError):
     return None
+
+
+def file_artifact(path: Path) -> dict:
+  artifact = {
+    "path": str(path),
+    "exists": path.exists(),
+  }
+  if not path.exists():
+    return artifact
+
+  digest = hashlib.sha256()
+  with path.open("rb") as f:
+    for chunk in iter(lambda: f.read(1024 * 1024), b""):
+      digest.update(chunk)
+  artifact.update({
+    "bytes": path.stat().st_size,
+    "sha256": digest.hexdigest(),
+  })
+  return artifact
+
+
+def visual_check_artifacts(snapshot_dir: Path) -> dict:
+  return {
+    "host_montage": file_artifact(HOST_MONTAGE),
+    "snapshot_images": {
+      name: file_artifact(snapshot_dir / filename)
+      for name, filename in VISUAL_SNAPSHOT_FILES.items()
+    },
+  }
+
+
+def visual_check_artifacts_present(artifacts: dict) -> bool:
+  host_montage = artifacts.get("host_montage", {})
+  snapshot_images = artifacts.get("snapshot_images", {})
+  return (
+    bool(host_montage.get("exists")) and
+    bool(host_montage.get("sha256")) and
+    all(
+      bool(snapshot_images.get(name, {}).get("exists")) and
+      bool(snapshot_images.get(name, {}).get("sha256"))
+      for name in VISUAL_SNAPSHOT_FILES
+    )
+  )
 
 
 def camera_extract(snapshot: dict | None) -> dict:
@@ -180,6 +232,7 @@ def main() -> int:
       "note_present": final_visual_note_present(args.visual_check_note),
       "scene": args.visual_check_scene,
       "host_montage": "/tmp/asius-cams-latest.jpg",
+      "artifacts": {},
       "requirement": "real daylight road scene reviewed by a human",
     },
   }
@@ -228,6 +281,8 @@ def main() -> int:
     summary["snapshot"]["artifacts"] = snapshot_json.get("artifacts", {}) if snapshot_json else {}
     summary["snapshot"]["failures"] = snapshot_json.get("failures", []) if snapshot_json else ["missing snapshot summary"]
     summary["snapshot"]["cameras"] = camera_extract(snapshot_json)
+    summary["visual_check"]["artifacts"] = visual_check_artifacts(snapshot_dir)
+    summary["visual_check"]["artifacts_present"] = visual_check_artifacts_present(summary["visual_check"]["artifacts"])
 
   modeld_rc = 0
   if not args.skip_modeld:
@@ -294,6 +349,7 @@ def main() -> int:
     "visual_check_passed": bool(args.visual_check_pass),
     "visual_check_scene_is_daylight_road": args.visual_check_scene == "daylight-road",
     "visual_check_note_present": final_visual_note_present(args.visual_check_note),
+    "visual_check_artifacts_present": visual_check_artifacts_present(summary["visual_check"].get("artifacts", {})),
   }
   summary["final_acceptance"] = final_acceptance_summary(final_acceptance_requirements)
   summary["final_acceptance"]["minimum_durations"] = {
