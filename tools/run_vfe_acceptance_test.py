@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 import run_vfe_acceptance as acceptance
@@ -36,6 +38,46 @@ class CameraExtractTest(unittest.TestCase):
     self.assertEqual(123, cameras["cam2"]["latest_bytes"])
     self.assertEqual("abc", cameras["cam2"]["raw_sha256"])
     self.assertEqual(100.0, cameras["cam2"]["y_median"])
+
+
+class VisualArtifactTest(unittest.TestCase):
+  def test_file_artifact_hashes_existing_file(self) -> None:
+    with TemporaryDirectory() as tmp:
+      path = Path(tmp) / "image.jpg"
+      path.write_bytes(b"vfe-image")
+
+      artifact = acceptance.file_artifact(path)
+
+      self.assertTrue(artifact["exists"])
+      self.assertEqual(len(b"vfe-image"), artifact["bytes"])
+      self.assertEqual(64, len(artifact["sha256"]))
+
+  def test_visual_check_artifacts_require_montage_and_snapshot_images(self) -> None:
+    with TemporaryDirectory() as tmp:
+      root = Path(tmp)
+      snapshot_dir = root / "snapshot"
+      snapshot_dir.mkdir()
+      montage = root / "asius-cams-latest.jpg"
+      montage.write_bytes(b"montage")
+      for filename in acceptance.VISUAL_SNAPSHOT_FILES.values():
+        (snapshot_dir / filename).write_bytes(filename.encode())
+
+      old_montage = acceptance.HOST_MONTAGE
+      acceptance.HOST_MONTAGE = montage
+      try:
+        artifacts = acceptance.visual_check_artifacts(snapshot_dir)
+      finally:
+        acceptance.HOST_MONTAGE = old_montage
+
+      self.assertTrue(acceptance.visual_check_artifacts_present(artifacts))
+      self.assertEqual(str(montage), artifacts["host_montage"]["path"])
+      self.assertEqual(64, len(artifacts["snapshot_images"]["cam2_latest"]["sha256"]))
+
+  def test_visual_check_artifacts_fail_when_image_missing(self) -> None:
+    self.assertFalse(acceptance.visual_check_artifacts_present({
+      "host_montage": {"exists": True, "sha256": "x"},
+      "snapshot_images": {},
+    }))
 
 
 class FinalAcceptanceSummaryTest(unittest.TestCase):
