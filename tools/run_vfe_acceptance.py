@@ -63,6 +63,19 @@ def camera_extract(snapshot: dict | None) -> dict:
   return ret
 
 
+def final_acceptance_summary(requirements: dict[str, bool]) -> dict:
+  missing = [name for name, passed in requirements.items() if not passed]
+  return {
+    "passed": not missing,
+    "requirements": requirements,
+    "missing_requirements": missing,
+    "note": (
+      "Final acceptance means a full non-dry-run daylight-road snapshot gate, "
+      "modeld gate, and explicit human visual pass all succeeded."
+    ),
+  }
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--openpilot-dir", default="/data/openpilot_hw_vfe")
@@ -251,14 +264,7 @@ def main() -> int:
     "visual_check_passed": bool(args.visual_check_pass),
     "visual_check_scene_is_daylight_road": args.visual_check_scene == "daylight-road",
   }
-  summary["final_acceptance"] = {
-    "passed": all(final_acceptance_requirements.values()),
-    "requirements": final_acceptance_requirements,
-    "note": (
-      "Final acceptance means a full non-dry-run daylight-road snapshot gate, "
-      "modeld gate, and explicit human visual pass all succeeded."
-    ),
-  }
+  summary["final_acceptance"] = final_acceptance_summary(final_acceptance_requirements)
   summary["final_acceptance_passed"] = summary["final_acceptance"]["passed"]
   summary["note"] = (
     "Use passed=true for repeatable machine gates. Use final_acceptance_passed=true "
