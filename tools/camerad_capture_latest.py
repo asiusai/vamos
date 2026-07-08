@@ -666,6 +666,8 @@ def main() -> int:
     ]
     if args.check_dmesg:
       validator_cmd.extend(["--check-dmesg", "--max-dmesg-matches", str(args.validate_max_dmesg_matches)])
+    if not args.enhance_preview:
+      validator_cmd.append("--require-latest-raw-match")
     if args.validate_ae_rgb_clip_guard:
       validator_cmd.extend([
         "--require-ae-rgb-clip-guard",

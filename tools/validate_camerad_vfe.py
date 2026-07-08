@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import statistics
@@ -26,6 +27,18 @@ STAT_FILES = {
   "cam1": "latest-camerad-driver-raw-stats.json",
   "cam2": "latest-camerad-road-raw-stats.json",
   "cam3": "latest-camerad-wide-raw-stats.json",
+}
+
+IMAGE_FILES = {
+  "cam1": "latest-camerad-driver.jpg",
+  "cam2": "latest-camerad-road.jpg",
+  "cam3": "latest-camerad-wide.jpg",
+}
+
+RAW_IMAGE_FILES = {
+  "cam1": "latest-camerad-driver-raw.jpg",
+  "cam2": "latest-camerad-road-raw.jpg",
+  "cam3": "latest-camerad-wide-raw.jpg",
 }
 
 FATAL_LOG_PATTERNS = [
@@ -186,6 +199,14 @@ def load_json(path: Path, report: Report, label: str, category: str = "general")
     return None
   report.pass_(f"{label} present: {path}")
   return data
+
+
+def file_sha256(path: Path) -> str:
+  digest = hashlib.sha256()
+  with path.open("rb") as f:
+    for chunk in iter(lambda: f.read(1024 * 1024), b""):
+      digest.update(chunk)
+  return digest.hexdigest()
 
 
 def forbidden_dmesg_matches(dmesg_text: str) -> list[dict[str, str]]:
@@ -710,6 +731,59 @@ def validate_image_stats(run_dir: Path, cams: list[str], args: argparse.Namespac
         report.pass_(f"{cam}: {name}={value:.3f} inside [{low:.3f}, {high:.3f}]")
 
 
+def validate_latest_raw_match(run_dir: Path, cams: list[str], args: argparse.Namespace, report: Report, summary: dict) -> None:
+  artifact_summary = {
+    "require_latest_raw_match": bool(args.require_latest_raw_match),
+    "cameras": {},
+  }
+  summary["artifacts"] = artifact_summary
+
+  if not args.require_latest_raw_match:
+    return
+
+  camera_summaries = summary.setdefault("cameras", {})
+  for cam in cams:
+    latest_path = run_dir / IMAGE_FILES[cam]
+    raw_path = run_dir / RAW_IMAGE_FILES[cam]
+    cam_summary = {
+      "latest_path": str(latest_path),
+      "raw_path": str(raw_path),
+      "latest_exists": latest_path.exists(),
+      "raw_exists": raw_path.exists(),
+      "latest_raw_match": False,
+    }
+    artifact_summary["cameras"][cam] = cam_summary
+    camera_summaries.setdefault(cam, {})["artifacts"] = cam_summary
+
+    if not latest_path.exists():
+      report.fail(f"{cam}: latest image missing for raw-match check: {latest_path}", "artifact")
+      continue
+    if not raw_path.exists():
+      report.fail(f"{cam}: raw image missing for raw-match check: {raw_path}", "artifact")
+      continue
+
+    latest_size = latest_path.stat().st_size
+    raw_size = raw_path.stat().st_size
+    latest_sha = file_sha256(latest_path)
+    raw_sha = file_sha256(raw_path)
+    matches = latest_size == raw_size and latest_sha == raw_sha
+    cam_summary.update({
+      "latest_bytes": latest_size,
+      "raw_bytes": raw_size,
+      "latest_sha256": latest_sha,
+      "raw_sha256": raw_sha,
+      "latest_raw_match": matches,
+    })
+    if matches:
+      report.pass_(f"{cam}: latest JPEG matches raw VFE JPEG")
+    else:
+      report.fail(
+        f"{cam}: latest JPEG differs from raw VFE JPEG "
+        f"(latest {latest_size} bytes {latest_sha[:12]}, raw {raw_size} bytes {raw_sha[:12]})",
+        "artifact",
+      )
+
+
 def validate_dmesg(run_dir: Path, args: argparse.Namespace, report: Report, summary: dict) -> None:
   if not args.check_dmesg:
     return
@@ -796,6 +870,7 @@ def main() -> int:
   parser.add_argument("--max-tile-luma-clip-hi-area-frac-gt-10pct", type=float, default=999.0, help="maximum fraction of tiles with >10%% RGB-luma clipping")
   parser.add_argument("--max-tile-luma-clip-hi-area-frac-gt-50pct", type=float, default=999.0, help="maximum fraction of tiles with >50%% RGB-luma clipping")
   parser.add_argument("--max-uv-hf-abs-mean", type=float, default=999.0, help="maximum mean high-frequency U/V absolute delta")
+  parser.add_argument("--require-latest-raw-match", action="store_true", help="fail unless latest JPEGs exactly match the unenhanced raw VFE JPEGs")
   parser.add_argument("--require-ae-rgb-clip-guard", action="store_true", help="fail unless OS04 AE logs show the RGB clipping guard actively capped EV")
   parser.add_argument("--min-ae-samples", type=int, default=3, help="minimum OS04 AE log samples per selected camera when --require-ae-rgb-clip-guard is set")
   parser.add_argument("--min-ae-rgb-clip", type=float, default=0.079, help="minimum AE rgb_clip fraction considered a guard-triggering highlight")
@@ -840,6 +915,7 @@ def main() -> int:
       "max_tile_luma_clip_hi_area_frac_gt_10pct": args.max_tile_luma_clip_hi_area_frac_gt_10pct,
       "max_tile_luma_clip_hi_area_frac_gt_50pct": args.max_tile_luma_clip_hi_area_frac_gt_50pct,
       "max_uv_hf_abs_mean": args.max_uv_hf_abs_mean,
+      "require_latest_raw_match": args.require_latest_raw_match,
       "require_ae_rgb_clip_guard": args.require_ae_rgb_clip_guard,
       "min_ae_samples": args.min_ae_samples,
       "min_ae_rgb_clip": args.min_ae_rgb_clip,
@@ -859,10 +935,11 @@ def main() -> int:
   validate_vipc_stats(args.run_dir, cams, args, report, summary)
   validate_cpu_stats(args.run_dir, args, report, summary)
   validate_image_stats(args.run_dir, cams, args, report, summary)
+  validate_latest_raw_match(args.run_dir, cams, args, report, summary)
   validate_dmesg(args.run_dir, args, report, summary)
 
   summary["passed"] = not report.failures
-  categories = ("transport", "cpu", "dmesg", "image", "ae", "general")
+  categories = ("transport", "cpu", "dmesg", "image", "artifact", "ae", "general")
   summary["category_passed"] = {
     category: not any(detail["category"] == category for detail in report.failure_details)
     for category in categories
@@ -871,6 +948,7 @@ def main() -> int:
     summary["category_passed"]["transport"] and
     summary["category_passed"]["cpu"] and
     summary["category_passed"]["dmesg"] and
+    summary["category_passed"]["artifact"] and
     summary["category_passed"]["general"]
   )
   summary["image_quality_passed"] = summary["category_passed"]["image"]
