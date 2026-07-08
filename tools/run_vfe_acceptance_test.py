@@ -94,6 +94,49 @@ class VisualArtifactTest(unittest.TestCase):
 
 
 class FinalAcceptanceSummaryTest(unittest.TestCase):
+  def final_ready_summary(self) -> dict:
+    return {
+      "dry_run": False,
+      "passed": True,
+      "snapshot": {
+        "skipped": False,
+        "passed": True,
+        "hardware_path_passed": True,
+        "raw_vfe_artifacts_passed": True,
+        "image_quality_passed": True,
+        "profile": "daylight-road",
+        "monitor_duration": 130.0,
+      },
+      "modeld": {
+        "skipped": False,
+        "passed": True,
+        "duration": 130.0,
+      },
+      "visual_check": {
+        "artifacts": {
+          "host_montage": {
+            "exists": True,
+            "sha256": "abc123",
+          },
+          "snapshot_images": {
+            name: {
+              "exists": True,
+              "sha256": f"{name}-sha",
+            }
+            for name in acceptance.VISUAL_SNAPSHOT_FILES
+          },
+        },
+      },
+      "final_acceptance": {
+        "minimum_durations": {
+          "snapshot_monitor_duration": 130.0,
+          "min_snapshot_monitor_duration": 120.0,
+          "modeld_duration": 130.0,
+          "min_modeld_duration": 120.0,
+        },
+      },
+    }
+
   def test_lists_missing_requirements_when_not_final(self) -> None:
     summary = acceptance.final_acceptance_summary({
       "not_dry_run": True,
@@ -135,6 +178,55 @@ class FinalAcceptanceSummaryTest(unittest.TestCase):
     self.assertFalse(acceptance.final_visual_note_present(""))
     self.assertFalse(acceptance.final_visual_note_present("   \n\t"))
     self.assertTrue(acceptance.final_visual_note_present("daylight road image looks acceptable"))
+
+  def test_apply_visual_review_finalizes_existing_summary_with_matching_hash(self) -> None:
+    summary = self.final_ready_summary()
+
+    acceptance.apply_visual_check_review(
+      summary,
+      True,
+      "daylight road image looks acceptable",
+      "daylight-road",
+      " ABC123 ",
+    )
+
+    self.assertTrue(summary["final_acceptance_passed"])
+    self.assertTrue(summary["visual_check"]["montage_sha256_matches"])
+    self.assertTrue(summary["visual_check"]["artifacts_present"])
+    self.assertEqual([], summary["final_acceptance"]["missing_requirements"])
+    self.assertIn("reviewed_at", summary["visual_check"])
+
+  def test_apply_visual_review_rejects_wrong_hash(self) -> None:
+    summary = self.final_ready_summary()
+
+    acceptance.apply_visual_check_review(
+      summary,
+      True,
+      "daylight road image looks acceptable",
+      "daylight-road",
+      "def456",
+    )
+
+    self.assertFalse(summary["final_acceptance_passed"])
+    self.assertIn(
+      "visual_check_montage_sha256_matches",
+      summary["final_acceptance"]["missing_requirements"],
+    )
+
+  def test_apply_visual_review_preserves_legacy_recorded_modeld_duration(self) -> None:
+    summary = self.final_ready_summary()
+    del summary["modeld"]["duration"]
+
+    acceptance.apply_visual_check_review(
+      summary,
+      True,
+      "daylight road image looks acceptable",
+      "daylight-road",
+      "abc123",
+    )
+
+    self.assertTrue(summary["final_acceptance_passed"])
+    self.assertEqual(130.0, summary["final_acceptance"]["minimum_durations"]["modeld_duration"])
 
 
 if __name__ == "__main__":

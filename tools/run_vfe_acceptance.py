@@ -98,6 +98,13 @@ def visual_check_hash_matches(artifacts: dict, expected_sha256: str) -> bool:
   return actual == expected
 
 
+def as_float(value: object, default: float = 0.0) -> float:
+  try:
+    return float(value)
+  except (TypeError, ValueError):
+    return default
+
+
 def camera_extract(snapshot: dict | None) -> dict:
   if not isinstance(snapshot, dict):
     return {}
@@ -148,10 +155,124 @@ def final_visual_note_present(note: str) -> bool:
   return bool(note.strip())
 
 
+def final_acceptance_minimum_durations(summary: dict) -> dict:
+  existing = summary.get("final_acceptance", {}).get("minimum_durations", {})
+  snapshot = summary.get("snapshot", {})
+  modeld = summary.get("modeld", {})
+  return {
+    "snapshot_monitor_duration": as_float(
+      snapshot.get("monitor_duration", existing.get("snapshot_monitor_duration", 0.0))
+    ),
+    "min_snapshot_monitor_duration": as_float(
+      existing.get("min_snapshot_monitor_duration", DEFAULT_MIN_FINAL_SNAPSHOT_DURATION),
+      DEFAULT_MIN_FINAL_SNAPSHOT_DURATION,
+    ),
+    "modeld_duration": as_float(modeld.get("duration", existing.get("modeld_duration", 0.0))),
+    "min_modeld_duration": as_float(
+      existing.get("min_modeld_duration", DEFAULT_MIN_FINAL_MODELD_DURATION),
+      DEFAULT_MIN_FINAL_MODELD_DURATION,
+    ),
+  }
+
+
+def final_acceptance_requirements(summary: dict, minimum_durations: dict | None = None) -> dict[str, bool]:
+  snapshot = summary.get("snapshot", {})
+  modeld = summary.get("modeld", {})
+  visual_check = summary.get("visual_check", {})
+  if minimum_durations is None:
+    minimum_durations = final_acceptance_minimum_durations(summary)
+  return {
+    "not_dry_run": not bool(summary.get("dry_run", False)),
+    "machine_gates_passed": bool(summary.get("passed", False)),
+    "snapshot_ran": not bool(snapshot.get("skipped", False)),
+    "snapshot_passed": bool(snapshot.get("passed", False)),
+    "snapshot_hardware_path_passed": bool(snapshot.get("hardware_path_passed", False)),
+    "snapshot_raw_vfe_artifacts_passed": bool(snapshot.get("raw_vfe_artifacts_passed", False)),
+    "snapshot_image_quality_passed": bool(snapshot.get("image_quality_passed", False)),
+    "snapshot_profile_is_daylight_road": snapshot.get("profile") == "daylight-road",
+    "snapshot_monitor_duration_long_enough": (
+      minimum_durations["snapshot_monitor_duration"] >= minimum_durations["min_snapshot_monitor_duration"]
+    ),
+    "modeld_ran": not bool(modeld.get("skipped", False)),
+    "modeld_passed": bool(modeld.get("passed", False)),
+    "modeld_duration_long_enough": (
+      minimum_durations["modeld_duration"] >= minimum_durations["min_modeld_duration"]
+    ),
+    "visual_check_passed": bool(visual_check.get("passed", False)),
+    "visual_check_scene_is_daylight_road": visual_check.get("scene") == "daylight-road",
+    "visual_check_note_present": final_visual_note_present(str(visual_check.get("note", ""))),
+    "visual_check_artifacts_present": visual_check_artifacts_present(visual_check.get("artifacts", {})),
+    "visual_check_montage_sha256_matches": visual_check_hash_matches(
+      visual_check.get("artifacts", {}),
+      str(visual_check.get("expected_montage_sha256", "")),
+    ),
+  }
+
+
+def update_final_acceptance(summary: dict) -> None:
+  minimum_durations = final_acceptance_minimum_durations(summary)
+  summary["final_acceptance"] = final_acceptance_summary(final_acceptance_requirements(summary, minimum_durations))
+  summary["final_acceptance"]["minimum_durations"] = minimum_durations
+  summary["final_acceptance_passed"] = summary["final_acceptance"]["passed"]
+
+
+def apply_visual_check_review(summary: dict, passed: bool, note: str, scene: str, expected_sha256: str) -> None:
+  visual_check = summary.setdefault("visual_check", {})
+  visual_check.update({
+    "required_for_final_acceptance": True,
+    "passed": bool(passed),
+    "note": note,
+    "note_present": final_visual_note_present(note),
+    "scene": scene,
+    "host_montage": str(HOST_MONTAGE),
+    "expected_montage_sha256": expected_sha256.strip().lower(),
+    "reviewed_at": dt.datetime.now(dt.UTC).isoformat(),
+    "requirement": "real daylight road scene reviewed by a human",
+  })
+  visual_check["artifacts_present"] = visual_check_artifacts_present(visual_check.get("artifacts", {}))
+  visual_check["montage_sha256_matches"] = visual_check_hash_matches(
+    visual_check.get("artifacts", {}),
+    visual_check.get("expected_montage_sha256", ""),
+  )
+  update_final_acceptance(summary)
+
+
+def finalize_existing_summary(args: argparse.Namespace) -> int:
+  summary_path = args.finalize_existing_summary
+  summary = load_json(summary_path)
+  if not isinstance(summary, dict):
+    print(f"missing or invalid summary: {summary_path}", file=sys.stderr)
+    return 2
+
+  apply_visual_check_review(
+    summary,
+    args.visual_check_pass,
+    args.visual_check_note,
+    args.visual_check_scene,
+    args.visual_check_montage_sha256,
+  )
+  summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+  print(f"summary_json: {summary_path}")
+  print(
+    "summary: "
+    f"passed={summary.get('passed', False)} "
+    f"final_acceptance_passed={summary['final_acceptance_passed']}"
+  )
+  if args.require_final_acceptance and not summary["final_acceptance_passed"]:
+    return 1
+  return 0 if summary.get("passed", False) else 1
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--openpilot-dir", default="/data/openpilot_hw_vfe")
   parser.add_argument("--out-dir", type=Path, default=None)
+  parser.add_argument(
+    "--finalize-existing-summary",
+    type=Path,
+    default=None,
+    help="update an existing vfe-acceptance-summary.json with post-capture visual review fields",
+  )
   parser.add_argument("--snapshot-settle", type=float, default=7.0)
   parser.add_argument("--snapshot-monitor-duration", type=float, default=15.0)
   parser.add_argument("--snapshot-profile", default="daylight-road", choices=("bench", "road", "road-spatial", "daylight-road"))
@@ -211,6 +332,9 @@ def main() -> int:
   if args.min_final_modeld_duration <= 0.0:
     parser.error("--min-final-modeld-duration must be positive")
 
+  if args.finalize_existing_summary is not None:
+    return finalize_existing_summary(args)
+
   out_dir = args.out_dir or default_out_dir()
   snapshot_dir = out_dir / "snapshot"
   modeld_dir = out_dir / "modeld"
@@ -235,6 +359,7 @@ def main() -> int:
     "modeld": {
       "skipped": bool(args.skip_modeld),
       "out_dir": str(modeld_dir),
+      "duration": args.modeld_duration,
     },
     "visual_check_required": True,
     "host_montage": "/tmp/asius-cams-latest.jpg",
@@ -351,36 +476,15 @@ def main() -> int:
 
   summary["gate_failures"] = gate_failures
   summary["passed"] = not gate_failures
-  final_acceptance_requirements = {
-    "not_dry_run": not args.dry_run,
-    "machine_gates_passed": summary["passed"],
-    "snapshot_ran": not args.skip_snapshot,
-    "snapshot_passed": bool(summary["snapshot"].get("passed", False)),
-    "snapshot_hardware_path_passed": bool(summary["snapshot"].get("hardware_path_passed", False)),
-    "snapshot_raw_vfe_artifacts_passed": bool(summary["snapshot"].get("raw_vfe_artifacts_passed", False)),
-    "snapshot_image_quality_passed": bool(summary["snapshot"].get("image_quality_passed", False)),
-    "snapshot_profile_is_daylight_road": args.snapshot_profile == "daylight-road",
-    "snapshot_monitor_duration_long_enough": args.snapshot_monitor_duration >= args.min_final_snapshot_duration,
-    "modeld_ran": not args.skip_modeld,
-    "modeld_passed": bool(summary["modeld"].get("passed", False)),
-    "modeld_duration_long_enough": args.modeld_duration >= args.min_final_modeld_duration,
-    "visual_check_passed": bool(args.visual_check_pass),
-    "visual_check_scene_is_daylight_road": args.visual_check_scene == "daylight-road",
-    "visual_check_note_present": final_visual_note_present(args.visual_check_note),
-    "visual_check_artifacts_present": visual_check_artifacts_present(summary["visual_check"].get("artifacts", {})),
-    "visual_check_montage_sha256_matches": visual_check_hash_matches(
-      summary["visual_check"].get("artifacts", {}),
-      summary["visual_check"].get("expected_montage_sha256", ""),
-    ),
+  summary["final_acceptance"] = {
+    "minimum_durations": {
+      "snapshot_monitor_duration": args.snapshot_monitor_duration,
+      "min_snapshot_monitor_duration": args.min_final_snapshot_duration,
+      "modeld_duration": args.modeld_duration,
+      "min_modeld_duration": args.min_final_modeld_duration,
+    },
   }
-  summary["final_acceptance"] = final_acceptance_summary(final_acceptance_requirements)
-  summary["final_acceptance"]["minimum_durations"] = {
-    "snapshot_monitor_duration": args.snapshot_monitor_duration,
-    "min_snapshot_monitor_duration": args.min_final_snapshot_duration,
-    "modeld_duration": args.modeld_duration,
-    "min_modeld_duration": args.min_final_modeld_duration,
-  }
-  summary["final_acceptance_passed"] = summary["final_acceptance"]["passed"]
+  update_final_acceptance(summary)
   summary["note"] = (
     "Use passed=true for repeatable machine gates. Use final_acceptance_passed=true "
     "only for full daylight-road acceptance with a human visual check."
