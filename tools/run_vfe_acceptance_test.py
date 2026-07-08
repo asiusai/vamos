@@ -177,7 +177,21 @@ class FinalAcceptanceSummaryTest(unittest.TestCase):
   def test_visual_note_requires_non_whitespace_text(self) -> None:
     self.assertFalse(acceptance.final_visual_note_present(""))
     self.assertFalse(acceptance.final_visual_note_present("   \n\t"))
+    self.assertFalse(acceptance.final_visual_note_present("<human-review-note>"))
+    self.assertFalse(acceptance.final_visual_note_present("REPLACE_WITH_HUMAN_REVIEW_NOTE"))
     self.assertTrue(acceptance.final_visual_note_present("daylight road image looks acceptable"))
+
+  def test_review_hint_uses_recorded_montage_hash(self) -> None:
+    summary = self.final_ready_summary()
+    acceptance.update_final_acceptance(summary)
+
+    hint = acceptance.final_acceptance_review_hint(Path("/tmp/summary.json"), summary)
+
+    self.assertEqual("abc123", hint["host_montage_sha256"])
+    self.assertIn("--visual-check-montage-sha256", hint["finalize_command"])
+    self.assertIn("abc123", hint["finalize_command"])
+    self.assertIn("<human-review-note>", hint["finalize_command"])
+    self.assertIn("'<human-review-note>'", acceptance.shell_command(["echo", "<human-review-note>"]))
 
   def test_apply_visual_review_finalizes_existing_summary_with_matching_hash(self) -> None:
     summary = self.final_ready_summary()
@@ -227,6 +241,33 @@ class FinalAcceptanceSummaryTest(unittest.TestCase):
 
     self.assertTrue(summary["final_acceptance_passed"])
     self.assertEqual(130.0, summary["final_acceptance"]["minimum_durations"]["modeld_duration"])
+
+  def test_update_review_hint_clears_when_final_acceptance_passes(self) -> None:
+    summary = self.final_ready_summary()
+    acceptance.apply_visual_check_review(
+      summary,
+      True,
+      "daylight road image looks acceptable",
+      "daylight-road",
+      "abc123",
+    )
+    summary["final_acceptance"]["review_hint"] = {"stale": True}
+
+    acceptance.update_review_hint(Path("/tmp/summary.json"), summary)
+
+    self.assertNotIn("review_hint", summary["final_acceptance"])
+
+  def test_update_review_hint_records_missing_requirements(self) -> None:
+    summary = self.final_ready_summary()
+    acceptance.update_final_acceptance(summary)
+
+    acceptance.update_review_hint(Path("/tmp/summary.json"), summary)
+
+    self.assertIn("review_hint", summary["final_acceptance"])
+    self.assertIn(
+      "visual_check_passed",
+      summary["final_acceptance"]["review_hint"]["missing_requirements"],
+    )
 
 
 if __name__ == "__main__":
