@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -162,6 +163,49 @@ class CandidateTest(unittest.TestCase):
     self.assertIn("--visual-check-montage-sha256", cmd)
     self.assertIn("<reviewed-montage-sha256>", cmd)
     self.assertIn("--require-final-acceptance", cmd)
+
+  def test_acceptance_script_execs_exact_command(self) -> None:
+    text = sweep.build_acceptance_script_text([
+      "/usr/bin/python3",
+      "/tmp/run_vfe_acceptance.py",
+      "--env",
+      "ASIUS_PHYS_CAM2_GAMMA_K=20",
+    ])
+
+    self.assertTrue(text.startswith("#!/usr/bin/env bash\n"))
+    self.assertIn("set -euo pipefail", text)
+    self.assertIn("exec /usr/bin/python3 /tmp/run_vfe_acceptance.py --env ASIUS_PHYS_CAM2_GAMMA_K=20", text)
+
+  def test_finalize_script_accepts_sha_and_note_arguments(self) -> None:
+    text = sweep.build_finalize_script_text(Path("/tmp/acceptance"))
+
+    self.assertIn("usage: $0 <reviewed-montage-sha256> <human-review-note>", text)
+    self.assertIn("/tmp/acceptance/vfe-acceptance-summary.json", text)
+    self.assertIn('"$human_review_note"', text)
+    self.assertIn('"$reviewed_montage_sha256"', text)
+    self.assertIn("--require-final-acceptance", text)
+
+  def test_write_best_candidate_scripts_creates_executable_files(self) -> None:
+    with TemporaryDirectory() as tmp:
+      out_dir = Path(tmp)
+      scripts = sweep.write_best_candidate_scripts(out_dir, {
+        "acceptance_out_dir": str(out_dir / "acceptance-best"),
+        "acceptance_command": [
+          "/usr/bin/python3",
+          "/tmp/run_vfe_acceptance.py",
+          "--target-grey",
+          "0.45",
+        ],
+      })
+
+      acceptance_script = Path(scripts["acceptance_script"])
+      finalize_script = Path(scripts["finalize_script"])
+      self.assertTrue(acceptance_script.exists())
+      self.assertTrue(finalize_script.exists())
+      self.assertTrue(os.access(acceptance_script, os.X_OK))
+      self.assertTrue(os.access(finalize_script, os.X_OK))
+      self.assertIn("--target-grey 0.45", acceptance_script.read_text())
+      self.assertIn("acceptance-best/vfe-acceptance-summary.json", finalize_script.read_text())
 
 
 class RankingTest(unittest.TestCase):
