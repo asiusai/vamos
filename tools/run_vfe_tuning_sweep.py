@@ -18,6 +18,23 @@ from run_vfe_acceptance import camera_extract, load_json
 SUMMARY_FILE = "vfe-tuning-sweep-summary.json"
 CONTACT_SHEET_FILE = "vfe-tuning-sweep-contact.jpg"
 DEFAULT_MAX_CANDIDATES = 12
+SWEEP_PRESETS = {
+  "manual": {
+    "target_greys": None,
+    "env_combos": None,
+    "description": "use explicitly supplied --target-grey and --env-combo values",
+  },
+  "os04-daylight-v1": {
+    "target_greys": (0.0, 0.45),
+    "env_combos": (
+      "default",
+      "gamma18:ASIUS_CAM_GAMMA_K=18",
+      "gamma20:ASIUS_CAM_GAMMA_K=20",
+      "split20-18:ASIUS_PHYS_CAM2_GAMMA_K=20,ASIUS_PHYS_CAM3_GAMMA_K=18",
+    ),
+    "description": "CAM2/CAM3 OS04 daylight-road candidates from current hardware-VFE bench evidence",
+  },
+}
 
 CAMERA_IMAGE_FILES = {
   "cam2": "latest-camerad-road.jpg",
@@ -83,6 +100,29 @@ def build_candidates(target_greys: list[float], env_combos: list[EnvCombo]) -> l
       name = slug(f"{combo.name}-{target_slug(target_grey)}")
       candidates.append(Candidate(name=name, target_grey=target_grey, env=combo.env))
   return candidates
+
+
+def preset_help() -> str:
+  return "; ".join(
+    f"{name}: {preset['description']}" for name, preset in SWEEP_PRESETS.items()
+  )
+
+
+def select_sweep_inputs(args: argparse.Namespace) -> tuple[list[float], list[str]]:
+  target_greys = list(args.target_greys or [])
+  env_combo_specs = list(args.env_combo or [])
+  preset = SWEEP_PRESETS[args.preset]
+
+  if not target_greys and preset["target_greys"] is not None:
+    target_greys = list(preset["target_greys"])
+  if not env_combo_specs and preset["env_combos"] is not None:
+    env_combo_specs = list(preset["env_combos"])
+
+  if not target_greys:
+    target_greys = [0.0]
+  if not env_combo_specs:
+    env_combo_specs = ["default"]
+  return target_greys, env_combo_specs
 
 
 def build_capture_cmd(args: argparse.Namespace, candidate: Candidate, out_dir: Path) -> list[str]:
@@ -296,6 +336,7 @@ def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--openpilot-dir", default="/data/openpilot_hw_vfe")
   parser.add_argument("--out-dir", type=Path, default=None)
+  parser.add_argument("--preset", choices=tuple(SWEEP_PRESETS), default="manual", help=preset_help())
   parser.add_argument("--profile", default="daylight-road", choices=("bench", "road", "road-spatial", "daylight-road"))
   parser.add_argument("--settle", type=float, default=7.0)
   parser.add_argument("--monitor-duration", type=float, default=15.0)
@@ -318,16 +359,17 @@ def main() -> int:
   parser.add_argument("--dry-run", action="store_true")
   args = parser.parse_args()
 
-  target_greys = args.target_greys if args.target_greys else [0.0]
-  if any(value < 0.0 for value in target_greys):
-    parser.error("--target-grey values must be non-negative")
   if args.monitor_duration <= 0.0:
     parser.error("--monitor-duration must be positive")
   if args.pull_timeout <= 0.0:
     parser.error("--pull-timeout must be positive")
 
+  target_greys, env_combo_specs = select_sweep_inputs(args)
+  if any(value < 0.0 for value in target_greys):
+    parser.error("--target-grey values must be non-negative")
+
   try:
-    env_combos = [parse_env_combo(spec) for spec in (args.env_combo or ["default"])]
+    env_combos = [parse_env_combo(spec) for spec in env_combo_specs]
   except ValueError as e:
     parser.error(str(e))
 
@@ -341,6 +383,9 @@ def main() -> int:
   summary = {
     "out_dir": str(out_dir),
     "openpilot_dir": args.openpilot_dir,
+    "preset": args.preset,
+    "target_greys": target_greys,
+    "env_combos": env_combo_specs,
     "profile": args.profile,
     "dry_run": bool(args.dry_run),
     "candidate_count": len(candidates),

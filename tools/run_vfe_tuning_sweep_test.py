@@ -45,6 +45,34 @@ class CandidateTest(unittest.TestCase):
       "gamma-tg0p45",
     ], [candidate.name for candidate in candidates])
 
+  def test_select_sweep_inputs_expands_named_preset(self) -> None:
+    args = SimpleNamespace(
+      preset="os04-daylight-v1",
+      target_greys=None,
+      env_combo=None,
+    )
+
+    target_greys, env_combo_specs = sweep.select_sweep_inputs(args)
+
+    self.assertEqual([0.0, 0.45], target_greys)
+    self.assertIn("gamma20:ASIUS_CAM_GAMMA_K=20", env_combo_specs)
+    self.assertIn(
+      "split20-18:ASIUS_PHYS_CAM2_GAMMA_K=20,ASIUS_PHYS_CAM3_GAMMA_K=18",
+      env_combo_specs,
+    )
+
+  def test_select_sweep_inputs_allows_explicit_preset_overrides(self) -> None:
+    args = SimpleNamespace(
+      preset="os04-daylight-v1",
+      target_greys=[0.5],
+      env_combo=["custom:ASIUS_CAM_GAMMA_K=16"],
+    )
+
+    target_greys, env_combo_specs = sweep.select_sweep_inputs(args)
+
+    self.assertEqual([0.5], target_greys)
+    self.assertEqual(["custom:ASIUS_CAM_GAMMA_K=16"], env_combo_specs)
+
   def test_build_capture_cmd_passes_candidate_env(self) -> None:
     args = SimpleNamespace(
       openpilot_dir="/data/openpilot_hw_vfe",
