@@ -7,9 +7,37 @@ import argparse
 import json
 import statistics
 from pathlib import Path
+import re
 
 
+LOG_FILE = "latest-camerad-dual.log"
 SUMMARY_FILE = "latest-camerad-vfe-summary.json"
+
+CAMERA_NUMS = {
+  "cam1": "2",
+  "cam2": "1",
+  "cam3": "0",
+}
+
+AE_LOG_PATTERN = re.compile(
+  r"cam (?P<cam_num>\d+): OS04 AE "
+  r"grey=(?P<grey>[-+0-9.eE]+) "
+  r"target=(?P<target>[-+0-9.eE]+) "
+  r"rgb_clip=(?P<rgb_clip>[-+0-9.eE]+) "
+  r"cur_ev=(?P<cur_ev>[-+0-9.eE]+) "
+  r"desired_ev=(?P<desired_ev>[-+0-9.eE]+) "
+  r"unclipped_ev=(?P<unclipped_ev>[-+0-9.eE]+) "
+  r"exp (?P<old_exp>\d+)->(?P<exp>\d+) "
+  r"gain_idx (?P<old_gain>\d+)->(?P<gain>\d+) "
+  r"gain (?P<gain_factor>[-+0-9.eE]+)",
+)
+
+AWB_LOG_PATTERN = re.compile(
+  r"cam (?P<cam_num>\d+): OS04 AWB (?P<stable>stable )?"
+  r"U=(?P<u>\d+) V=(?P<v>\d+) "
+  r"samples=(?P<samples>\d+) neutral=(?P<neutral>\d+) "
+  r"blue=0x(?P<blue>[0-9a-fA-F]+) red=0x(?P<red>[0-9a-fA-F]+)",
+)
 
 
 def camera_list(selection: str) -> list[str]:
@@ -48,6 +76,91 @@ def median(values: list[float]) -> float:
   return float(statistics.median(values)) if values else -1.0
 
 
+def parse_ae_samples(log_text: str, cam: str) -> list[dict[str, float | int]]:
+  cam_num = CAMERA_NUMS[cam]
+  samples = []
+  for match in AE_LOG_PATTERN.finditer(log_text):
+    if match.group("cam_num") != cam_num:
+      continue
+    samples.append({
+      "grey": float(match.group("grey")),
+      "target": float(match.group("target")),
+      "rgb_clip": float(match.group("rgb_clip")),
+      "cur_ev": float(match.group("cur_ev")),
+      "desired_ev": float(match.group("desired_ev")),
+      "unclipped_ev": float(match.group("unclipped_ev")),
+      "exp": int(match.group("exp")),
+      "gain": int(match.group("gain")),
+      "gain_factor": float(match.group("gain_factor")),
+    })
+  return samples
+
+
+def parse_awb_samples(log_text: str, cam: str) -> list[dict[str, int | bool]]:
+  cam_num = CAMERA_NUMS[cam]
+  samples = []
+  for match in AWB_LOG_PATTERN.finditer(log_text):
+    if match.group("cam_num") != cam_num:
+      continue
+    samples.append({
+      "stable": match.group("stable") is not None,
+      "u": int(match.group("u")),
+      "v": int(match.group("v")),
+      "samples": int(match.group("samples")),
+      "neutral": int(match.group("neutral")),
+      "blue": int(match.group("blue"), 16),
+      "red": int(match.group("red"), 16),
+    })
+  return samples
+
+
+def print_log_hints(cam: str, log_text: str, args: argparse.Namespace) -> None:
+  if not log_text:
+    return
+
+  ae_samples = parse_ae_samples(log_text, cam)
+  if ae_samples:
+    window = ae_samples[-args.log_window:]
+    last = ae_samples[-1]
+    cap_samples = sum(
+      1 for sample in ae_samples
+      if float(sample["unclipped_ev"]) - float(sample["desired_ev"]) >= args.min_ae_ev_cap
+    )
+    print(
+      f"  ae_log: samples={len(ae_samples)} "
+      f"last_grey={float(last['grey']):.4f} target={float(last['target']):.4f} "
+      f"clip={float(last['rgb_clip']):.4f} exp={int(last['exp'])} "
+      f"gain_idx={int(last['gain'])} gain={float(last['gain_factor']):.3f} "
+      f"cap_samples={cap_samples}"
+    )
+    print(
+      f"  ae_log_window: n={len(window)} "
+      f"grey_med={median([float(sample['grey']) for sample in window]):.4f} "
+      f"clip_med={median([float(sample['rgb_clip']) for sample in window]):.4f} "
+      f"exp_med={median([float(sample['exp']) for sample in window]):.1f} "
+      f"gain_idx_med={median([float(sample['gain']) for sample in window]):.1f}"
+    )
+
+  awb_samples = parse_awb_samples(log_text, cam)
+  if awb_samples:
+    window = awb_samples[-args.log_window:]
+    last = awb_samples[-1]
+    blue_med = int(round(median([float(sample["blue"]) for sample in window])))
+    red_med = int(round(median([float(sample["red"]) for sample in window])))
+    print(
+      f"  awb_log: samples={len(awb_samples)} "
+      f"last_u={int(last['u'])} last_v={int(last['v'])} "
+      f"last_blue=0x{int(last['blue']):x} last_red=0x{int(last['red']):x} "
+      f"stable_last={bool(last['stable'])}"
+    )
+    print(
+      f"  awb_log_window: n={len(window)} "
+      f"u_med={median([float(sample['u']) for sample in window]):.1f} "
+      f"v_med={median([float(sample['v']) for sample in window]):.1f} "
+      f"blue_med=0x{blue_med:x} red_med=0x{red_med:x}"
+    )
+
+
 def wb_hint(tiles: list[dict]) -> dict:
   if not tiles:
     return {
@@ -73,7 +186,7 @@ def wb_hint(tiles: list[dict]) -> dict:
   }
 
 
-def print_cam(cam: str, data: dict, args: argparse.Namespace) -> None:
+def print_cam(cam: str, data: dict, args: argparse.Namespace, log_text: str) -> None:
   cam_data = data.get("cameras", {}).get(cam, {})
   image = cam_data.get("image", {})
   tiles = image.get("tiles", [])
@@ -123,6 +236,7 @@ def print_cam(cam: str, data: dict, args: argparse.Namespace) -> None:
       f"  wb_hint_warning: only {hint['tile_count']} usable non-clipped tiles; "
       "do not bake WB from this scene"
     )
+  print_log_hints(cam, log_text, args)
 
 
 def main() -> int:
@@ -135,11 +249,18 @@ def main() -> int:
   parser.add_argument("--min-neutral-y", type=float, default=45.0)
   parser.add_argument("--max-neutral-y", type=float, default=210.0)
   parser.add_argument("--min-neutral-tiles", type=int, default=6)
+  parser.add_argument("--log-file", type=Path, help=f"default is RUN_DIR/{LOG_FILE}")
+  parser.add_argument("--log-window", type=int, default=20, help="AE/AWB samples to use for rolling medians")
+  parser.add_argument("--min-ae-ev-cap", type=float, default=0.05, help="unclipped_ev - desired_ev threshold for AE cap count")
   args = parser.parse_args()
 
   summary_path = args.summary_json or args.run_dir / SUMMARY_FILE
   data = load_summary(summary_path)
+  log_path = args.log_file or args.run_dir / LOG_FILE
+  log_text = log_path.read_text(errors="replace") if log_path.exists() else ""
   print(f"summary={summary_path}")
+  if log_text:
+    print(f"log={log_path}")
   print(f"passed={bool(data.get('passed', False))}")
   print(f"hardware_path_passed={bool(data.get('hardware_path_passed', False))}")
   print(f"image_quality_passed={bool(data.get('image_quality_passed', False))}")
@@ -152,7 +273,7 @@ def main() -> int:
     print(f"failure[{failure.get('category', 'unknown')}]: {failure.get('message', '')}")
 
   for cam in camera_list(args.cam):
-    print_cam(cam, data, args)
+    print_cam(cam, data, args, log_text)
   return 0
 
 
