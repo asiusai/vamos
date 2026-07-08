@@ -37,6 +37,18 @@ LOCAL_MODELD_LOG = "live-vfe-modeld-modeld.log"
 LOCAL_DMESG_LOG = "live-vfe-modeld-dmesg.log"
 LOCAL_SUMMARY = "live-vfe-modeld-summary.json"
 
+CAMERA_NUMS = {
+  "cam2": "1",
+  "cam3": "0",
+}
+
+FATAL_CAMERAD_MARKERS = [
+  "falling back to RDI",
+  "NV12 sw debayer",
+  "VFE PIX unavailable",
+  "falling back to V4L2 MMAP CPU-copy path",
+]
+
 DMESG_FORBIDDEN_PATTERNS = [
   (
     "normal VFE PIX buffer-address spam",
@@ -317,6 +329,35 @@ def forbidden_dmesg_matches(dmesg_text: str) -> list[dict[str, str]]:
   return matches
 
 
+def camerad_hardware_path_summary(camerad_log: str) -> tuple[dict, list[str]]:
+  summary = {
+    "fatal_markers": {},
+    "cameras": {},
+  }
+  failures: list[str] = []
+
+  for marker in FATAL_CAMERAD_MARKERS:
+    present = marker in camerad_log
+    summary["fatal_markers"][marker] = present
+    if present:
+      failures.append(f"camerad: forbidden fallback marker present: {marker}")
+
+  for cam, cam_num in CAMERA_NUMS.items():
+    vfe_pix_v4l2 = re.search(rf"cam {re.escape(cam_num)}: VIPC buffers created \(VFE PIX V4L2", camerad_log) is not None
+    dmabuf_nv12 = re.search(rf"cam {re.escape(cam_num)}: VIPC buffers created \(VFE PIX V4L2 DMABUF NV12", camerad_log) is not None
+    summary["cameras"][cam] = {
+      "camera_num": cam_num,
+      "vfe_pix_v4l2": vfe_pix_v4l2,
+      "dmabuf_nv12": dmabuf_nv12,
+    }
+    if not vfe_pix_v4l2:
+      failures.append(f"camerad: {cam} missing VFE PIX V4L2 VIPC buffer marker")
+    if not dmabuf_nv12:
+      failures.append(f"camerad: {cam} missing VFE PIX V4L2 DMABUF NV12 marker")
+
+  return summary, failures
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--openpilot-dir", default="/data/openpilot_hw_vfe")
@@ -396,18 +437,9 @@ def main() -> int:
     failures.append(f"modelV2: steady-state max frame drop {max_drop} > {args.max_frame_drop_pct:.1f}")
 
   camerad_log = camerad_log_path.read_text(errors="replace") if camerad_log_path.exists() else ""
-  for marker in (
-    "VFE PIX V4L2 DMABUF NV12",
-    "falling back to RDI",
-    "NV12 sw debayer",
-    "VFE PIX unavailable",
-    "falling back to V4L2 MMAP CPU-copy path",
-  ):
-    present = marker in camerad_log
-    if marker == "VFE PIX V4L2 DMABUF NV12" and not present:
-      failures.append("camerad: missing VFE PIX V4L2 DMABUF NV12 marker")
-    elif marker != "VFE PIX V4L2 DMABUF NV12" and present:
-      failures.append(f"camerad: forbidden fallback marker present: {marker}")
+  hardware_path_summary, hardware_path_failures = camerad_hardware_path_summary(camerad_log)
+  summary["camerad_hardware_path"] = hardware_path_summary
+  failures.extend(hardware_path_failures)
 
   modeld_log = modeld_log_path.read_text(errors="replace") if modeld_log_path.exists() else ""
   sync_warnings = modeld_log.count("frames out of sync!")
