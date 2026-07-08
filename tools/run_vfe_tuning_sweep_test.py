@@ -29,6 +29,30 @@ class EnvComboTest(unittest.TestCase):
       sweep.parse_env_combo("bad:1INVALID=value")
 
 
+class PublicCcmTest(unittest.TestCase):
+  def test_vfe_ccm_override_env_quantizes_public_os04_matrix(self) -> None:
+    env = sweep.vfe_ccm_override_env(sweep.PUBLIC_OS04_CCM[6500])
+
+    self.assertTrue(env.startswith("ASIUS_CAM_VFE_REG_OVERRIDES="))
+    self.assertIn("0x760=0x0000017f", env)
+    self.assertIn("0x764=0x00000fd0", env)
+    self.assertIn("0x780=0x000001b0", env)
+    self.assertIn("0x790=0x00000000", env)
+    self.assertEqual(13, len(env.split("=", 1)[1].splitlines()))
+    self.assertIn("\n", env)
+    self.assertNotIn(",", env)
+
+  def test_public_os04_ccm_combo_can_add_gamma_without_splitting_registers(self) -> None:
+    combo = sweep.parse_env_combo(sweep.public_os04_ccm_combo(6500, gamma=20))
+
+    self.assertEqual("pubccm6500-gamma20", combo.name)
+    self.assertEqual(2, len(combo.env))
+    self.assertTrue(combo.env[0].startswith("ASIUS_CAM_VFE_REG_OVERRIDES="))
+    self.assertIn("0x760=0x0000017f", combo.env[0])
+    self.assertIn("\n0x764=0x00000fd0", combo.env[0])
+    self.assertEqual("ASIUS_CAM_GAMMA_K=20", combo.env[1])
+
+
 class CandidateTest(unittest.TestCase):
   def test_build_candidates_crosses_targets_and_env_combos(self) -> None:
     candidates = sweep.build_candidates(
@@ -61,6 +85,22 @@ class CandidateTest(unittest.TestCase):
       "split20-18:ASIUS_PHYS_CAM2_GAMMA_K=20,ASIUS_PHYS_CAM3_GAMMA_K=18",
       env_combo_specs,
     )
+
+  def test_select_sweep_inputs_expands_public_ccm_preset(self) -> None:
+    args = SimpleNamespace(
+      preset="os04-public-ccm-v1",
+      target_greys=None,
+      env_combo=None,
+    )
+
+    target_greys, env_combo_specs = sweep.select_sweep_inputs(args)
+
+    self.assertEqual([0.0, 0.45], target_greys)
+    self.assertEqual(6, len(env_combo_specs))
+    self.assertIn("gamma20:ASIUS_CAM_GAMMA_K=20", env_combo_specs)
+    self.assertTrue(any("pubccm5000" in spec for spec in env_combo_specs))
+    self.assertTrue(any("pubccm6500" in spec for spec in env_combo_specs))
+    self.assertTrue(any("ASIUS_CAM_VFE_REG_OVERRIDES=" in spec for spec in env_combo_specs))
 
   def test_select_sweep_inputs_allows_explicit_preset_overrides(self) -> None:
     args = SimpleNamespace(
