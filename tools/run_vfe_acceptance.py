@@ -74,6 +74,15 @@ def main() -> int:
   parser.add_argument("--min-ae-rgb-clip", type=float, default=0.079, help="minimum AE rgb_clip fraction considered a guard-triggering highlight")
   parser.add_argument("--min-ae-ev-cap", type=float, default=0.05, help="minimum unclipped_ev - desired_ev considered an active AE RGB clip cap")
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
+  parser.add_argument(
+    "--visual-check-pass",
+    action="store_true",
+    help=(
+      "mark the final daylight-road visual check passed; use only after "
+      "inspecting /tmp/asius-cams-latest.jpg from a real daylight road scene"
+    ),
+  )
+  parser.add_argument("--visual-check-note", default="", help="short note for the human visual check record")
   parser.add_argument("--skip-snapshot", action="store_true")
   parser.add_argument("--skip-modeld", action="store_true")
   parser.add_argument("--dry-run", action="store_true")
@@ -95,6 +104,7 @@ def main() -> int:
   summary: dict = {
     "out_dir": str(out_dir),
     "openpilot_dir": args.openpilot_dir,
+    "dry_run": bool(args.dry_run),
     "snapshot": {
       "skipped": bool(args.skip_snapshot),
       "out_dir": str(snapshot_dir),
@@ -111,6 +121,13 @@ def main() -> int:
     },
     "visual_check_required": True,
     "host_montage": "/tmp/asius-cams-latest.jpg",
+    "visual_check": {
+      "required_for_final_acceptance": True,
+      "passed": bool(args.visual_check_pass),
+      "note": args.visual_check_note,
+      "host_montage": "/tmp/asius-cams-latest.jpg",
+      "requirement": "real daylight road scene reviewed by a human",
+    },
   }
 
   common_env_args: list[str] = []
@@ -203,15 +220,41 @@ def main() -> int:
 
   summary["gate_failures"] = gate_failures
   summary["passed"] = not gate_failures
+  final_acceptance_requirements = {
+    "not_dry_run": not args.dry_run,
+    "machine_gates_passed": summary["passed"],
+    "snapshot_ran": not args.skip_snapshot,
+    "snapshot_passed": bool(summary["snapshot"].get("passed", False)),
+    "snapshot_hardware_path_passed": bool(summary["snapshot"].get("hardware_path_passed", False)),
+    "snapshot_image_quality_passed": bool(summary["snapshot"].get("image_quality_passed", False)),
+    "snapshot_profile_is_daylight_road": args.snapshot_profile == "daylight-road",
+    "modeld_ran": not args.skip_modeld,
+    "modeld_passed": bool(summary["modeld"].get("passed", False)),
+    "visual_check_passed": bool(args.visual_check_pass),
+  }
+  summary["final_acceptance"] = {
+    "passed": all(final_acceptance_requirements.values()),
+    "requirements": final_acceptance_requirements,
+    "note": (
+      "Final acceptance means a full non-dry-run daylight-road snapshot gate, "
+      "modeld gate, and explicit human visual pass all succeeded."
+    ),
+  }
+  summary["final_acceptance_passed"] = summary["final_acceptance"]["passed"]
   summary["note"] = (
-    "A passing machine summary still needs a human visual check of "
-    "/tmp/asius-cams-latest.jpg for the final daylight-road acceptance."
+    "Use passed=true for repeatable machine gates. Use final_acceptance_passed=true "
+    "only for full daylight-road acceptance with a human visual check."
   )
 
   summary_path = out_dir / SUMMARY_FILE
   summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
   print(f"summary_json: {summary_path}")
-  print(f"summary: passed={summary['passed']} snapshot_rc={snapshot_rc} modeld_rc={modeld_rc}")
+  print(
+    "summary: "
+    f"passed={summary['passed']} "
+    f"final_acceptance_passed={summary['final_acceptance_passed']} "
+    f"snapshot_rc={snapshot_rc} modeld_rc={modeld_rc}"
+  )
   return 0 if summary["passed"] else 1
 
 
