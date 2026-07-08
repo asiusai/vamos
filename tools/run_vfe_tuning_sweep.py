@@ -197,9 +197,11 @@ def candidate_label(result: dict) -> list[str]:
     uvhf = cam_data.get("uv_hf_abs_mean")
     clip10 = cam_data.get("tile_luma_clip_hi_area_frac_gt_10pct")
     clip50 = cam_data.get("tile_luma_clip_hi_area_frac_gt_50pct")
+    raw = cam_data.get("latest_raw_match")
     lines.append(
       f"{cam}: y={metric_text(y)} rgb={metric_text(rgb)} "
-      f"uvhf={metric_text(uvhf)} clip={metric_text(clip10)}/{metric_text(clip50)}"
+      f"uvhf={metric_text(uvhf)} clip={metric_text(clip10)}/{metric_text(clip50)} "
+      f"raw={raw if raw is not None else 'n/a'}"
     )
   return lines
 
