@@ -19,7 +19,7 @@ Usage:
   dragon.py uart login PASSWORD       Root login sequence
   dragon.py uart wake                 Poke with newline, print response
 """
-import argparse, codecs, os, re, subprocess, sys, time
+import argparse, codecs, os, re, shlex, subprocess, sys, time
 
 def find_hwmon(name="nct6799"):
     for h in os.listdir("/sys/class/hwmon"):
@@ -337,6 +337,7 @@ def cmd_uart(args):
 
 def cmd_health(args):
     target = args.target or f"comma@{NCM_IP}"
+    openpilot_root = args.openpilot_root.rstrip("/") or "/"
     ssh_opts = list(SSH_HOSTKEY_OPTS) if args.target else list(SSH_OPTS)
     if args.identity:
         ssh_opts = ["-i", os.path.expanduser(args.identity), *SSH_HOSTKEY_OPTS]
@@ -349,9 +350,11 @@ def cmd_health(args):
     subprocess.run(["scp", *ssh_opts, HEALTH_SCRIPT,
                     f"{target}:{REMOTE_HEALTH_SCRIPT}"], check=True)
 
+    root = shlex.quote(openpilot_root)
+    print(f"[health] testing openpilot root {openpilot_root}", flush=True)
     ssh_cmd = ["ssh", *ssh_opts, target,
-               f"cd /data/openpilot && PYTHONPATH=/data/openpilot:/data/openpilot/tinygrad_repo "
-               f"OPENPILOT_ROOT=/data/openpilot LD_LIBRARY_PATH=/opt/qcom-adreno/lib "
+               f"cd {root} && PYTHONPATH={root}:{root}/tinygrad_repo "
+               f"OPENPILOT_ROOT={root} LD_LIBRARY_PATH=/opt/qcom-adreno/lib "
                f"VISIONBUF_USE_DMA_HEAP=1 python3 -u {REMOTE_HEALTH_SCRIPT}"]
     ret = subprocess.run(ssh_cmd).returncode
     local_dir = "/tmp/dragon_health_local"
@@ -387,6 +390,8 @@ def main():
     health_p = sub.add_parser("health", help="Run system health check on Dragon")
     health_p.add_argument("--target", help="SSH target, e.g. comma@asius1. Defaults to USB NCM.")
     health_p.add_argument("--identity", help="SSH identity file for health target.")
+    health_p.add_argument("--openpilot-root", default="/data/openpilot",
+                          help="Remote openpilot checkout to test (default: /data/openpilot).")
 
     args = ap.parse_args()
     if not args.cmd:
