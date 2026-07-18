@@ -7,6 +7,7 @@ captures sample images, and runs model replay.
 Invoked from the host via:  dragon.py health
 """
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -17,6 +18,8 @@ EXPECTED_FRAME_INTERVAL_MS = 50.0
 FRAME_INTERVAL_TOLERANCE_MS = 1.0
 SNAPSHOT_DIR = "/tmp/dragon_health"
 OPENPILOT_ROOT = os.environ.get("OPENPILOT_ROOT", "/data/openpilot")
+DEFAULT_OPENPILOT_ROOT = "/data/openpilot"
+CUSTOM_MANAGER_LOG = "/tmp/dragon_health_manager.log"
 GENERATED_NATIVE_OUTPUTS = (
     "common/libcommon.a",
     "common/params_pyx.so",
@@ -33,6 +36,10 @@ GENERATED_NATIVE_OUTPUTS = (
     "third_party/libjson11.a",
 )
 MIN_GENERATED_OUTPUT_SIZE = 4096
+custom_manager_process = None
+custom_manager_log = None
+livestream_original = None
+livestream_changed = False
 
 
 def section(title):
@@ -48,6 +55,95 @@ def run(cmd, timeout=10):
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return -1, "", ""
+
+
+def uses_system_openpilot_service():
+    return os.path.realpath(OPENPILOT_ROOT) == os.path.realpath(DEFAULT_OPENPILOT_ROOT)
+
+
+def enable_health_cameras():
+    global livestream_original, livestream_changed
+
+    try:
+        from openpilot.common.params import Params
+        params = Params()
+        if not livestream_changed:
+            livestream_original = params.get("IsLiveStreaming")
+            livestream_changed = True
+        params.put_bool("IsLiveStreaming", True)
+        return True
+    except Exception as e:
+        fail(f"Could not enable cameras for health check: {e}")
+        return False
+
+
+def start_openpilot():
+    global custom_manager_process, custom_manager_log
+
+    if not enable_health_cameras():
+        return False
+
+    if uses_system_openpilot_service():
+        run(["sudo", "sv", "up", "openpilot"], timeout=15)
+        return True
+
+    if custom_manager_process is not None and custom_manager_process.poll() is None:
+        return True
+
+    launcher = Path(OPENPILOT_ROOT) / "launch_openpilot.sh"
+    if not launcher.exists():
+        fail(f"openpilot launcher not found at {launcher}")
+        return False
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = OPENPILOT_ROOT
+    env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
+    custom_manager_log = open(CUSTOM_MANAGER_LOG, "w")
+    custom_manager_process = subprocess.Popen(
+        [str(launcher)],
+        cwd=OPENPILOT_ROOT,
+        env=env,
+        stdout=custom_manager_log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    print(f"  Started {OPENPILOT_ROOT} (log: {CUSTOM_MANAGER_LOG})")
+    return True
+
+
+def restore_system_openpilot():
+    global custom_manager_process, custom_manager_log, livestream_changed
+
+    if custom_manager_process is not None:
+        if custom_manager_process.poll() is None:
+            try:
+                os.killpg(custom_manager_process.pid, signal.SIGTERM)
+                custom_manager_process.wait(timeout=15)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(custom_manager_process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        custom_manager_process = None
+
+    if custom_manager_log is not None:
+        custom_manager_log.close()
+        custom_manager_log = None
+
+    if livestream_changed:
+        try:
+            from openpilot.common.params import Params
+            params = Params()
+            if livestream_original is None:
+                params.remove("IsLiveStreaming")
+            else:
+                params.put("IsLiveStreaming", livestream_original)
+        except Exception as e:
+            warn(f"Could not restore IsLiveStreaming: {e}")
+        livestream_changed = False
+
+    if not uses_system_openpilot_service():
+        run(["sudo", "sv", "up", "openpilot"], timeout=15)
 
 
 def check_ncm():
@@ -228,7 +324,10 @@ def capture_snapshots():
     for name, stream_type in streams.items():
         try:
             client = VisionIpcClient("camerad", stream_type, True)
-            if not client.connect(True):
+            deadline = time.monotonic() + 10
+            while not client.connect(False) and time.monotonic() < deadline:
+                time.sleep(0.1)
+            if not client.is_connected():
                 fail(f"{name}: could not connect to VisionIPC")
                 all_ok = False
                 continue
@@ -374,7 +473,8 @@ def run_model_replay():
             if returncode != 0:
                 break
         finally:
-            run(["sudo", "sv", "up", "openpilot"], timeout=15)
+            if uses_system_openpilot_service():
+                run(["sudo", "sv", "up", "openpilot"], timeout=15)
 
     if returncode == 0 and not timing_failed:
         ok("Model replay passed")
@@ -479,9 +579,10 @@ def system_info():
         ok(f"Disk: {out.splitlines()[-1].strip()}")
 
 
-def wait_for_openpilot(timeout=600):
+def wait_for_openpilot(timeout=1800):
     section("Waiting for openpilot")
-    run(["sudo", "sv", "up", "openpilot"], timeout=15)
+    if not start_openpilot():
+        return False
     try:
         import cereal.messaging as messaging
     except ImportError:
@@ -493,8 +594,17 @@ def wait_for_openpilot(timeout=600):
     last_print = 0
     while time.monotonic() - start < timeout:
         if messaging.drain_sock(sock):
-            ok(f"openpilot is up ({time.monotonic() - start:.0f}s)")
-            return True
+            elapsed = time.monotonic() - start
+            if not enable_health_cameras():
+                return False
+            camera_start = time.monotonic()
+            while time.monotonic() - camera_start < 60:
+                if run(["pgrep", "-x", "camerad"], timeout=2)[0] == 0:
+                    ok(f"openpilot and camerad are up ({elapsed:.0f}s)")
+                    return True
+                time.sleep(0.5)
+            fail("camerad did not start within 60s")
+            return False
         now = time.monotonic()
         if now - last_print >= 10:
             elapsed = now - start
@@ -505,9 +615,7 @@ def wait_for_openpilot(timeout=600):
     return False
 
 
-def main():
-    print(f"Dragon Q6A Health Check — {time.strftime('%Y-%m-%d %H:%M:%S')}")
-
+def run_checks():
     system_info()
     model_replay_ok = run_model_replay()
     ready = wait_for_openpilot()
@@ -549,6 +657,14 @@ def main():
     print()
     print("  ALL CHECKS PASSED" if all_pass else "  SOME CHECKS FAILED")
     return 0 if all_pass else 1
+
+
+def main():
+    print(f"Dragon Q6A Health Check — {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    try:
+        return run_checks()
+    finally:
+        restore_system_openpilot()
 
 
 if __name__ == "__main__":
