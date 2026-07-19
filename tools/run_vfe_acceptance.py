@@ -364,7 +364,7 @@ def finalize_existing_summary(args: argparse.Namespace) -> int:
 
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
-  parser.add_argument("--openpilot-dir", default="/data/openpilot_hw_vfe")
+  parser.add_argument("--openpilot-dir", default="/data/openpilot")
   parser.add_argument("--out-dir", type=Path, default=None)
   parser.add_argument(
     "--finalize-existing-summary",

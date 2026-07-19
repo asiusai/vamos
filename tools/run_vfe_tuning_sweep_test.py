@@ -178,7 +178,7 @@ class CandidateTest(unittest.TestCase):
 
   def test_build_capture_cmd_passes_candidate_env(self) -> None:
     args = SimpleNamespace(
-      openpilot_dir="/data/openpilot_hw_vfe",
+      openpilot_dir="/data/openpilot",
       settle=7.0,
       monitor_duration=15.0,
       profile="daylight-road",
@@ -206,7 +206,7 @@ class CandidateTest(unittest.TestCase):
 
   def test_build_acceptance_cmd_preserves_candidate_knobs(self) -> None:
     args = SimpleNamespace(
-      openpilot_dir="/data/openpilot_hw_vfe",
+      openpilot_dir="/data/openpilot",
       pull_timeout=60.0,
       require_ae_rgb_clip_guard=True,
       min_ae_samples=3,
@@ -239,7 +239,7 @@ class CandidateTest(unittest.TestCase):
 
   def test_build_acceptance_cmd_can_disable_ae_clip_guard(self) -> None:
     args = SimpleNamespace(
-      openpilot_dir="/data/openpilot_hw_vfe",
+      openpilot_dir="/data/openpilot",
       pull_timeout=60.0,
       require_ae_rgb_clip_guard=False,
       min_ae_samples=3,
