@@ -16,6 +16,8 @@ dependencies = [
   # provisioning
   "pyusb",
   "paramiko",
+  # WebRTC device streaming
+  "libdatachannel-py>=2026.1.0.dev2",
 
   # extra nice-to-haves
   "matplotlib",
