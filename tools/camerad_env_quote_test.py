@@ -27,13 +27,14 @@ class BashEnvWordTest(unittest.TestCase):
 class RemoteScriptTest(unittest.TestCase):
   def test_capture_script_multiline_env_does_not_break_heredoc_dedent(self) -> None:
     script = capture.remote_script(
-      "/data/openpilot_hw_vfe",
+      "/data/openpilot",
       "both",
       0.1,
       600,
       0.0,
       1.0,
       115.0,
+      False,
       False,
       False,
       0.1,
@@ -51,7 +52,7 @@ class RemoteScriptTest(unittest.TestCase):
 
   def test_modeld_script_multiline_env_does_not_break_heredoc_dedent(self) -> None:
     script = modeld.remote_script(
-      "/data/openpilot_hw_vfe",
+      "/data/openpilot",
       0.1,
       0.1,
       0.0,

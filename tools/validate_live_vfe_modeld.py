@@ -381,7 +381,7 @@ def camerad_hardware_path_summary(camerad_log: str) -> tuple[dict, list[str]]:
 
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
-  parser.add_argument("--openpilot-dir", default="/data/openpilot_hw_vfe")
+  parser.add_argument("--openpilot-dir", default="/data/openpilot")
   parser.add_argument("--out-dir", default="/tmp/dragon_os04_bench/live-vfe-modeld")
   parser.add_argument("--duration", type=float, default=25.0)
   parser.add_argument("--settle", type=float, default=7.0)

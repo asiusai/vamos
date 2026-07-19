@@ -597,7 +597,7 @@ def build_contact_sheet(ranked_results: list[dict], out_dir: Path, image_width: 
 
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
-  parser.add_argument("--openpilot-dir", default="/data/openpilot_hw_vfe")
+  parser.add_argument("--openpilot-dir", default="/data/openpilot")
   parser.add_argument("--out-dir", type=Path, default=None)
   parser.add_argument("--preset", choices=tuple(SWEEP_PRESETS), default="manual", help=preset_help())
   parser.add_argument("--profile", default="daylight-road", choices=("bench", "road", "road-spatial", "daylight-road"))
