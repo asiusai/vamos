@@ -1,0 +1,63 @@
+diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+--- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
++++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+@@ -1680,7 +1680,6 @@ led@3 {
+ 			reg = <3>;
+ 			label = "asius:cam1:blue:0";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "asius-boot";
+ 		};
+ 
+ 		led@4 {
+@@ -1699,7 +1698,6 @@ led@6 {
+ 			reg = <6>;
+ 			label = "asius:cam1:blue:1";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "asius-boot";
+ 		};
+ 
+ 		led@7 {
+@@ -1718,7 +1716,6 @@ led@9 {
+ 			reg = <9>;
+ 			label = "asius:cam1:blue:2";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "asius-boot";
+ 		};
+ 	};
+ };
+diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
+index d427e8a51..6210320ee 100644
+--- a/drivers/firmware/efi/libstub/fdt.c
++++ b/drivers/firmware/efi/libstub/fdt.c
+@@ -331,7 +331,7 @@ static int asius_configure_camera_leds(void *fdt, const char *path,
+ 		if (status)
+ 			return status;
+ 
+-		if ((i % 3) == 2) {
++		if ((i % 3) == 2 && camera_number != 1) {
+ 			status = fdt_setprop_string(fdt, child,
+ 						   "linux,default-trigger",
+ 						   "asius-boot") ?:
+diff --git a/drivers/leds/trigger/ledtrig-asius-boot.c b/drivers/leds/trigger/ledtrig-asius-boot.c
+index 9288f40ca..8e4a06eea 100644
+--- a/drivers/leds/trigger/ledtrig-asius-boot.c
++++ b/drivers/leds/trigger/ledtrig-asius-boot.c
+@@ -8,15 +8,16 @@
+ #include <linux/timer.h>
+ 
+ #define ASIUS_BOOT_BLINK_MS	500
++#define ASIUS_BOOT_BRIGHTNESS	204
+ 
+ static struct led_trigger *asius_boot_trigger;
+ static struct timer_list asius_boot_timer;
+-static enum led_brightness asius_boot_brightness = LED_FULL;
++static enum led_brightness asius_boot_brightness = ASIUS_BOOT_BRIGHTNESS;
+ 
+ static void asius_boot_blink(struct timer_list *timer)
+ {
+ 	asius_boot_brightness = asius_boot_brightness == LED_OFF ?
+-				LED_FULL : LED_OFF;
++				ASIUS_BOOT_BRIGHTNESS : LED_OFF;
+ 	led_trigger_event(asius_boot_trigger, asius_boot_brightness);
+ 	mod_timer(timer, jiffies + msecs_to_jiffies(ASIUS_BOOT_BLINK_MS));
+ }
