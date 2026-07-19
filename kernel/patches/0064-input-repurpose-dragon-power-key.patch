@@ -1,0 +1,54 @@
+diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+index 592e6a10b..63763b34c 100644
+--- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
++++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+@@ -864,6 +864,8 @@ channel@14a {
+ };
+ 
+ &pon_pwrkey {
++	linux,code = <KEY_PROG1>;
++
+ 	status = "okay";
+ };
+ 
+diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
+index d6c6eb348..5c15ce373 100644
+--- a/drivers/firmware/efi/libstub/fdt.c
++++ b/drivers/firmware/efi/libstub/fdt.c
+@@ -83,6 +83,28 @@ static void asius_enable_panda_spi(void *fdt)
+ 			 status);
+ }
+ 
++#define ASIUS_PWRKEY_PATH \
++	"/soc@0/spmi@c440000/pmic@0/pon@1300/pwrkey"
++#define ASIUS_PAIR_KEY_CODE		148
++
++static void asius_repurpose_power_key(void *fdt)
++{
++	int node;
++	int status;
++
++	node = fdt_path_offset(fdt, ASIUS_PWRKEY_PATH);
++	if (node < 0) {
++		efi_warn("Failed to find Asius pairing key: %d\n", node);
++		return;
++	}
++
++	status = fdt_setprop_u32(fdt, node, "linux,code",
++				 ASIUS_PAIR_KEY_CODE);
++	if (status)
++		efi_warn("Failed to configure Asius pairing key: %d\n",
++			 status);
++}
++
+ #define ASIUS_CAMCC_PATH		"/soc@0/clock-controller@ad00000"
+ #define ASIUS_CAMSS_PATH		"/soc@0/isp@acb3000"
+ #define ASIUS_CAMSS_PORTS_PATH		ASIUS_CAMSS_PATH "/ports"
+@@ -774,6 +796,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+ 	}
+ 
+ 	asius_enable_panda_spi(fdt);
++	asius_repurpose_power_key(fdt);
+ 	asius_enable_dragon_cameras(fdt);
+ 
+ 	/* Add FDT entries for EFI runtime services in chosen node. */

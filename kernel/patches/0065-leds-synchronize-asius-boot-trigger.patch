@@ -1,0 +1,195 @@
+diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+index 63763b34c..3390cf636 100644
+--- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
++++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+@@ -1680,8 +1680,7 @@ led@3 {
+ 			reg = <3>;
+ 			label = "asius:cam1:blue:0";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "timer";
+-			led-pattern = <500 500>;
++			linux,default-trigger = "asius-boot";
+ 		};
+ 
+ 		led@4 {
+@@ -1700,8 +1699,7 @@ led@6 {
+ 			reg = <6>;
+ 			label = "asius:cam1:blue:1";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "timer";
+-			led-pattern = <500 500>;
++			linux,default-trigger = "asius-boot";
+ 		};
+ 
+ 		led@7 {
+@@ -1720,8 +1718,7 @@ led@9 {
+ 			reg = <9>;
+ 			label = "asius:cam1:blue:2";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "timer";
+-			led-pattern = <500 500>;
++			linux,default-trigger = "asius-boot";
+ 		};
+ 	};
+ };
+@@ -1773,8 +1770,7 @@ led@3 {
+ 			reg = <3>;
+ 			label = "asius:cam2:blue:0";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "timer";
+-			led-pattern = <500 500>;
++			linux,default-trigger = "asius-boot";
+ 		};
+ 
+ 		led@4 {
+@@ -1793,8 +1789,7 @@ led@6 {
+ 			reg = <6>;
+ 			label = "asius:cam2:blue:1";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "timer";
+-			led-pattern = <500 500>;
++			linux,default-trigger = "asius-boot";
+ 		};
+ 
+ 		led@7 {
+@@ -1813,8 +1808,7 @@ led@9 {
+ 			reg = <9>;
+ 			label = "asius:cam2:blue:2";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "timer";
+-			led-pattern = <500 500>;
++			linux,default-trigger = "asius-boot";
+ 		};
+ 	};
+ };
+@@ -1862,8 +1856,7 @@ led@3 {
+ 			reg = <3>;
+ 			label = "asius:cam3:blue:0";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "timer";
+-			led-pattern = <500 500>;
++			linux,default-trigger = "asius-boot";
+ 		};
+ 
+ 		led@4 {
+@@ -1882,8 +1875,7 @@ led@6 {
+ 			reg = <6>;
+ 			label = "asius:cam3:blue:1";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "timer";
+-			led-pattern = <500 500>;
++			linux,default-trigger = "asius-boot";
+ 		};
+ 
+ 		led@7 {
+@@ -1902,8 +1894,7 @@ led@9 {
+ 			reg = <9>;
+ 			label = "asius:cam3:blue:2";
+ 			led-max-microamp = <40000>;
+-			linux,default-trigger = "timer";
+-			led-pattern = <500 500>;
++			linux,default-trigger = "asius-boot";
+ 		};
+ 	};
+ };
+diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
+index 5c15ce373..d427e8a51 100644
+--- a/drivers/firmware/efi/libstub/fdt.c
++++ b/drivers/firmware/efi/libstub/fdt.c
+@@ -284,7 +284,6 @@ static int asius_configure_cci_bus(void *fdt, const char *path)
+ static int asius_configure_camera_leds(void *fdt, const char *path,
+ 				       int camera_number)
+ {
+-	const u32 blink_pattern[] = { 500, 500 };
+ 	char child_name[] = "led@1";
+ 	char label[sizeof("asius:cam1:green:0")];
+ 	int controller;
+@@ -335,11 +334,9 @@ static int asius_configure_camera_leds(void *fdt, const char *path,
+ 		if ((i % 3) == 2) {
+ 			status = fdt_setprop_string(fdt, child,
+ 						   "linux,default-trigger",
+-						   "timer") ?:
+-				 asius_fdt_setprop_u32_array(fdt, child,
+-							     "led-pattern",
+-							     blink_pattern,
+-							     ARRAY_SIZE(blink_pattern));
++						   "asius-boot") ?:
++				 asius_fdt_delprop_optional(fdt, child,
++							    "led-pattern");
+ 		} else {
+ 			status = asius_fdt_delprop_optional(fdt, child,
+ 							    "linux,default-trigger") ?:
+diff --git a/drivers/leds/trigger/Kconfig b/drivers/leds/trigger/Kconfig
+index c11282a74..827d37e87 100644
+--- a/drivers/leds/trigger/Kconfig
++++ b/drivers/leds/trigger/Kconfig
+@@ -19,6 +19,14 @@ config LEDS_TRIGGER_TIMER
+ 
+ 	  If unsure, say Y.
+ 
++config LEDS_TRIGGER_ASIUS_BOOT
++	bool "Asius synchronized camera boot trigger"
++	help
++	  Blink all camera-board status LEDs from one shared timer so every
++	  available board displays the same boot phase. LEDs using the
++	  "asius-boot" trigger blink blue every 500 milliseconds until
++	  userspace selects another trigger or sets brightness directly.
++
+ config LEDS_TRIGGER_ONESHOT
+ 	tristate "LED One-shot Trigger"
+ 	help
+diff --git a/drivers/leds/trigger/Makefile b/drivers/leds/trigger/Makefile
+index 3b3628889..ee45f5cc8 100644
+--- a/drivers/leds/trigger/Makefile
++++ b/drivers/leds/trigger/Makefile
+@@ -1,5 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0
+ obj-$(CONFIG_LEDS_TRIGGER_TIMER)	+= ledtrig-timer.o
++obj-$(CONFIG_LEDS_TRIGGER_ASIUS_BOOT)	+= ledtrig-asius-boot.o
+ obj-$(CONFIG_LEDS_TRIGGER_ONESHOT)	+= ledtrig-oneshot.o
+ obj-$(CONFIG_LEDS_TRIGGER_DISK)		+= ledtrig-disk.o
+ obj-$(CONFIG_LEDS_TRIGGER_MTD)		+= ledtrig-mtd.o
+diff --git a/drivers/leds/trigger/ledtrig-asius-boot.c b/drivers/leds/trigger/ledtrig-asius-boot.c
+new file mode 100644
+index 000000000..9288f40ca
+--- /dev/null
++++ b/drivers/leds/trigger/ledtrig-asius-boot.c
+@@ -0,0 +1,38 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Synchronized boot-status trigger for Asius camera-board LEDs.
++ */
++
++#include <linux/init.h>
++#include <linux/jiffies.h>
++#include <linux/leds.h>
++#include <linux/timer.h>
++
++#define ASIUS_BOOT_BLINK_MS	500
++
++static struct led_trigger *asius_boot_trigger;
++static struct timer_list asius_boot_timer;
++static enum led_brightness asius_boot_brightness = LED_FULL;
++
++static void asius_boot_blink(struct timer_list *timer)
++{
++	asius_boot_brightness = asius_boot_brightness == LED_OFF ?
++				LED_FULL : LED_OFF;
++	led_trigger_event(asius_boot_trigger, asius_boot_brightness);
++	mod_timer(timer, jiffies + msecs_to_jiffies(ASIUS_BOOT_BLINK_MS));
++}
++
++static int __init asius_boot_init(void)
++{
++	led_trigger_register_simple("asius-boot", &asius_boot_trigger);
++	if (!asius_boot_trigger)
++		return -ENOMEM;
++
++	led_trigger_event(asius_boot_trigger, asius_boot_brightness);
++	timer_setup(&asius_boot_timer, asius_boot_blink, 0);
++	mod_timer(&asius_boot_timer,
++		  jiffies + msecs_to_jiffies(ASIUS_BOOT_BLINK_MS));
++
++	return 0;
++}
++subsys_initcall(asius_boot_init);
