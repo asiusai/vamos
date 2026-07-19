@@ -19,7 +19,14 @@ Usage:
   dragon.py uart login PASSWORD       Root login sequence
   dragon.py uart wake                 Poke with newline, print response
 """
-import argparse, codecs, os, re, shlex, subprocess, sys, time
+import argparse
+import codecs
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
 
 def find_hwmon(name="nct6799"):
     for h in os.listdir("/sys/class/hwmon"):
@@ -65,7 +72,9 @@ def power(state):
     if not hwmon:
         sys.exit("nct6799 hwmon not found — is the module loaded?")
     subprocess.run(["sudo", "sh", "-c",
-        f"echo 1 > {hwmon}/pwm1_enable && echo {state} > {hwmon}/pwm1"], check=True)
+        f"echo 1 > {hwmon}/pwm1_mode && "
+        f"echo 1 > {hwmon}/pwm1_enable && "
+        f"echo {state} > {hwmon}/pwm1"], check=True)
 
 def cmd_on(_args):
     power(255)
@@ -107,8 +116,8 @@ def ensure_ncm():
         sys.exit("No Dragon NCM interface found — is the USB cable connected?")
     print(f"[ncm] bringing up {iface}")
     subprocess.run(["sudo", "ip", "link", "set", iface, "up"], check=True)
-    r = subprocess.run(["sudo", "dhcpcd", "-1", iface],
-                       capture_output=True, text=True)
+    subprocess.run(["sudo", "dhcpcd", "-1", iface],
+                   capture_output=True, text=True)
     _, host_ip = check_ncm()
     if not host_ip:
         sys.exit(f"[ncm] DHCP failed on {iface} — Dragon may not have NCM enabled")
@@ -315,21 +324,30 @@ def cmd_uart(args):
         with open_port() as s:
             s.write(b'\r\n')
             out = drain(s, 2.0, echo=False)
-            sys.stdout.write(out); sys.stdout.flush()
+            sys.stdout.write(out)
+            sys.stdout.flush()
             if '#' in (out.splitlines()[-1:] or ['']):
                 print("\n[already logged in as root]")
                 return
+
+            if 'login:' not in out and 'password:' not in out.lower():
+                s.write(b'\r\n')
+                out = drain(s, 2.0, echo=False)
+                sys.stdout.write(out)
+                sys.stdout.flush()
+
             if 'login:' in out:
                 s.write(b'root\r\n')
-                drain(s, 2.0)
+                out = drain(s, 2.0, echo=False)
+                sys.stdout.write(out)
+                sys.stdout.flush()
+
             if 'password' in out.lower():
                 s.write(pw.encode() + b'\r\n')
                 drain(s, 3.0)
             else:
-                s.write(b'root\r\n')
-                drain(s, 2.0)
-                s.write(pw.encode() + b'\r\n')
-                drain(s, 3.0)
+                print("\n[uart login prompt not found]", file=sys.stderr)
+                return
     else:
         sys.exit(f"uart: unknown subcommand '{sub}'")
 

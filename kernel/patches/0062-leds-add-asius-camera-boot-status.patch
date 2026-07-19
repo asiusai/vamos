@@ -1,0 +1,354 @@
+diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+index c9e545c2d..592e6a10b 100644
+--- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
++++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+@@ -1655,6 +1655,73 @@ os04c10_cam1_ep: endpoint {
+ 			};
+ 		};
+ 	};
++
++	cam1_leds: led-controller@64 {
++		compatible = "issi,is31fl3199";
++		reg = <0x64>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		led@1 {
++			reg = <1>;
++			label = "asius:cam1:red:0";
++			led-max-microamp = <40000>;
++		};
++
++		led@2 {
++			reg = <2>;
++			label = "asius:cam1:green:0";
++			led-max-microamp = <40000>;
++		};
++
++		led@3 {
++			reg = <3>;
++			label = "asius:cam1:blue:0";
++			led-max-microamp = <40000>;
++			linux,default-trigger = "timer";
++			led-pattern = <500 500>;
++		};
++
++		led@4 {
++			reg = <4>;
++			label = "asius:cam1:red:1";
++			led-max-microamp = <40000>;
++		};
++
++		led@5 {
++			reg = <5>;
++			label = "asius:cam1:green:1";
++			led-max-microamp = <40000>;
++		};
++
++		led@6 {
++			reg = <6>;
++			label = "asius:cam1:blue:1";
++			led-max-microamp = <40000>;
++			linux,default-trigger = "timer";
++			led-pattern = <500 500>;
++		};
++
++		led@7 {
++			reg = <7>;
++			label = "asius:cam1:red:2";
++			led-max-microamp = <40000>;
++		};
++
++		led@8 {
++			reg = <8>;
++			label = "asius:cam1:green:2";
++			led-max-microamp = <40000>;
++		};
++
++		led@9 {
++			reg = <9>;
++			label = "asius:cam1:blue:2";
++			led-max-microamp = <40000>;
++			linux,default-trigger = "timer";
++			led-pattern = <500 500>;
++		};
++	};
+ };
+ 
+ &cci1 {
+@@ -1681,6 +1748,73 @@ os04c10_cam2_ep: endpoint {
+ 			};
+ 		};
+ 	};
++
++	cam2_leds: led-controller@64 {
++		compatible = "issi,is31fl3199";
++		reg = <0x64>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		led@1 {
++			reg = <1>;
++			label = "asius:cam2:red:0";
++			led-max-microamp = <40000>;
++		};
++
++		led@2 {
++			reg = <2>;
++			label = "asius:cam2:green:0";
++			led-max-microamp = <40000>;
++		};
++
++		led@3 {
++			reg = <3>;
++			label = "asius:cam2:blue:0";
++			led-max-microamp = <40000>;
++			linux,default-trigger = "timer";
++			led-pattern = <500 500>;
++		};
++
++		led@4 {
++			reg = <4>;
++			label = "asius:cam2:red:1";
++			led-max-microamp = <40000>;
++		};
++
++		led@5 {
++			reg = <5>;
++			label = "asius:cam2:green:1";
++			led-max-microamp = <40000>;
++		};
++
++		led@6 {
++			reg = <6>;
++			label = "asius:cam2:blue:1";
++			led-max-microamp = <40000>;
++			linux,default-trigger = "timer";
++			led-pattern = <500 500>;
++		};
++
++		led@7 {
++			reg = <7>;
++			label = "asius:cam2:red:2";
++			led-max-microamp = <40000>;
++		};
++
++		led@8 {
++			reg = <8>;
++			label = "asius:cam2:green:2";
++			led-max-microamp = <40000>;
++		};
++
++		led@9 {
++			reg = <9>;
++			label = "asius:cam2:blue:2";
++			led-max-microamp = <40000>;
++			linux,default-trigger = "timer";
++			led-pattern = <500 500>;
++		};
++	};
+ };
+ 
+ &cci1_i2c1 {
+@@ -1703,6 +1837,73 @@ os04c10_cam3_ep: endpoint {
+ 			};
+ 		};
+ 	};
++
++	cam3_leds: led-controller@64 {
++		compatible = "issi,is31fl3199";
++		reg = <0x64>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		led@1 {
++			reg = <1>;
++			label = "asius:cam3:red:0";
++			led-max-microamp = <40000>;
++		};
++
++		led@2 {
++			reg = <2>;
++			label = "asius:cam3:green:0";
++			led-max-microamp = <40000>;
++		};
++
++		led@3 {
++			reg = <3>;
++			label = "asius:cam3:blue:0";
++			led-max-microamp = <40000>;
++			linux,default-trigger = "timer";
++			led-pattern = <500 500>;
++		};
++
++		led@4 {
++			reg = <4>;
++			label = "asius:cam3:red:1";
++			led-max-microamp = <40000>;
++		};
++
++		led@5 {
++			reg = <5>;
++			label = "asius:cam3:green:1";
++			led-max-microamp = <40000>;
++		};
++
++		led@6 {
++			reg = <6>;
++			label = "asius:cam3:blue:1";
++			led-max-microamp = <40000>;
++			linux,default-trigger = "timer";
++			led-pattern = <500 500>;
++		};
++
++		led@7 {
++			reg = <7>;
++			label = "asius:cam3:red:2";
++			led-max-microamp = <40000>;
++		};
++
++		led@8 {
++			reg = <8>;
++			label = "asius:cam3:green:2";
++			led-max-microamp = <40000>;
++		};
++
++		led@9 {
++			reg = <9>;
++			label = "asius:cam3:blue:2";
++			led-max-microamp = <40000>;
++			linux,default-trigger = "timer";
++			led-pattern = <500 500>;
++		};
++	};
+ };
+ 
+ &tlmm {
+diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
+index 014d71056..d6c6eb348 100644
+--- a/drivers/firmware/efi/libstub/fdt.c
++++ b/drivers/firmware/efi/libstub/fdt.c
+@@ -100,6 +100,9 @@ static void asius_enable_panda_spi(void *fdt)
+ #define ASIUS_CAM1_PATH			ASIUS_CCI0_BUS0_PATH "/camera@36"
+ #define ASIUS_CAM2_PATH			ASIUS_CCI1_BUS0_PATH "/camera@36"
+ #define ASIUS_CAM3_PATH			ASIUS_CCI1_BUS1_PATH "/camera@36"
++#define ASIUS_CAM1_LEDS_PATH		ASIUS_CCI0_BUS0_PATH "/led-controller@64"
++#define ASIUS_CAM2_LEDS_PATH		ASIUS_CCI1_BUS0_PATH "/led-controller@64"
++#define ASIUS_CAM3_LEDS_PATH		ASIUS_CCI1_BUS1_PATH "/led-controller@64"
+ #define ASIUS_CAM1_PORT_PATH		ASIUS_CAM1_PATH "/port"
+ #define ASIUS_CAM2_PORT_PATH		ASIUS_CAM2_PATH "/port"
+ #define ASIUS_CAM3_PORT_PATH		ASIUS_CAM3_PATH "/port"
+@@ -256,6 +259,78 @@ static int asius_configure_cci_bus(void *fdt, const char *path)
+ 	       fdt_setprop_u32(fdt, bus, "#size-cells", 0);
+ }
+ 
++static int asius_configure_camera_leds(void *fdt, const char *path,
++				       int camera_number)
++{
++	const u32 blink_pattern[] = { 500, 500 };
++	char child_name[] = "led@1";
++	char label[sizeof("asius:cam1:green:0")];
++	int controller;
++	int child;
++	int status;
++	int i;
++
++	controller = fdt_path_offset(fdt, path);
++	if (controller < 0)
++		return controller;
++
++	status = fdt_setprop_string(fdt, controller, "compatible",
++				    "issi,is31fl3199") ?:
++		 fdt_setprop_u32(fdt, controller, "reg", 0x64) ?:
++		 fdt_setprop_u32(fdt, controller, "#address-cells", 1) ?:
++		 fdt_setprop_u32(fdt, controller, "#size-cells", 0);
++	if (status)
++		return status;
++
++	for (i = 0; i < 9; i++) {
++		child_name[4] = '1' + i;
++		child = asius_fdt_subnode(fdt, controller, child_name);
++		if (child < 0)
++			return child;
++
++		switch (i % 3) {
++		case 0:
++			snprintf(label, sizeof(label), "asius:cam%d:red:%d",
++				 camera_number, i / 3);
++			break;
++		case 1:
++			snprintf(label, sizeof(label), "asius:cam%d:green:%d",
++				 camera_number, i / 3);
++			break;
++		default:
++			snprintf(label, sizeof(label), "asius:cam%d:blue:%d",
++				 camera_number, i / 3);
++			break;
++		}
++
++		status = fdt_setprop_u32(fdt, child, "reg", i + 1) ?:
++			 fdt_setprop_string(fdt, child, "label", label) ?:
++			 fdt_setprop_u32(fdt, child, "led-max-microamp",
++					 40000);
++		if (status)
++			return status;
++
++		if ((i % 3) == 2) {
++			status = fdt_setprop_string(fdt, child,
++						   "linux,default-trigger",
++						   "timer") ?:
++				 asius_fdt_setprop_u32_array(fdt, child,
++							     "led-pattern",
++							     blink_pattern,
++							     ARRAY_SIZE(blink_pattern));
++		} else {
++			status = asius_fdt_delprop_optional(fdt, child,
++							    "linux,default-trigger") ?:
++				 asius_fdt_delprop_optional(fdt, child,
++							    "led-pattern");
++		}
++		if (status)
++			return status;
++	}
++
++	return 0;
++}
++
+ static int asius_configure_cam_mclk_pinctrl(void *fdt, const char *path,
+ 					    const char *pin, const char *bias)
+ {
+@@ -489,6 +564,24 @@ static void asius_enable_dragon_cameras(void *fdt)
+ 	if (status < 0)
+ 		goto fail;
+ 
++	status = asius_fdt_ensure_child(fdt, ASIUS_CCI0_BUS0_PATH,
++				       "led-controller@64",
++				       ASIUS_CAM1_LEDS_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_CCI1_BUS0_PATH,
++				       "led-controller@64",
++				       ASIUS_CAM2_LEDS_PATH);
++	if (status < 0)
++		goto fail;
++
++	status = asius_fdt_ensure_child(fdt, ASIUS_CCI1_BUS1_PATH,
++				       "led-controller@64",
++				       ASIUS_CAM3_LEDS_PATH);
++	if (status < 0)
++		goto fail;
++
+ 	status = asius_fdt_ensure_child(fdt, ASIUS_TLMM_PATH,
+ 				       "cam1-mclk-default-state",
+ 				       ASIUS_CAM1_MCLK_DEFAULT_PATH);
+@@ -546,6 +639,9 @@ static void asius_enable_dragon_cameras(void *fdt)
+ 		 asius_configure_cci_bus(fdt, ASIUS_CCI0_BUS0_PATH) ?:
+ 		 asius_configure_cci_bus(fdt, ASIUS_CCI1_BUS0_PATH) ?:
+ 		 asius_configure_cci_bus(fdt, ASIUS_CCI1_BUS1_PATH) ?:
++		 asius_configure_camera_leds(fdt, ASIUS_CAM1_LEDS_PATH, 1) ?:
++		 asius_configure_camera_leds(fdt, ASIUS_CAM2_LEDS_PATH, 2) ?:
++		 asius_configure_camera_leds(fdt, ASIUS_CAM3_LEDS_PATH, 3) ?:
+ 		 asius_configure_camss_port(fdt, 0, ASIUS_CAMSS_PORT0_PATH,
+ 					    ASIUS_CAMSS_PORT0_EP_PATH,
+ 					    &cam1_csi_phandle) ?:

@@ -1,10 +1,45 @@
 #!/bin/sh
-# Custom runit stage 1 for vamOS - verbose and handles missing kernel features
-
-# Enable verbose output for debugging
-set -x
+# Custom runit stage 1 for vamOS
 
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
+configure_asius_efi_boot() {
+    timeout_var="/sys/firmware/efi/efivars/BootAskTimeoutSecs-5f4065c9-d7bf-4555-b55d-820b3defd23a"
+    efi_state="$(efibootmgr -v 2>/dev/null || true)"
+    boot_entry="$(printf '%s\n' "$efi_state" |
+        sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\* vamOS.*/\1/p' | head -n 1)"
+
+    if ! printf '%s\n' "$efi_state" | grep -q '^Timeout: 0 seconds$'; then
+        efibootmgr -t 0 >/dev/null 2>&1 || echo "WARN: failed to set EFI boot timeout"
+    fi
+
+    if [ -z "$boot_entry" ]; then
+        efibootmgr -c -d /dev/nvme0n1 -p 1 -L vamOS \
+            -l '\EFI\BOOT\BOOTAA64.EFI' >/dev/null 2>&1 ||
+            echo "WARN: failed to create direct vamOS EFI boot entry"
+        efi_state="$(efibootmgr -v 2>/dev/null || true)"
+        boot_entry="$(printf '%s\n' "$efi_state" |
+            sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\* vamOS.*/\1/p' | head -n 1)"
+    fi
+
+    if [ -n "$boot_entry" ] &&
+        ! printf '%s\n' "$efi_state" | grep -q "^BootOrder: $boot_entry\$"; then
+        efibootmgr -o "$boot_entry" >/dev/null 2>&1 ||
+            echo "WARN: failed to select direct vamOS EFI boot entry"
+    fi
+
+    # Qualcomm treats zero as the five-second default. One is the minimum
+    # that preserves the F2/F5/F12 recovery window.
+    if [ -f "$timeout_var" ]; then
+        timeout="$(od -An -j 4 -N 4 -t u4 "$timeout_var" 2>/dev/null | tr -d ' ')"
+        if [ "$timeout" != "1" ]; then
+            chattr -i "$timeout_var" 2>/dev/null || true
+            printf '\007\000\000\000\001\000\000\000' > "$timeout_var" ||
+                echo "WARN: failed to set Qualcomm EFI boot prompt to one second"
+            chattr +i "$timeout_var" 2>/dev/null || true
+        fi
+    fi
+}
 
 echo "=> vamOS runit stage 1 starting"
 
@@ -23,7 +58,11 @@ if [ -d /sys/firmware/efi ]; then
     mkdir -p /sys/firmware/efi/efivars
     if mountpoint -q /sys/firmware/efi/efivars || mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null; then
         if command -v efibootmgr >/dev/null 2>&1; then
-            efibootmgr -t 0 >/dev/null 2>&1 || echo "WARN: failed to set EFI boot timeout"
+            if [ -f /ASIUS ]; then
+                configure_asius_efi_boot
+            else
+                efibootmgr -t 0 >/dev/null 2>&1 || echo "WARN: failed to set EFI boot timeout"
+            fi
         else
             echo "WARN: efibootmgr not installed"
         fi
@@ -65,13 +104,17 @@ fi
 # Mount /firmware early (before udev) so firmware is available when drivers load
 # The symlink /lib/firmware/updates -> /firmware/image requires /firmware to be mounted
 echo "=> Mounting /firmware early for driver firmware..."
-n=0
-while [ ! -b /dev/sde4 ] && [ $n -lt 50 ]; do
-    sleep 0.1
-    n=$((n + 1))
-done
+if [ ! -f /ASIUS ]; then
+    n=0
+    while [ ! -b /dev/sde4 ] && [ $n -lt 50 ]; do
+        sleep 0.1
+        n=$((n + 1))
+    done
+fi
 if [ -b /dev/sde4 ]; then
     mount -t vfat -o ro /dev/sde4 /firmware && echo "=> /firmware mounted" || echo "WARN: /firmware mount failed"
+elif [ -f /ASIUS ]; then
+    echo "=> No Dragon firmware partition; using built-in and rootfs firmware"
 else
     echo "WARN: /dev/sde4 not ready after 5s, will mount later"
 fi
@@ -86,9 +129,13 @@ if [ -x /usr/bin/udevd ]; then
     echo "=> udevd started, triggering events..."
     udevadm trigger --action=add --type=subsystems
     udevadm trigger --action=add --type=devices
-    echo "=> Waiting for udev to settle (timeout 30s)..."
-    udevadm settle --timeout=30 || echo "WARN: udevadm settle timed out"
-    echo "=> udev settle complete"
+    if [ -f /ASIUS ]; then
+        echo "=> Continuing while Dragon udev probes finish asynchronously"
+    else
+        echo "=> Waiting for udev to settle (timeout 30s)..."
+        udevadm settle --timeout=30 || echo "WARN: udevadm settle timed out"
+        echo "=> udev settle complete"
+    fi
 else
     echo "WARN: udevd not found at /usr/bin/udevd"
     ls -la /usr/bin/udev* 2>/dev/null || true
@@ -100,7 +147,7 @@ wait_for_dev() {
     dev="$1"
     timeout="${2:-60}"
     n=0
-    while [ ! -e "$dev" ] && [ $n -lt $timeout ]; do
+    while [ ! -e "$dev" ] && [ "$n" -lt "$timeout" ]; do
         sleep 1
         n=$((n + 1))
         [ $((n % 10)) -eq 0 ] && echo "=> Still waiting for $dev... (${n}s)"
