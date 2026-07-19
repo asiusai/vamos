@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Dragon Q6A system health check.
 
-Checks connectivity (NCM/wifi/bluetooth), openpilot processes, camera FPS,
-captures sample images, and runs model replay.
+Checks connectivity (NCM/wifi/bluetooth), openpilot processes, camera and
+livestream FPS, captures sample images, and runs model replay.
 
 Invoked from the host via:  dragon.py health
 """
@@ -13,9 +13,16 @@ import sys
 import time
 from pathlib import Path
 
-CAMERA_SERVICES = ('roadCameraState', 'wideRoadCameraState')
+CAMERA_SERVICES = ('roadCameraState', 'wideRoadCameraState', 'driverCameraState')
+LIVESTREAM_SERVICES = (
+    'livestreamRoadEncodeData',
+    'livestreamWideRoadEncodeData',
+    'livestreamDriverEncodeData',
+)
 EXPECTED_FRAME_INTERVAL_MS = 50.0
 FRAME_INTERVAL_TOLERANCE_MS = 1.0
+EXPECTED_STREAM_FPS = 15.0
+STREAM_FPS_TOLERANCE = 2.0
 SNAPSHOT_DIR = "/tmp/dragon_health"
 OPENPILOT_ROOT = os.environ.get("OPENPILOT_ROOT", "/data/openpilot")
 DEFAULT_OPENPILOT_ROOT = "/data/openpilot"
@@ -40,6 +47,21 @@ custom_manager_process = None
 custom_manager_log = None
 livestream_original = None
 livestream_changed = False
+
+
+def source_path(*parts):
+    root = Path(OPENPILOT_ROOT)
+    nested_root = root / "openpilot"
+    source_root = nested_root if (nested_root / "system" / "manager").is_dir() else root
+    return source_root.joinpath(*parts)
+
+
+def import_messaging():
+    try:
+        from openpilot.cereal import messaging
+    except ImportError:
+        from cereal import messaging
+    return messaging
 
 
 def section(title):
@@ -201,7 +223,7 @@ def check_processes():
     section("Openpilot Processes")
     results = {}
     try:
-        import cereal.messaging as messaging
+        messaging = import_messaging()
         sm = messaging.SubMaster(['managerState'])
         for _ in range(20):
             sm.update(200)
@@ -238,7 +260,7 @@ def check_processes():
 def measure_fps(duration=5):
     section(f"Camera FPS ({duration}s sample)")
     try:
-        import cereal.messaging as messaging
+        messaging = import_messaging()
         import numpy as np
     except ImportError:
         fail("cereal.messaging not available")
@@ -288,6 +310,55 @@ def measure_fps(duration=5):
     return fps_results
 
 
+def measure_streaming(duration=5):
+    section(f"Livestream Encoders ({duration}s sample)")
+    try:
+        messaging = import_messaging()
+    except ImportError:
+        fail("cereal.messaging not available")
+        return {}
+
+    socks = {service: messaging.sub_sock(service, conflate=False, timeout=100)
+             for service in LIVESTREAM_SERVICES}
+    time.sleep(0.2)
+    for sock in socks.values():
+        messaging.drain_sock(sock)
+
+    frames = {service: {} for service in LIVESTREAM_SERVICES}
+    start = time.monotonic()
+    while time.monotonic() - start < duration:
+        for service, sock in socks.items():
+            for msg in messaging.drain_sock(sock):
+                encoded = getattr(msg, service)
+                if len(encoded.data):
+                    frames[service][encoded.idx.frameId] = (
+                        msg.logMonoTime, encoded.width, encoded.height, len(encoded.data))
+        time.sleep(0.01)
+
+    results = {}
+    for service, service_frames in frames.items():
+        samples = sorted(service_frames.values())
+        if len(samples) < 2:
+            fail(f"{service:32s}  fewer than two encoded frames")
+            results[service] = {'fps': 0, 'frames': len(samples), 'ok': False}
+            continue
+
+        elapsed = (samples[-1][0] - samples[0][0]) / 1e9
+        fps = (len(samples) - 1) / elapsed if elapsed > 0 else 0
+        dimensions = {(sample[1], sample[2]) for sample in samples}
+        total_bytes = sum(sample[3] for sample in samples)
+        stream_ok = (
+            abs(fps - EXPECTED_STREAM_FPS) <= STREAM_FPS_TOLERANCE
+            and dimensions == {(1344, 760)}
+            and total_bytes > 0
+        )
+        results[service] = {'fps': fps, 'frames': len(samples), 'ok': stream_ok}
+        msg = (f"{service:32s}  {fps:.2f} fps, {len(samples)} frames, "
+               f"{total_bytes / 1024:.0f} KiB, dimensions={sorted(dimensions)}")
+        (ok if stream_ok else fail)(msg)
+    return results
+
+
 def image_has_color(img):
     if len(img.shape) != 3 or img.shape[2] < 3:
         return False
@@ -319,6 +390,7 @@ def capture_snapshots():
     streams = {
         'road': VisionStreamType.VISION_STREAM_ROAD,
         'wide_road': VisionStreamType.VISION_STREAM_WIDE_ROAD,
+        'driver': VisionStreamType.VISION_STREAM_DRIVER,
     }
     all_ok = True
     for name, stream_type in streams.items():
@@ -363,7 +435,10 @@ def max_thermal_c():
 def remove_partial_build_outputs(force=False):
     removed = []
     for relpath in GENERATED_NATIVE_OUTPUTS:
-        path = Path(OPENPILOT_ROOT) / relpath
+        if relpath.startswith(("msgq_repo/", "rednose_repo/")):
+            path = Path(OPENPILOT_ROOT) / relpath
+        else:
+            path = source_path(relpath)
         try:
             if not path.exists() or path.is_dir():
                 continue
@@ -382,21 +457,18 @@ def wait_for_replay_idle():
     run(["tmux", "kill-session", "-t", "openpilot"], timeout=5)
 
     process_pattern = "manager.py|launch_chffrplus|camerad|selfdrive\\.|dmonitoringmodeld|scons|system/manager/build.py"
-    interrupted_build = False
     for _ in range(20):
         code, out, _ = run(["bash", "-lc",
                             f"pgrep -af '{process_pattern}' | grep -v dragon_health.py | grep -v pgrep || true"],
                            timeout=5)
         if code == 0 and not out:
             break
-        interrupted_build = interrupted_build or "scons" in out or "system/manager/build.py" in out
         run(["bash", "-lc", f"pkill -TERM -f '{process_pattern}' || true"], timeout=5)
         time.sleep(0.5)
     else:
         run(["bash", "-lc", f"pkill -KILL -f '{process_pattern}' || true"], timeout=5)
-        interrupted_build = True
 
-    remove_partial_build_outputs(force=interrupted_build)
+    remove_partial_build_outputs()
 
     start = time.monotonic()
     last_print = 0.0
@@ -414,8 +486,7 @@ def wait_for_replay_idle():
 
 def run_model_replay():
     section("Model Replay")
-    replay_script = os.path.join(OPENPILOT_ROOT, "selfdrive", "test",
-                                 "process_replay", "model_replay.py")
+    replay_script = source_path("selfdrive", "test", "process_replay", "model_replay.py")
     if not os.path.isfile(replay_script):
         fail(f"model_replay.py not found at {replay_script}")
         return False
@@ -459,7 +530,7 @@ def run_model_replay():
         if repeats > 1:
             print(f"  model replay {i + 1}/{repeats}")
         try:
-            proc = subprocess.Popen([sys.executable, replay_script],
+            proc = subprocess.Popen([sys.executable, str(replay_script)],
                                     cwd=OPENPILOT_ROOT,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, env=env)
@@ -502,7 +573,7 @@ def build_openpilot_for_replay(env):
     if cache_config.exists() and cache_config.stat().st_size == 0:
         cache_config.unlink()
 
-    build_py = Path(OPENPILOT_ROOT) / "system/manager/build.py"
+    build_py = source_path("system", "manager", "build.py")
     if not build_py.exists():
         warn(f"build.py missing at {build_py}")
         return
@@ -535,7 +606,7 @@ def chunked_or_plain_file_exists(path):
 
 
 def missing_replay_model_artifacts():
-    models_dir = Path(OPENPILOT_ROOT) / "selfdrive/modeld/models"
+    models_dir = source_path("selfdrive", "modeld", "models")
     required = (
         "driving_tinygrad",
     )
@@ -579,12 +650,12 @@ def system_info():
         ok(f"Disk: {out.splitlines()[-1].strip()}")
 
 
-def wait_for_openpilot(timeout=1800):
+def wait_for_openpilot(timeout=300):
     section("Waiting for openpilot")
     if not start_openpilot():
         return False
     try:
-        import cereal.messaging as messaging
+        messaging = import_messaging()
     except ImportError:
         warn("cereal not importable, proceeding anyway")
         return True
@@ -628,6 +699,7 @@ def run_checks():
         'bluetooth':    check_bluetooth(),
         'processes':    check_processes(),
         'fps':          measure_fps(),
+        'streaming':    measure_streaming(),
         'snapshots':    capture_snapshots(),
         'model_replay': model_replay_ok,
     }
@@ -635,6 +707,8 @@ def run_checks():
     section("Summary")
     fps = results.get('fps', {})
     fps_ok = all(v['ok'] for v in fps.values()) if fps else False
+    streaming = results.get('streaming', {})
+    streaming_ok = all(v['ok'] for v in streaming.values()) if streaming else False
     checks = [
         ("NCM",          results['ncm']),
         ("WiFi",         results['wifi']),
@@ -643,6 +717,7 @@ def run_checks():
         ("Snapshots",    results['snapshots']),
         ("Model Replay", results['model_replay']),
         ("Camera FPS",   fps_ok),
+        ("Streaming",    streaming_ok),
     ]
 
     all_pass = True
