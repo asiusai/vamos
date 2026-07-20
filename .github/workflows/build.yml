@@ -64,44 +64,97 @@ jobs:
             build/rootfs-profile.md
           if-no-files-found: error
 
-      - name: download master baseline
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  release:
+    if: github.event_name == 'push'
+    needs: [build-kernel, build-system]
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: download boot.img
+        uses: actions/download-artifact@v4
+        with:
+          name: boot.img
+          path: build/
+
+      - name: download system.erofs.img
+        uses: actions/download-artifact@v4
+        with:
+          name: system.erofs.img
+          path: build/
+
+      - name: check deploy key
+        id: check-key
         run: |
-          mkdir -p baseline
-          RUN_ID=$(gh run list --workflow=build.yml --branch=master \
-            --status=success --limit=1 --json databaseId --jq '.[0].databaseId')
-          if [ -n "$RUN_ID" ]; then
-            gh run download "$RUN_ID" --name rootfs-profile --dir baseline/ || true
-          fi
-
-      - name: post PR comment
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Generate diff (gracefully handles missing baseline)
-          DIFF_MD=$(./vamos profile diff baseline/rootfs-profile.json build/rootfs-profile.json 2>/dev/null || echo "No baseline available")
-          PROFILE_MD=$(cat build/rootfs-profile.md)
-
-          # Assemble comment with hidden marker for find-and-update
-          printf -v COMMENT_BODY '%s\n%s\n\n%s\n%s\n\n---\n\n%s' \
-            '<!-- rootfs-profile-bot -->' \
-            '## vamOS System Profile' \
-            '### Changes vs master' \
-            "$DIFF_MD" \
-            "$PROFILE_MD"
-
-          # Find existing comment by marker
-          COMMENT_ID=$(gh api \
-            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            --jq '.[] | select(.body | contains("<!-- rootfs-profile-bot -->")) | .id' \
-            | head -1)
-
-          if [ -n "$COMMENT_ID" ]; then
-            gh api "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" \
-              -X PATCH -f body="$COMMENT_BODY"
+          if [ -n "${{ secrets.VAMOS_IMAGES_DEPLOY_KEY }}" ]; then
+            echo "has_key=true" >> $GITHUB_OUTPUT
           else
-            gh pr comment "${{ github.event.pull_request.number }}" --body "$COMMENT_BODY"
+            echo "has_key=false" >> $GITHUB_OUTPUT
+            echo "::warning::VAMOS_IMAGES_DEPLOY_KEY secret is not set — skipping image publish and release."
           fi
+
+      - name: generate manifest
+        if: steps.check-key.outputs.has_key == 'true'
+        run: |
+          VERSION=$(cat userspace/root/VERSION)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          IMAGES_URL="https://github.com/${{ github.repository_owner }}/vamos-images/raw/v${VERSION}"
+          IMAGES_URL=$IMAGES_URL python3 tools/build/package_ota.py
+
+      - name: push images to vamos-images
+        if: steps.check-key.outputs.has_key == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/vamos-images
+          ssh-key: ${{ secrets.VAMOS_IMAGES_DEPLOY_KEY }}
+          path: vamos-images
+
+      - name: commit and tag images
+        if: steps.check-key.outputs.has_key == 'true'
+        run: |
+          TAG="v${VERSION}"
+          cd vamos-images
+          git checkout --orphan release
+          cp ../build/ota/*.img* .
+          cp ../build/ota/manifest.json .
+          git add .
+          git -c user.name="github-actions" -c user.email="actions@github.com" \
+            commit -m "release images for $TAG"
+          git tag "$TAG"
+          git push origin "refs/tags/$TAG" --force
+
+      - name: create release
+        if: steps.check-key.outputs.has_key == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${VERSION}"
+
+          # Delete existing release if it exists
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          git tag -d "$TAG" 2>/dev/null || true
+          git push origin ":refs/tags/$TAG" 2>/dev/null || true
+
+          MANIFEST_URL="https://github.com/${{ github.repository_owner }}/vamos-images/raw/${TAG}/manifest.json"
+
+          # Create release linking to manifest
+          NOTES="Automated release from commit ${{ github.sha }}
+
+          Manifest: ${MANIFEST_URL}"
+          gh release create "$TAG" \
+            --title "vamOS $TAG" \
+            --target "${{ github.sha }}" \
+            --notes "$NOTES"
+
+      - name: post setup instructions
+        if: steps.check-key.outputs.has_key == 'false'
+        run: |
+          echo "::warning::VAMOS_IMAGES_DEPLOY_KEY is not configured. To enable image publishing:"
+          echo "::warning::1. Create a ${{ github.repository_owner }}/vamos-images repo"
+          echo "::warning::2. Generate an SSH deploy key: ssh-keygen -t ed25519 -f vamos-images-deploy-key -N \"\""
+          echo "::warning::3. Add the public key to ${{ github.repository_owner }}/vamos-images as a deploy key with write access"
+          echo "::warning::4. Add the private key as VAMOS_IMAGES_DEPLOY_KEY secret in ${{ github.repository }}"

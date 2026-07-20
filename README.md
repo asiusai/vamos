@@ -129,41 +129,40 @@ Example: `0001-defconfig-add-vamos.patch`
 comma threex:
 - [x] ufs
 - [x] display
-- [ ] i2c
-  - [ ] TODO: look at device tree
+- [x] i2c
 - [x] wifi
   - [ ] testing (set benchmarks, test case)
 - [x] usb
 - [x] modem
 - [ ] sound
-- [ ] SPI
+- [x] SPI
 - [ ] GPS
 - [ ] cameras (OX03C10)
   - [ ] kernel wiring
   - [ ] ISP
   - [ ] openpilot
-- [ ] graphics
-  - [ ] gpu
+- [x] graphics
+  - [x] gpu
 - [ ] opencl - via rusticl / msm_drm
 - [ ] Venus? (video encode/decode)
 
 comma four:
 - [x] ufs
 - [x] display
-- [ ] i2c (IMU/temp/...)
+- [x] i2c (IMU/temp/...)
 - [x] wifi
   - [ ] testing (set benchmarks, test case)
 - [x] usb
 - [x] modem
 - [ ] sound
-- [ ] SPI
-- [ ] GPS
+- [x] SPI
+- [x] GPS
 - [ ] cameras (OS04C10)
   - [ ] kernel wiring
   - [ ] ISP
   - [ ] openpilot
-- [ ] graphics
-  - [ ] gpu
+- [x] graphics
+  - [x] gpu
 - [ ] opencl - via rusticl / msm_drm
 - [ ] Venus (video encode/decode)
 

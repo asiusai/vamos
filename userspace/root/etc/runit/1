@@ -217,11 +217,7 @@ if [ ! -s /data/params/d/GithubSshKeys ] && [ -s /usr/comma/setup_keys ]; then
 fi
 
 echo "=> Setting hostname..."
-if [ -f /etc/hostname ]; then
-    hostname "$(cat /etc/hostname)"
-else
-    hostname comma
-fi
+/usr/comma/set-hostname.sh
 
 echo "=> Running core services..."
 for f in /etc/runit/core-services/*.sh; do
