@@ -391,12 +391,6 @@ def image_has_color(img):
     return channel_delta >= 2.0
 
 
-def boost_saturation(img, factor=4.0):
-    rgb = img.astype("float32")
-    luma = (0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2])[:, :, None]
-    return (luma + (rgb - luma) * factor).clip(0, 255).astype("uint8")
-
-
 def capture_snapshots_worker():
     try:
         from msgq.visionipc import VisionIpcClient, VisionStreamType
@@ -426,7 +420,7 @@ def capture_snapshots_worker():
                 fail(f"{name}: empty frame")
                 all_ok = False
                 continue
-            img = boost_saturation(extract_image(buf))
+            img = extract_image(buf)
             path = os.path.join(SNAPSHOT_DIR, f"{name}.jpg")
             jpeg_write(path, img)
             if image_has_color(img):
