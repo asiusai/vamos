@@ -29,9 +29,11 @@ case "${1:-}" in
     case "${2:-}" in
       kernel) exec "$DIR/tools/build/build_kernel.sh" ;;
       system) exec "$DIR/tools/build/build_system.sh" ;;
+      esp)    exec "$DIR/tools/build/build_esp.sh" ;;
+      ota)    "$DIR/tools/build/build_esp.sh" && exec python3 "$DIR/tools/build/package_ota.py" ;;
       disk)   exec "$DIR/tools/build/build_disk.sh" ;;
       all)    "$DIR/tools/build/build_kernel.sh" && "$DIR/tools/build/build_system.sh" && "$DIR/tools/build/build_disk.sh" ;;
-      *)      echo "Usage: vamos build <kernel|system|disk|all>"; exit 1 ;;
+      *)      echo "Usage: vamos build <kernel|system|esp|ota|disk|all>"; exit 1 ;;
     esac ;;
   flash)
     case "${2:-}" in
@@ -49,7 +51,9 @@ case "${1:-}" in
     echo "  setup              Initialize submodules and udev rules"
     echo "  build kernel       Build the kernel → build/Image + dtb"
     echo "  build system       Build the rootfs  → build/system.img (ext4)"
-    echo "  build disk         Assemble full disk image → build/dragon.img (GPT+ESP+rootfs)"
+    echo "  build esp          Build update/boot ESP → build/esp.img"
+    echo "  build ota          Package ESP + system → build/ota/vamos.json"
+    echo "  build disk         Assemble initial disk image → build/dragon.img"
     echo "  build all          Do all three in order"
     echo "  flash system       Flash build/dragon.img to Dragon NVMe via EDL"
     echo "  flash kernel       Flash just the ESP partition via EDL (fast iter)"

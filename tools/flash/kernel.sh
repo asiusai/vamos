@@ -33,14 +33,7 @@ if ! lsusb -d 05c6:9008 >/dev/null 2>&1; then
 fi
 
 echo "== Building ESP image =="
-rm -f "$ESP_IMG"
-truncate -s $(( 256 * 1024 * 1024 )) "$ESP_IMG"
-mkfs.vfat -F 32 -n VAMOS-ESP "$ESP_IMG" >/dev/null
-mmd -i "$ESP_IMG" ::/EFI
-mmd -i "$ESP_IMG" ::/EFI/BOOT
-mcopy -i "$ESP_IMG" "$KERNEL_IMAGE" ::/EFI/BOOT/BOOTAA64.EFI
-mcopy -i "$ESP_IMG" "$DTB_FILE" ::/qcs6490-radxa-dragon-q6a.dtb
-mcopy -i "$ESP_IMG" "$KERNEL_IMAGE" ::/Image
+"$DIR/tools/build/build_esp.sh"
 
 echo "== Flashing ESP (kernel + dtb) to Dragon =="
 sudo edl-ng --memory=nvme write-part esp "$ESP_IMG" --loader="$LOADER"
