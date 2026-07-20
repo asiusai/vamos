@@ -59,6 +59,11 @@ SSH_HOSTKEY_OPTS = [
     "-o", "GlobalKnownHostsFile=/dev/null",
     "-o", "LogLevel=ERROR",
 ]
+SSH_HEALTH_OPTS = [
+    "-o", "ConnectTimeout=5",
+    "-o", "ServerAliveInterval=3",
+    "-o", "ServerAliveCountMax=2",
+]
 SSH_OPTS = ["-i", SSH_KEY, *SSH_HOSTKEY_OPTS]
 
 F2 = b"\x1bOQ"
@@ -356,9 +361,9 @@ def cmd_uart(args):
 def cmd_health(args):
     target = args.target or f"comma@{NCM_IP}"
     openpilot_root = args.openpilot_root.rstrip("/") or "/"
-    ssh_opts = list(SSH_HOSTKEY_OPTS) if args.target else list(SSH_OPTS)
+    ssh_opts = [*(SSH_HOSTKEY_OPTS if args.target else SSH_OPTS), *SSH_HEALTH_OPTS]
     if args.identity:
-        ssh_opts = ["-i", os.path.expanduser(args.identity), *SSH_HOSTKEY_OPTS]
+        ssh_opts = ["-i", os.path.expanduser(args.identity), *SSH_HOSTKEY_OPTS, *SSH_HEALTH_OPTS]
     if not args.target:
         ensure_ncm()
     if not os.path.isfile(HEALTH_SCRIPT):
