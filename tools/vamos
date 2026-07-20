@@ -45,8 +45,11 @@ case "${1:-}" in
   profile)
     shift
     exec "$DIR/tools/profile/rootfs.sh" "$@" ;;
+  device-update)
+    shift
+    exec python3 "$DIR/tools/device_update.py" "$@" ;;
   *)
-    echo "Usage: vamos <setup|build|flash|profile>"
+    echo "Usage: vamos <setup|build|flash|profile|device-update>"
     echo ""
     echo "  setup              Initialize submodules and udev rules"
     echo "  build kernel       Build the kernel → build/Image + dtb"
@@ -59,5 +62,6 @@ case "${1:-}" in
     echo "  flash kernel       Flash just the ESP partition via EDL (fast iter)"
     echo "  flash all          Flash system + kernel in one EDL session"
     echo "  profile [diff]     Profile rootfs or diff two profiles"
+    echo "  device-update HOST Stage pushed openpilot 'one' on an SSH device"
     exit 1 ;;
 esac

@@ -16,6 +16,17 @@ a new operating system for comma 3X and comma four
 ./vamos flash system       # replace the complete NVMe image through EDL
 ./vamos flash all          # flash system and kernel
 ./vamos profile diff A B   # diff two rootfs profiles
+./vamos device-update comma@192.168.88.20
+```
+
+`device-update` validates that the local openpilot `one` branch is clean and
+pushed, rsyncs a small trigger helper to the target, signals openpilot's normal
+offroad updater, and waits for that exact commit to be finalized. It does not
+overwrite the running `/data/openpilot` tree. Add `--install` to request the
+reboot after staging:
+
+```bash
+./vamos device-update comma@192.168.88.20 --install
 ```
 
 ## Dragon OTA Updates
