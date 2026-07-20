@@ -138,6 +138,7 @@ def reconcile() -> None:
   active = current_slot()
   if is_trial_boot() and active == target:
     state["state"] = "booting"
+    state["phase"] = "booting"
     state["boot_attempts"] = int(state.get("boot_attempts", 0)) + 1
     state["boot_started_at"] = int(time.time())
     save_state(state, "trial-booted")
@@ -146,6 +147,7 @@ def reconcile() -> None:
   if active != target:
     rollback_boot(active, target)
     state["state"] = "rolled_back"
+    state["phase"] = "rolled_back"
     state["rolled_back_at"] = int(time.time())
     state["error"] = "trial slot did not commit before fallback boot"
     save_state(state, "rolled-back")
@@ -195,6 +197,8 @@ def commit() -> None:
     raise
   state.update({
     "state": "committed",
+    "phase": "committed",
+    "progress": 100,
     "committed_at": int(time.time()),
     "previous_slot": previous,
     "active_slot": active,
