@@ -33,10 +33,29 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       VAMOS_PUBLIC_URL: ${{ vars.VAMOS_PUBLIC_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out release source
+        uses: actions/checkout@v4
+        env:
+          GIT_LFS_SKIP_SMUDGE: "1"
         with:
-          lfs: true
           submodules: recursive
+
+      - name: Fetch Git LFS release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs install --local
+          for attempt in $(seq 1 12); do
+            if git lfs fetch origin "$GITHUB_SHA"; then
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+          git lfs checkout
+          git lfs fsck
 
       - name: Free runner disk space
         run: |
