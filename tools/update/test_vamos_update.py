@@ -113,6 +113,14 @@ class ManifestTest(unittest.TestCase):
           update.load_manifest("https://updates.example/vamos.json")
 
 
+class StateFileTest(unittest.TestCase):
+  def test_atomic_state_is_readable_by_device_services(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      state_file = Path(temporary) / "state.json"
+      update.atomic_write_json(state_file, {"state": "writing"})
+      self.assertEqual(state_file.stat().st_mode & 0o777, 0o644)
+
+
 class ImageWriteTest(unittest.TestCase):
   def test_write_and_verify_xz_image(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
