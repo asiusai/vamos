@@ -69,10 +69,7 @@ class DeviceUpdateTest(unittest.TestCase):
         mock.patch.object(device_update, "sync_payload") as sync,
         mock.patch.object(device_update, "install_remote") as install,
       ):
-        self.assertEqual(
-          device_update.main(["192.168.88.20", "--no-reboot"]),
-          0,
-        )
+        self.assertEqual(device_update.main(["192.168.88.20"]), 0)
 
       preflight.assert_called_once_with(
         "comma@192.168.88.20", [], device_update.DEFAULT_REMOTE_DIR
@@ -87,7 +84,6 @@ class DeviceUpdateTest(unittest.TestCase):
         "comma@192.168.88.20",
         [],
         device_update.DEFAULT_REMOTE_DIR,
-        reboot=False,
       )
 
   def test_install_uses_local_updater_without_version_gate(self):
@@ -96,22 +92,43 @@ class DeviceUpdateTest(unittest.TestCase):
         "comma@example",
         ["-o", "BatchMode=yes"],
         "/data/vamos-local",
-        reboot=True,
       )
 
-    remote.assert_called_once_with(
-      "comma@example",
-      ["-o", "BatchMode=yes"],
+    self.assertEqual(
+      remote.call_args_list,
       [
-        "sudo",
-        "-n",
-        "python3",
-        "/data/vamos-local/update.py",
-        "local",
-        "/data/vamos-local",
-        "--reboot",
+        mock.call(
+          "comma@example",
+          ["-o", "BatchMode=yes"],
+          [
+            "sudo",
+            "-n",
+            "python3",
+            "/data/vamos-local/update.py",
+            "local",
+            "/data/vamos-local",
+          ],
+        ),
+        mock.call(
+          "comma@example",
+          ["-o", "BatchMode=yes"],
+          ["sudo", "-n", "reboot"],
+        ),
       ],
     )
+
+  def test_install_accepts_expected_ssh_disconnect_during_reboot(self):
+    disconnect = device_update.subprocess.CalledProcessError(255, ["ssh"])
+    with mock.patch.object(
+      device_update,
+      "remote_command",
+      side_effect=[None, disconnect],
+    ):
+      device_update.install_remote(
+        "comma@example",
+        [],
+        "/data/vamos-local",
+      )
 
 
 if __name__ == "__main__":
