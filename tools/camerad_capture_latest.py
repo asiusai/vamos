@@ -546,7 +546,6 @@ def main() -> int:
   parser.add_argument("--settle", type=float, default=7.0, help="seconds to let AE settle before saving")
   parser.add_argument("--exposure-lines", type=int, default=600, help="initial OS04 exposure lines")
   parser.add_argument("--target-grey", type=float, default=0.0, help="OS04 AE target grey fraction; 0 uses camerad defaults")
-  parser.add_argument("--chroma-scale", type=float, default=2.05, help="legacy ignored option; One camerad no longer has a software debayer path on this branch")
   parser.add_argument("--enhance-preview", action="store_true", help="save tone-mapped preview JPEGs instead of unenhanced VisionIPC frames")
   parser.add_argument("--preview-saturation", type=float, default=1.00, help="JPEG preview saturation boost used with --enhance-preview")
   parser.add_argument("--preview-median", type=float, default=115.0, help="JPEG preview target median luma used with --enhance-preview")
