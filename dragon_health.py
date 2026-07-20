@@ -526,7 +526,7 @@ def wait_for_replay_idle():
             print(f"  Waiting for replay idle/cooldown: max thermal {temp:.0f}C")
             last_print = now
         time.sleep(3.0)
-    time.sleep(3.0)
+    time.sleep(15.0)
 
 
 def run_model_replay():

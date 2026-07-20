@@ -26,7 +26,8 @@ RUN apk add --no-cache \
     perl \
     python3 \
     util-linux-dev \
-    xz-dev
+    xz-dev \
+    zerofree
 
 RUN git lfs install --system
 

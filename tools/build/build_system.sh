@@ -179,7 +179,7 @@ if [ -n "$OP_SRC" ]; then
     git@github.com:*) OP_PULL_ORIGIN="https://github.com/${OP_PULL_ORIGIN#git@github.com:}" ;;
   esac
   OP_DATE=$(git -C "$OP_SRC" log -1 --format=%ci 2>/dev/null || echo "unknown")
-  OP_VERSION=$(cat "$OP_SRC/common/version.h" 2>/dev/null | grep COMMA_VERSION | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
+  OP_VERSION=$(cat "$OP_SRC/openpilot/common/version.h" 2>/dev/null | grep COMMA_VERSION | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
   OP_CLONE_BRANCH="$OP_BRANCH"
   if [ "$OP_CLONE_BRANCH" = "HEAD" ] || [ "$OP_CLONE_BRANCH" = "unknown" ]; then
     OP_CLONE_BRANCH="one"
@@ -242,11 +242,11 @@ BUILDJSON
     cat >> '$ROOTFS_DIR/data/openpilot/.git/info/exclude' <<'GITEXCLUDE'
 /build.json
 /scons_cache/
-/selfdrive/modeld/models/*_tinygrad.pkl
-/selfdrive/modeld/models/*_tinygrad.pkl.chunk*
-/selfdrive/modeld/models/*_metadata.pkl
-/selfdrive/modeld/models/*.prebuilt.pkl
-/selfdrive/modeld/models/tg_compiled_flags.json
+/openpilot/selfdrive/modeld/models/*_tinygrad.pkl
+/openpilot/selfdrive/modeld/models/*_tinygrad.pkl.chunk*
+/openpilot/selfdrive/modeld/models/*_metadata.pkl
+/openpilot/selfdrive/modeld/models/*.prebuilt.pkl
+/openpilot/selfdrive/modeld/models/tg_compiled_flags.json
 GITEXCLUDE
     cd '$ROOTFS_DIR/data/openpilot' && \
     rm -rf build scons_cache && \
@@ -254,7 +254,7 @@ GITEXCLUDE
     find . -name '*.o' -delete
     # Drop generated model artifacts from the copy so first launch builds them
     # on the Dragon instead of using files produced on this host.
-    find selfdrive/modeld/models -type f \( \
+    find openpilot/selfdrive/modeld/models -type f \( \
       -name '*_tinygrad.pkl' -o \
       -name '*_tinygrad.pkl.chunk*' -o \
       -name '*_metadata.pkl' -o \
@@ -297,6 +297,42 @@ CONT
   exec_as_root umount -l "$ROOTFS_DIR/dev" || true
   [ "$UV_STATUS" -eq 0 ] || exit "$UV_STATUS"
 
+  echo "Deduplicating identical openpilot LFS worktree files"
+  exec_as_root bash -c "
+    set -euo pipefail
+    repo='$ROOTFS_DIR/data/openpilot'
+    linked=0
+    linked_bytes=0
+    skipped=0
+
+    while read -r oid marker path; do
+      object=\"\$repo/.git/lfs/objects/\${oid:0:2}/\${oid:2:2}/\$oid\"
+      worktree=\"\$repo/\$path\"
+
+      [ -f \"\$object\" ] && [ -f \"\$worktree\" ]
+      cmp -s \"\$object\" \"\$worktree\"
+
+      # Hardlinks cannot retain different metadata. The tici updater is
+      # executable only in the worktree, so it intentionally stays separate.
+      if [ \"\$(stat -c '%a:%u:%g' \"\$object\")\" != \"\$(stat -c '%a:%u:%g' \"\$worktree\")\" ]; then
+        skipped=\$((skipped + 1))
+        continue
+      fi
+
+      if [ ! \"\$object\" -ef \"\$worktree\" ]; then
+        size=\$(stat -c %s \"\$object\")
+        ln -f -- \"\$object\" \"\$worktree\"
+        linked=\$((linked + 1))
+        linked_bytes=\$((linked_bytes + size))
+      fi
+    done < <(git -c safe.directory=\"\$repo\" -C \"\$repo\" lfs ls-files -l)
+
+    git -c safe.directory=\"\$repo\" -C \"\$repo\" lfs fsck
+    [ -z \"\$(git -c safe.directory=\"\$repo\" -C \"\$repo\" status --short --untracked-files=no)\" ]
+    printf 'Hardlinked %d LFS files (%d bytes); skipped %d metadata mismatches\n' \
+      \"\$linked\" \"\$linked_bytes\" \"\$skipped\"
+  "
+
 else
   echo "WARN: openpilot not found next to vamos; /data/openpilot will be empty on first boot"
 fi
@@ -317,13 +353,24 @@ if [ "${VAMOS_SKIP_EROFS:-0}" != "1" ]; then
     -C65536 \
     -T0 \
     --all-root \
+    --quiet \
     -x-1 \
     "$EROFS_IMAGE" "$ROOTFS_DIR"
 fi
 
 # Unmount image
 echo "Unmount filesystem"
-exec_as_root umount -l "$ROOTFS_DIR"
+exec_as_root sync
+exec_as_root umount "$ROOTFS_DIR"
+
+# Deleted and deduplicated data otherwise remains in free ext4 blocks and
+# bloats the compressed OTA payload.
+echo "Checking filesystem before zeroing"
+exec_as_root e2fsck -fp "$ROOTFS_IMAGE"
+echo "Zeroing free filesystem blocks"
+exec_as_root zerofree "$ROOTFS_IMAGE"
+echo "Checking filesystem after zeroing"
+exec_as_root e2fsck -fn "$ROOTFS_IMAGE"
 
 # Copy raw ext4 image to output. edl-ng write-sector takes raw bytes, not the
 # Android-sparse format qdl used to consume — so no img2simg step.
