@@ -26,6 +26,7 @@ RUN apk add --no-cache \
     perl \
     python3 \
     util-linux-dev \
+    util-linux-misc \
     xz-dev \
     zerofree
 

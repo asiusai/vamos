@@ -297,6 +297,9 @@ CONT
   exec_as_root umount -l "$ROOTFS_DIR/dev" || true
   [ "$UV_STATUS" -eq 0 ] || exit "$UV_STATUS"
 
+  echo "Deduplicating immutable Python environment files"
+  exec_as_root hardlink -X -s 4096 "$ROOTFS_DIR/usr/local/venv"
+
   echo "Deduplicating identical openpilot LFS worktree files"
   exec_as_root bash -c "
     set -euo pipefail
