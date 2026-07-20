@@ -26,6 +26,7 @@ STREAM_FPS_TOLERANCE = 2.0
 SNAPSHOT_DIR = "/tmp/dragon_health"
 OPENPILOT_ROOT = os.environ.get("OPENPILOT_ROOT", "/data/openpilot")
 DEFAULT_OPENPILOT_ROOT = "/data/openpilot"
+PARAMS_DIR = Path(os.environ.get("PARAMS_DIR", "/data/params/d"))
 OPENPILOT_PYTHON_PATHS = [
     OPENPILOT_ROOT,
     *(str(Path(OPENPILOT_ROOT) / submodule) for submodule in (
@@ -97,16 +98,23 @@ def uses_system_openpilot_service():
     return os.path.realpath(OPENPILOT_ROOT) == os.path.realpath(DEFAULT_OPENPILOT_ROOT)
 
 
+def write_param(name, value):
+    path = PARAMS_DIR / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{name}.{os.getpid()}.tmp")
+    temporary.write_bytes(value)
+    os.replace(temporary, path)
+
+
 def enable_health_cameras():
     global livestream_original, livestream_changed
 
     try:
-        from openpilot.common.params import Params
-        params = Params()
+        path = PARAMS_DIR / "IsLiveStreaming"
         if not livestream_changed:
-            livestream_original = params.get("IsLiveStreaming")
+            livestream_original = path.read_bytes() if path.exists() else None
             livestream_changed = True
-        params.put_bool("IsLiveStreaming", True)
+        write_param("IsLiveStreaming", b"1")
         return True
     except Exception as e:
         fail(f"Could not enable cameras for health check: {e}")
@@ -168,12 +176,10 @@ def restore_system_openpilot():
 
     if livestream_changed:
         try:
-            from openpilot.common.params import Params
-            params = Params()
             if livestream_original is None:
-                params.remove("IsLiveStreaming")
+                (PARAMS_DIR / "IsLiveStreaming").unlink(missing_ok=True)
             else:
-                params.put("IsLiveStreaming", livestream_original)
+                write_param("IsLiveStreaming", livestream_original)
         except Exception as e:
             warn(f"Could not restore IsLiveStreaming: {e}")
         livestream_changed = False
