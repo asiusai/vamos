@@ -1,7 +1,0 @@
-#!/bin/sh
-# One-shot service - run once then sleep forever
-set -e
-
-sysctl kernel.hostname="asius-one"
-
-exec sleep infinity

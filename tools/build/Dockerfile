@@ -80,21 +80,13 @@ RUN chown -R comma:comma /home/comma
 RUN printf '\nif [ -f ~/.bash_aliases ]; then\n    . ~/.bash_aliases\nfi\n' >> /home/$USERNAME/.bashrc
 RUN mkdir -p /root/.config
 
-# Enable runit services (Dragon vamOS baseline)
-# Minimal: boot + ssh + serial + basic logging. Comma-era services
-# (gpio, lte, modemmanager,
-# adsp/cdsp, rmtfs, sound, ipa_fws, varwatch,
-# fs_setup, openpilot, leprop, irsc_util, qrtr-ns/tqftpserv/pd-mapper,
-# cnss_daemon, ssh-param-watcher, ncm-param-watcher, avahi-ssh-publish,
-# set-hostname, bluetoothd, dnsmasq, polkitd) are NOT enabled — they
-# assume comma hardware and spam the console with errors on Dragon.
-# Re-enable as Dragon support for those subsystems lands.
+# Enable the minimal Dragon services. Comma hardware services for its screen,
+# modem, DSPs, GPIO, and power monitoring remain disabled.
 RUN for svc in \
   sshd rsyslogd busybox-ntpd iptables \
   tailscaled \
   keygen \
   bluetoothd \
-  set-hostname \
   openpilot init-qcom \
   agetty-ttyMSM0 agetty-ttyAMA0; do \
     ln -sf /etc/sv/$svc /etc/runit/runsvdir/default/; \
