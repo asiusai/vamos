@@ -551,7 +551,6 @@ def main() -> int:
   parser.add_argument("--preview-saturation", type=float, default=1.00, help="JPEG preview saturation boost used with --enhance-preview")
   parser.add_argument("--preview-median", type=float, default=115.0, help="JPEG preview target median luma used with --enhance-preview")
   parser.add_argument("--pix-ioctl", action="store_true", help="use the experimental liberation-day-style VFE userspace ioctl path")
-  parser.add_argument("--rdi", action="store_true", help="legacy unsupported option; use tools/camss_rdi_probe.c for raw RDI probing")
   parser.add_argument("--raw-debug", action="store_true", help="save unenhanced NV12-derived JPEGs and JSON stats beside the normal preview JPEG")
   parser.add_argument("--monitor-duration", type=float, default=5.0, help="seconds to keep camerad running before the one-shot JPEG capture")
   parser.add_argument("--camerad-debug-frames", action="store_true", help="make camerad print one log line per dequeued frame")
@@ -573,8 +572,6 @@ def main() -> int:
   parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="extra remote camerad environment variable")
   args = parser.parse_args()
 
-  if args.rdi:
-    parser.error("--rdi was removed from One camerad on the hardware VFE branch; use tools/camss_rdi_probe.c for raw RDI probing")
   if args.pull_timeout <= 0.0:
     parser.error("--pull-timeout must be positive")
 
