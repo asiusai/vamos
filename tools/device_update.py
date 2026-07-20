@@ -162,20 +162,6 @@ def prepare_payload(build_dir: Path) -> Payload:
   return Payload(version, version_file, updater, tuple(prepared))
 
 
-def build_images(build_kernel: bool) -> None:
-  scripts: list[Path] = []
-  if build_kernel:
-    scripts.append(VAMOS_ROOT / "tools/build/build_kernel.sh")
-  scripts.extend(
-    (
-      VAMOS_ROOT / "tools/build/build_system.sh",
-      VAMOS_ROOT / "tools/build/build_esp.sh",
-    )
-  )
-  for script in scripts:
-    subprocess.run([str(script)], cwd=VAMOS_ROOT, check=True)
-
-
 def remote_command(
   target: str, options: list[str], command: list[str], *, capture: bool = False
 ) -> str:
@@ -248,21 +234,26 @@ def install_remote(
   target: str,
   options: list[str],
   remote_dir: str,
-  *,
-  reboot: bool,
 ) -> None:
-  command = [
-    "sudo",
-    "-n",
-    "python3",
-    f"{remote_dir}/update.py",
-    "local",
-    remote_dir,
-  ]
-  if reboot:
-    command.append("--reboot")
   print("[device-update] writing and verifying the inactive vamOS slot", flush=True)
-  remote_command(target, options, command)
+  remote_command(
+    target,
+    options,
+    [
+      "sudo",
+      "-n",
+      "python3",
+      f"{remote_dir}/update.py",
+      "local",
+      remote_dir,
+    ],
+  )
+  print("[device-update] rebooting into the trial slot", flush=True)
+  try:
+    remote_command(target, options, ["sudo", "-n", "reboot"])
+  except subprocess.CalledProcessError as error:
+    if error.returncode != 255:
+      raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -277,29 +268,12 @@ def main(argv: list[str] | None = None) -> int:
     type=Path,
     default=Path(os.environ.get("DRAGON_SSH_KEY", "~/.ssh/comma_setup")).expanduser(),
   )
-  parser.add_argument(
-    "--build",
-    action="store_true",
-    help="build system.img and esp.img before deploying",
-  )
-  parser.add_argument(
-    "--build-kernel",
-    action="store_true",
-    help="also rebuild the kernel; implies --build",
-  )
-  parser.add_argument(
-    "--no-reboot",
-    action="store_true",
-    help="arm the trial slot but leave rebooting to the user",
-  )
   args = parser.parse_args(argv)
 
   try:
     target = normalize_target(args.target)
     options = ssh_options(args.identity)
     build_dir = args.build_dir.expanduser().resolve()
-    if args.build or args.build_kernel:
-      build_images(args.build_kernel)
 
     payload = prepare_payload(build_dir)
     compressed_size = sum(image.compressed.stat().st_size for image in payload.images)
@@ -309,16 +283,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     preflight_remote(target, options, args.remote_dir)
     sync_payload(payload, target, options, args.remote_dir)
-    install_remote(
-      target,
-      options,
-      args.remote_dir,
-      reboot=not args.no_reboot,
-    )
-    if args.no_reboot:
-      print("[device-update] trial slot is ready; reboot the device to test it")
-    else:
-      print("[device-update] reboot requested; the device will trial the new slot")
+    install_remote(target, options, args.remote_dir)
+    print("[device-update] reboot requested; the device will trial the new slot")
     return 0
   except (
     DeviceUpdateError,

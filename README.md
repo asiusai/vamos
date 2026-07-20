@@ -25,18 +25,13 @@ inactive vamOS A/B slot. It does not use GitHub, R2, an openpilot branch, or the
 `VAMOS_VERSION` update gate. The image's existing `/VERSION` is used only for
 post-write verification, so rebuilding and reinstalling the same version works.
 
-The device reboots into a one-shot trial of the new slot by default:
+Build the images separately, then deploy them. The device reboots into a
+one-shot trial of the new slot:
 
 ```bash
+./vamos build system
+./vamos build esp
 ./vamos device-update comma@192.168.88.20
-```
-
-Build the system and ESP first in the same command, or leave the verified trial
-slot ready without rebooting:
-
-```bash
-./vamos device-update comma@192.168.88.20 --build
-./vamos device-update comma@192.168.88.20 --no-reboot
 ```
 
 ## Dragon OTA Updates
