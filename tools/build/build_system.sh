@@ -152,7 +152,7 @@ if [ -n "$KVER" ]; then
     exec_as_root sh -c "touch '$ROOTFS_DIR/lib/modules/$KVER/modules.order' '$ROOTFS_DIR/lib/modules/$KVER/modules.builtin' '$ROOTFS_DIR/lib/modules/$KVER/modules.builtin.modinfo'"
   fi
   exec_as_root mkdir -p "$ROOTFS_DIR/lib/modules/$KVER/extra"
-  for ko in aic_load_fw.ko aic8800_fdrv.ko aic_btusb.ko camera_overlay.ko; do
+  for ko in aic_load_fw.ko aic8800_fdrv.ko aic_btusb.ko; do
     if [ -f "$DIR/kernel/modules/$ko" ]; then
       exec_as_root cp "$DIR/kernel/modules/$ko" "$ROOTFS_DIR/lib/modules/$KVER/extra/"
     fi
