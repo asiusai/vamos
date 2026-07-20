@@ -160,115 +160,28 @@ if [ -n "$KVER" ]; then
   exec_as_root depmod -b "$ROOTFS_DIR" -a "$KVER" 2>/dev/null || true
 fi
 
-# Copy openpilot into /data/openpilot so first boot works offline.
-# Path resolution: vamos may be a submodule; the outer asius repo contains
-# openpilot/ alongside vamos/. Fall back to not baking if not found.
+# Use the sibling openpilot checkout to refresh the system Python environment.
+# /data is a separate userdata partition at runtime, so files baked below that
+# mount point would be hidden and only waste image space.
 OP_SRC=""
 for cand in "$DIR/../openpilot" "$(git -C "$DIR" rev-parse --show-superproject-working-tree 2>/dev/null)/openpilot"; do
   [ -d "$cand" ] && OP_SRC="$(cd "$cand" && pwd)" && break
 done
 if [ -n "$OP_SRC" ]; then
-  echo "Copying openpilot from $OP_SRC into /data/openpilot"
-
-  # Generate build.json from git metadata. No openpilot build runs in this script.
-  OP_COMMIT=$(git -C "$OP_SRC" rev-parse HEAD 2>/dev/null || echo "unknown")
-  OP_BRANCH=$(git -C "$OP_SRC" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-  OP_ORIGIN=$(git -C "$OP_SRC" remote get-url origin 2>/dev/null || echo "unknown")
-  OP_PULL_ORIGIN="$OP_ORIGIN"
-  case "$OP_PULL_ORIGIN" in
-    git@github.com:*) OP_PULL_ORIGIN="https://github.com/${OP_PULL_ORIGIN#git@github.com:}" ;;
-  esac
-  OP_DATE=$(git -C "$OP_SRC" log -1 --format=%ci 2>/dev/null || echo "unknown")
-  OP_VERSION=$(cat "$OP_SRC/openpilot/common/version.h" 2>/dev/null | grep COMMA_VERSION | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
-  OP_CLONE_BRANCH="$OP_BRANCH"
-  if [ "$OP_CLONE_BRANCH" = "HEAD" ] || [ "$OP_CLONE_BRANCH" = "unknown" ]; then
-    OP_CLONE_BRANCH="one"
-  fi
-
-  # All fs ops run inside the builder container — ROOTFS_DIR only exists there
-  exec_as_root rm -rf "$ROOTFS_DIR/data/openpilot"
-  exec_as_root mkdir -p "$ROOTFS_DIR/data"
-  exec_as_root git \
-    -c safe.directory="$OP_SRC" \
-    -c protocol.file.allow=always \
-    clone --depth 1 --single-branch --branch "$OP_CLONE_BRANCH" \
-    "file://$OP_SRC" "$ROOTFS_DIR/data/openpilot"
-  exec_as_root git -C "$ROOTFS_DIR/data/openpilot" remote set-url origin "$OP_PULL_ORIGIN"
-  exec_as_root git -C "$ROOTFS_DIR/data/openpilot" config branch.one.remote origin
-  exec_as_root git -C "$ROOTFS_DIR/data/openpilot" config branch.one.merge refs/heads/one
-  exec_as_root git -C "$ROOTFS_DIR/data/openpilot" submodule init
-
-  for spec in \
-    msgq_repo:msgq \
-    opendbc_repo:opendbc \
-    panda:panda \
-    rednose_repo:rednose_repo \
-    teleoprtc_repo:teleoprtc_repo \
-    tinygrad_repo:tinygrad
-  do
-    sub_path=${spec%%:*}
-    sub_name=${spec#*:}
+  echo "Staging tracked openpilot sources from $OP_SRC"
+  exec_as_root mkdir -p "$ROOTFS_DIR/data/openpilot"
+  GIT_LFS_SKIP_SMUDGE=1 git -C "$OP_SRC" archive HEAD |
+    docker exec -i "$MOUNT_CONTAINER_ID" tar -xf - -C "$ROOTFS_DIR/data/openpilot"
+  while read -r sub_path; do
     sub_src="$OP_SRC/$sub_path"
-    sub_git_dir=$(git -C "$sub_src" rev-parse --absolute-git-dir 2>/dev/null || true)
-    [ -d "$sub_src" ] || continue
-
-    exec_as_root rm -rf "$ROOTFS_DIR/data/openpilot/$sub_path"
-    exec_as_root cp -a "$sub_src" "$ROOTFS_DIR/data/openpilot/$sub_path"
-    if [ -n "$sub_git_dir" ] && [ -d "$sub_git_dir" ]; then
-      exec_as_root mkdir -p "$ROOTFS_DIR/data/openpilot/.git/modules"
-      exec_as_root rm -rf "$ROOTFS_DIR/data/openpilot/.git/modules/$sub_name"
-      exec_as_root cp -a "$sub_git_dir" "$ROOTFS_DIR/data/openpilot/.git/modules/$sub_name"
-      exec_as_root sh -c "
-        printf 'gitdir: ../.git/modules/%s\n' '$sub_name' > '$ROOTFS_DIR/data/openpilot/$sub_path/.git'
-        git config --file '$ROOTFS_DIR/data/openpilot/.git/modules/$sub_name/config' core.worktree '../../../$sub_path'
-      "
-    fi
-  done
-
-  exec_as_root sh -c "
-    cat > '$ROOTFS_DIR/data/openpilot/build.json' <<BUILDJSON
-{
-  \"channel\": \"$OP_BRANCH\",
-  \"openpilot\": {
-    \"version\": \"$OP_VERSION\",
-    \"release_notes\": \"\",
-    \"git_commit\": \"$OP_COMMIT\",
-    \"git_origin\": \"$OP_PULL_ORIGIN\",
-    \"git_commit_date\": \"$OP_DATE\",
-    \"build_style\": \"source\"
-  }
-}
-BUILDJSON
-    cat >> '$ROOTFS_DIR/data/openpilot/.git/info/exclude' <<'GITEXCLUDE'
-/build.json
-/scons_cache/
-/openpilot/selfdrive/modeld/models/*_tinygrad.pkl
-/openpilot/selfdrive/modeld/models/*_tinygrad.pkl.chunk*
-/openpilot/selfdrive/modeld/models/*_metadata.pkl
-/openpilot/selfdrive/modeld/models/*.prebuilt.pkl
-/openpilot/selfdrive/modeld/models/tg_compiled_flags.json
-GITEXCLUDE
-    cd '$ROOTFS_DIR/data/openpilot' && \
-    rm -rf build scons_cache && \
-    find . -name __pycache__ -type d -prune -exec rm -rf {} + ; \
-    find . -name '*.o' -delete
-    # Drop generated model artifacts from the copy so first launch builds them
-    # on the Dragon instead of using files produced on this host.
-    find openpilot/selfdrive/modeld/models -type f \( \
-      -name '*_tinygrad.pkl' -o \
-      -name '*_tinygrad.pkl.chunk*' -o \
-      -name '*_metadata.pkl' -o \
-      -name '*.prebuilt.pkl' -o \
-      -name 'tg_compiled_flags.json' \
-    \) -delete
-    cat > '$ROOTFS_DIR/data/continue.sh' <<'CONT'
-#!/usr/bin/env bash
-cd /data/openpilot
-exec /data/openpilot/launch_openpilot.sh
-CONT
-    chmod +x '$ROOTFS_DIR/data/continue.sh'
-    chown -R 1000:1000 '$ROOTFS_DIR/data/openpilot' '$ROOTFS_DIR/data/continue.sh'
-  "
+    [ -d "$sub_src" ] || {
+      echo "Missing openpilot submodule checkout: $sub_path"
+      exit 1
+    }
+    exec_as_root mkdir -p "$ROOTFS_DIR/data/openpilot/$sub_path"
+    GIT_LFS_SKIP_SMUDGE=1 git -C "$sub_src" archive HEAD |
+      docker exec -i "$MOUNT_CONTAINER_ID" tar -xf - -C "$ROOTFS_DIR/data/openpilot/$sub_path"
+  done < <(git -C "$OP_SRC" config --file .gitmodules --get-regexp path | awk '{print $2}')
 
   echo "Installing openpilot Python dependencies"
   exec_as_root mkdir -p "$ROOTFS_DIR/dev" "$ROOTFS_DIR/proc" "$ROOTFS_DIR/sys" "$ROOTFS_DIR/run"
@@ -295,49 +208,13 @@ CONT
   exec_as_root umount -l "$ROOTFS_DIR/sys" || true
   exec_as_root umount -l "$ROOTFS_DIR/proc" || true
   exec_as_root umount -l "$ROOTFS_DIR/dev" || true
+  exec_as_root rm -rf "$ROOTFS_DIR/data/openpilot"
   [ "$UV_STATUS" -eq 0 ] || exit "$UV_STATUS"
 
   echo "Deduplicating immutable Python environment files"
   exec_as_root hardlink -X -s 4096 "$ROOTFS_DIR/usr/local/venv"
-
-  echo "Deduplicating identical openpilot LFS worktree files"
-  exec_as_root bash -c "
-    set -euo pipefail
-    repo='$ROOTFS_DIR/data/openpilot'
-    linked=0
-    linked_bytes=0
-    skipped=0
-
-    while read -r oid marker path; do
-      object=\"\$repo/.git/lfs/objects/\${oid:0:2}/\${oid:2:2}/\$oid\"
-      worktree=\"\$repo/\$path\"
-
-      [ -f \"\$object\" ] && [ -f \"\$worktree\" ]
-      cmp -s \"\$object\" \"\$worktree\"
-
-      # Hardlinks cannot retain different metadata. The tici updater is
-      # executable only in the worktree, so it intentionally stays separate.
-      if [ \"\$(stat -c '%a:%u:%g' \"\$object\")\" != \"\$(stat -c '%a:%u:%g' \"\$worktree\")\" ]; then
-        skipped=\$((skipped + 1))
-        continue
-      fi
-
-      if [ ! \"\$object\" -ef \"\$worktree\" ]; then
-        size=\$(stat -c %s \"\$object\")
-        ln -f -- \"\$object\" \"\$worktree\"
-        linked=\$((linked + 1))
-        linked_bytes=\$((linked_bytes + size))
-      fi
-    done < <(git -c safe.directory=\"\$repo\" -C \"\$repo\" lfs ls-files -l)
-
-    git -c safe.directory=\"\$repo\" -C \"\$repo\" lfs fsck
-    [ -z \"\$(git -c safe.directory=\"\$repo\" -C \"\$repo\" status --short --untracked-files=no)\" ]
-    printf 'Hardlinked %d LFS files (%d bytes); skipped %d metadata mismatches\n' \
-      \"\$linked\" \"\$linked_bytes\" \"\$skipped\"
-  "
-
 else
-  echo "WARN: openpilot not found next to vamos; /data/openpilot will be empty on first boot"
+  echo "WARN: openpilot not found next to vamos; Python dependencies may be stale"
 fi
 
 # Profile rootfs (before unmount)
