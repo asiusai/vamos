@@ -307,17 +307,19 @@ MOUNT_CONTAINER_ID="$MOUNT_CONTAINER_ID" ROOTFS_DIR="$ROOTFS_DIR" \
   ROOTFS_IMAGE="$ROOTFS_IMAGE" OUTPUT_DIR="$OUTPUT_DIR" \
   "$DIR/vamos" profile
 
-# Build EROFS image (before unmount, while rootfs is still mounted)
 EROFS_IMAGE="$BUILD_DIR/system.erofs.img"
 OUT_EROFS_IMAGE="$OUTPUT_DIR/system.erofs.img"
-echo "Building EROFS image (LZ4HC, 64K clusters)"
-exec_as_root mkfs.erofs \
-  -zlz4hc,12 \
-  -C65536 \
-  -T0 \
-  --all-root \
-  -x-1 \
-  "$EROFS_IMAGE" "$ROOTFS_DIR"
+if [ "${VAMOS_SKIP_EROFS:-0}" != "1" ]; then
+  # Build EROFS before unmount while the rootfs is still mounted.
+  echo "Building EROFS image (LZ4HC, 64K clusters)"
+  exec_as_root mkfs.erofs \
+    -zlz4hc,12 \
+    -C65536 \
+    -T0 \
+    --all-root \
+    -x-1 \
+    "$EROFS_IMAGE" "$ROOTFS_DIR"
+fi
 
 # Unmount image
 echo "Unmount filesystem"
@@ -328,8 +330,9 @@ exec_as_root umount -l "$ROOTFS_DIR"
 echo "Copying system image to output"
 exec_as_user cp "$ROOTFS_IMAGE" "$OUT_IMAGE"
 
-# Copy EROFS image to output
-cp "$EROFS_IMAGE" "$OUT_EROFS_IMAGE"
+if [ "${VAMOS_SKIP_EROFS:-0}" != "1" ]; then
+  cp "$EROFS_IMAGE" "$OUT_EROFS_IMAGE"
+fi
 
 # Patch sparse image size into profile JSON
 SPARSE_SIZE=$(stat -c%s "$OUT_IMAGE" 2>/dev/null || stat -f%z "$OUT_IMAGE")
@@ -341,11 +344,13 @@ fi
 
 # Size comparison
 EXT4_SPARSE_SIZE=$(stat -c%s "$OUT_IMAGE" 2>/dev/null || stat -f%z "$OUT_IMAGE")
-EROFS_SIZE=$(stat -c%s "$OUT_EROFS_IMAGE" 2>/dev/null || stat -f%z "$OUT_EROFS_IMAGE")
 echo ""
-echo "=== Image size comparison ==="
+echo "=== Image size ==="
 echo "ext4 (sparse): $(numfmt --to=iec-i --suffix=B "$EXT4_SPARSE_SIZE") ($EXT4_SPARSE_SIZE bytes)"
-echo "EROFS (LZ4HC): $(numfmt --to=iec-i --suffix=B "$EROFS_SIZE") ($EROFS_SIZE bytes)"
+if [ "${VAMOS_SKIP_EROFS:-0}" != "1" ]; then
+  EROFS_SIZE=$(stat -c%s "$OUT_EROFS_IMAGE" 2>/dev/null || stat -f%z "$OUT_EROFS_IMAGE")
+  echo "EROFS (LZ4HC): $(numfmt --to=iec-i --suffix=B "$EROFS_SIZE") ($EROFS_SIZE bytes)"
+fi
 echo ""
 
 echo "Done!"

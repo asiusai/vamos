@@ -1,133 +1,104 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import hashlib
 import json
 import os
-import hashlib
-import shutil
+import subprocess
 from pathlib import Path
-from collections import namedtuple
-
-ROOT = Path(__file__).parent.parent.parent
-OUTPUT_DIR = ROOT / "build"
-FIRMWARE_DIR = ROOT / "firmware"
-OTA_OUTPUT_DIR = OUTPUT_DIR / "ota"
-
-SECTOR_SIZE = 4096
-CHUNK_SIZE = 52_428_800  # 50 MB - must be under raw.githubusercontent.com's 100 MB limit
-
-BASE_URL = os.environ.get("BASE_URL", "https://raw.githubusercontent.com/commaai/vamOS/release-images")
-
-GPT = namedtuple('GPT', ['lun', 'name', 'path', 'start_sector', 'num_sectors', 'has_ab', 'full_check'])
-GPTS = [
-  GPT(0, 'gpt_main_0', FIRMWARE_DIR / 'gpt_main_0.img', 0, 6, False, True),
-  GPT(1, 'gpt_main_1', FIRMWARE_DIR / 'gpt_main_1.img', 0, 6, False, True),
-  GPT(2, 'gpt_main_2', FIRMWARE_DIR / 'gpt_main_2.img', 0, 6, False, True),
-  GPT(3, 'gpt_main_3', FIRMWARE_DIR / 'gpt_main_3.img', 0, 6, False, True),
-  GPT(4, 'gpt_main_4', FIRMWARE_DIR / 'gpt_main_4.img', 0, 6, False, True),
-  GPT(5, 'gpt_main_5', FIRMWARE_DIR / 'gpt_main_5.img', 0, 6, False, True),
-]
-
-Partition = namedtuple('Partition', ['name', 'path', 'has_ab', 'full_check'])
-PARTITIONS = [
-  Partition('persist', FIRMWARE_DIR / 'persist.img', False, True),
-  Partition('systemrw', FIRMWARE_DIR / 'systemrw.img', False, True),
-  Partition('cache', FIRMWARE_DIR / 'cache.img', False, True),
-  Partition('xbl', FIRMWARE_DIR / 'xbl.img', True, True),
-  Partition('xbl_config', FIRMWARE_DIR / 'xbl_config.img', True, True),
-  Partition('abl', FIRMWARE_DIR / 'abl.img', True, True),
-  Partition('aop', FIRMWARE_DIR / 'aop.img', True, True),
-  Partition('bluetooth', FIRMWARE_DIR / 'bluetooth.img', True, True),
-  Partition('cmnlib64', FIRMWARE_DIR / 'cmnlib64.img', True, True),
-  Partition('cmnlib', FIRMWARE_DIR / 'cmnlib.img', True, True),
-  Partition('devcfg', FIRMWARE_DIR / 'devcfg.img', True, True),
-  Partition('devinfo', FIRMWARE_DIR / 'devinfo.img', False, True),
-  Partition('dsp', FIRMWARE_DIR / 'dsp.img', True, True),
-  Partition('hyp', FIRMWARE_DIR / 'hyp.img', True, True),
-  Partition('keymaster', FIRMWARE_DIR / 'keymaster.img', True, True),
-  Partition('limits', FIRMWARE_DIR / 'limits.img', False, True),
-  Partition('logfs', FIRMWARE_DIR / 'logfs.img', False, True),
-  Partition('modem', FIRMWARE_DIR / 'modem.img', True, True),
-  Partition('qupfw', FIRMWARE_DIR / 'qupfw.img', True, True),
-  Partition('splash', FIRMWARE_DIR / 'splash.img', False, True),
-  Partition('storsec', FIRMWARE_DIR / 'storsec.img', True, True),
-  Partition('tz', FIRMWARE_DIR / 'tz.img', True, True),
-  Partition('boot', OUTPUT_DIR / 'boot.img', True, True),
-  Partition('system', OUTPUT_DIR / 'system.erofs.img', True, False),
-]
 
 
-def file_checksum(fn):
-  sha256 = hashlib.sha256()
-  with open(fn, 'rb') as f:
-    for chunk in iter(lambda: f.read(4096), b""):
-      sha256.update(chunk)
-  return sha256
+ROOT = Path(__file__).resolve().parents[2]
+BUILD_DIR = ROOT / "build"
+OUTPUT_DIR = BUILD_DIR / "ota"
+PRODUCT = "radxa-dragon-q6a"
+MANIFEST_VERSION = 1
+UPDATER_VERSION = 1
+CHUNK_SIZE = 4 * 1024 * 1024
+IMAGE_SIZES = {
+  "esp": 256 * 1024 * 1024,
+  "system": 10 * 1024 * 1024 * 1024,
+}
 
 
-def process_file(entry):
-  size = entry.path.stat().st_size
-  print(f"\n{entry.name} {size} bytes")
+def sha256(path: Path) -> str:
+  digest = hashlib.sha256()
+  with path.open("rb", buffering=0) as source:
+    while chunk := source.read(CHUNK_SIZE):
+      digest.update(chunk)
+  return digest.hexdigest()
 
-  sha256 = file_checksum(entry.path)
-  hash = hash_raw = sha256.hexdigest()
 
-  # ondevice_hash: hash with zero-padding to sector boundary
-  sha256.update(b'\x00' * ((SECTOR_SIZE - (size % SECTOR_SIZE)) % SECTOR_SIZE))
-  ondevice_hash = sha256.hexdigest()
+def compress_image(source: Path, destination: Path) -> None:
+  temporary = destination.with_suffix(destination.suffix + ".tmp")
+  try:
+    with temporary.open("wb") as compressed:
+      subprocess.run(
+        ["xz", "-T0", "-1", "--check=crc64", "--stdout", str(source)],
+        check=True,
+        stdout=compressed,
+      )
+    os.replace(temporary, destination)
+  finally:
+    temporary.unlink(missing_ok=True)
 
-  base_name = f"{entry.name}-{hash_raw}.img"
 
-  # Write file(s) to output directory, splitting into chunks if needed
-  chunks = None
-  if size > CHUNK_SIZE:
-    chunks = []
-    chunk_idx = 0
-    with open(entry.path, 'rb') as f:
-      while True:
-        data = f.read(CHUNK_SIZE)
-        if not data:
-          break
-        chunk_name = f"{base_name}.{chunk_idx:02d}"
-        (OTA_OUTPUT_DIR / chunk_name).write_bytes(data)
-        chunks.append({"url": f"{BASE_URL}/{chunk_name}", "size": len(data)})
-        print(f"  chunk {chunk_idx}: {chunk_name} ({len(data)} bytes)")
-        chunk_idx += 1
+def package_image(name: str, source: Path, base_url: str) -> dict:
+  if not source.is_file():
+    raise FileNotFoundError(f"missing {source}; build it first")
+  if source.stat().st_size != IMAGE_SIZES[name]:
+    raise ValueError(f"{source} is {source.stat().st_size} bytes, expected {IMAGE_SIZES[name]}")
+  raw_hash = sha256(source)
+  filename = f"{name}-{raw_hash}.img.xz"
+  destination = OUTPUT_DIR / filename
+  if destination.is_file():
+    print(f"Reusing {destination.name}")
   else:
-    print(f"  copying to {base_name}")
-    shutil.copy(entry.path, OTA_OUTPUT_DIR / base_name)
-
-  ret = {
-    "name": entry.name,
-    "url": f"{BASE_URL}/{base_name}",
-    "hash": hash,
-    "hash_raw": hash_raw,
-    "size": size,
-    "sparse": False,
-    "full_check": entry.full_check,
-    "has_ab": entry.has_ab,
-    "ondevice_hash": ondevice_hash,
+    print(f"Compressing {source.name} -> {destination.name}")
+    compress_image(source, destination)
+  return {
+    "name": name,
+    "url": f"{base_url.rstrip('/')}/{filename}",
+    "size": source.stat().st_size,
+    "hash": raw_hash,
+    "sha256": raw_hash,
+    "compression": "xz",
+    "compressed_size": destination.stat().st_size,
+    "compressed_sha256": sha256(destination),
   }
 
-  if chunks:
-    ret["url"] = ""
-    ret["chunks"] = chunks
 
-  if isinstance(entry, GPT):
-    ret["gpt"] = {
-      "lun": entry.lun,
-      "start_sector": entry.start_sector,
-      "num_sectors": entry.num_sectors,
-    }
+def main() -> None:
+  parser = argparse.ArgumentParser(description="Package a full vamOS A/B update")
+  parser.add_argument(
+    "--base-url",
+    default=os.environ.get("VAMOS_OTA_BASE_URL", "https://updates.asius.ai/vamos/objects"),
+    help="public URL prefix containing the content-addressed image objects",
+  )
+  parser.add_argument(
+    "--version",
+    default=(ROOT / "userspace/root/VERSION").read_text(encoding="utf-8").strip(),
+  )
+  args = parser.parse_args()
 
-  return ret
+  OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+  partitions = [
+    package_image("esp", BUILD_DIR / "esp.img", args.base_url),
+    package_image("system", BUILD_DIR / "system.img", args.base_url),
+  ]
+  manifest = {
+    "manifest_version": MANIFEST_VERSION,
+    "minimum_updater_version": UPDATER_VERSION,
+    "product": PRODUCT,
+    "version": args.version,
+    "partitions": partitions,
+  }
+  manifest_path = OUTPUT_DIR / "vamos.json"
+  manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+  (OUTPUT_DIR / "VERSION").write_text(args.version + "\n", encoding="utf-8")
+  print(f"Wrote {manifest_path}")
 
 
 if __name__ == "__main__":
-  OTA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-  entries = []
-  for entry in GPTS + PARTITIONS:
-    entries.append(process_file(entry))
-  with open(OTA_OUTPUT_DIR / "manifest.json", "w") as f:
-    json.dump(entries, f, indent=2)
-
-  print(f"\nWrote manifest with {len(entries)} entries to {OTA_OUTPUT_DIR / 'manifest.json'}")
+  main()

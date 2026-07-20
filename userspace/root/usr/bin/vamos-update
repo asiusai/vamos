@@ -1,0 +1,8 @@
+#!/usr/bin/python3
+import sys
+
+sys.path.insert(0, "/usr/lib")
+
+from vamos.update import main
+
+raise SystemExit(main())

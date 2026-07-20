@@ -28,8 +28,8 @@ handle_setup_keys () {
   fi
 }
 
-# factory reset handling (ASIUS: /data lives on the rootfs, not a separate
-# mountpoint, so skip the mountpoint check that would falsely trigger recovery)
+# factory reset handling. Legacy Asius installations did not have a separate
+# userdata partition, so keep accepting that layout until it is migrated.
 if [ ! -f /tmp/booted ]; then
   touch /tmp/booted
   if [ -f "$RESET_TRIGGER" ]; then
@@ -72,6 +72,13 @@ while true; do
   handle_setup_keys
 
   if [ -f $CONTINUE ]; then
+    if [ -f /run/vamos-trial-boot ]; then
+      echo "committing healthy vamOS trial boot"
+      if ! sudo /usr/bin/vamos-boot commit; then
+        echo "vamOS trial commit failed; waiting for watchdog rollback"
+        while true; do sleep 60; done
+      fi
+    fi
     exec "$CONTINUE"
   fi
 

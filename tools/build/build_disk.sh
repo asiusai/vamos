@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Assemble a bootable disk image for Radxa Dragon Q6A.
-# Layout: GPT + ESP (FAT32, kernel Image as BOOTAA64.EFI + dtb) + rootfs (ext4).
+# Assemble a compact initial disk image for Radxa Dragon Q6A.
+# `vamos-update initialize` migrates it to A/B plus persistent userdata.
 set -e
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null && pwd)"
@@ -51,21 +51,7 @@ echo "  rootfs: sectors $ROOTFS_START..$ROOTFS_END  ($(numfmt --to=iec-i --suffi
 echo "  total:  sectors 0..$TOTAL_SECTORS      ($(numfmt --to=iec-i --suffix=B "$TOTAL_BYTES"))"
 
 # ---- Build ESP (FAT32) ----
-echo "== Building ESP =="
-rm -f "$ESP_IMG"
-truncate -s $(( ESP_SECTORS * 512 )) "$ESP_IMG"
-mkfs.vfat -F 32 -n vamos-ESP "$ESP_IMG" >/dev/null
-
-# Linux arm64 Image is a valid PE32+ EFI application — edk2 launches it directly.
-# /EFI/BOOT/BOOTAA64.EFI is the removable-device / fallback boot path edk2 auto-detects.
-mmd -i "$ESP_IMG" ::/EFI
-mmd -i "$ESP_IMG" ::/EFI/BOOT
-mcopy -i "$ESP_IMG" "$KERNEL_IMAGE" ::/EFI/BOOT/BOOTAA64.EFI
-mcopy -i "$ESP_IMG" "$DTB_FILE"     ::/qcs6490-radxa-dragon-q6a.dtb
-# Also drop the kernel + DTB at the root for convenience / manual boot-manager use.
-mcopy -i "$ESP_IMG" "$KERNEL_IMAGE" ::/Image
-echo "ESP contents:"
-mdir -i "$ESP_IMG" -/ ::/
+"$DIR/tools/build/build_esp.sh"
 
 # ---- Assemble full disk image ----
 echo "== Assembling $DISK_IMG =="

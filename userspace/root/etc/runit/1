@@ -3,29 +3,11 @@
 
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 
-configure_asius_efi_boot() {
+configure_asius_efi_timeout() {
     timeout_var="/sys/firmware/efi/efivars/BootAskTimeoutSecs-5f4065c9-d7bf-4555-b55d-820b3defd23a"
-    efi_state="$(efibootmgr -v 2>/dev/null || true)"
-    boot_entry="$(printf '%s\n' "$efi_state" |
-        sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\* vamOS.*/\1/p' | head -n 1)"
 
-    if ! printf '%s\n' "$efi_state" | grep -q '^Timeout: 0 seconds$'; then
+    if ! efibootmgr 2>/dev/null | grep -q '^Timeout: 0 seconds$'; then
         efibootmgr -t 0 >/dev/null 2>&1 || echo "WARN: failed to set EFI boot timeout"
-    fi
-
-    if [ -z "$boot_entry" ]; then
-        efibootmgr -c -d /dev/nvme0n1 -p 1 -L vamOS \
-            -l '\EFI\BOOT\BOOTAA64.EFI' >/dev/null 2>&1 ||
-            echo "WARN: failed to create direct vamOS EFI boot entry"
-        efi_state="$(efibootmgr -v 2>/dev/null || true)"
-        boot_entry="$(printf '%s\n' "$efi_state" |
-            sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\* vamOS.*/\1/p' | head -n 1)"
-    fi
-
-    if [ -n "$boot_entry" ] &&
-        ! printf '%s\n' "$efi_state" | grep -q "^BootOrder: $boot_entry\$"; then
-        efibootmgr -o "$boot_entry" >/dev/null 2>&1 ||
-            echo "WARN: failed to select direct vamOS EFI boot entry"
     fi
 
     # Qualcomm treats zero as the five-second default. One is the minimum
@@ -54,12 +36,13 @@ touch /run/motd && chmod 666 /run/motd
 
 mountpoint -q /dev/pts || mount -t devpts devpts /dev/pts -o mode=0620,gid=5,nosuid,noexec
 mountpoint -q /dev/shm || mount -t tmpfs shm /dev/shm -o mode=1777,nosuid,nodev
+
 if [ -d /sys/firmware/efi ]; then
     mkdir -p /sys/firmware/efi/efivars
     if mountpoint -q /sys/firmware/efi/efivars || mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null; then
         if command -v efibootmgr >/dev/null 2>&1; then
             if [ -f /ASIUS ]; then
-                configure_asius_efi_boot
+                configure_asius_efi_timeout
             else
                 efibootmgr -t 0 >/dev/null 2>&1 || echo "WARN: failed to set EFI boot timeout"
             fi
@@ -174,15 +157,47 @@ mount_part() {
     fi
 }
 
-# No extra partitions to mount on Dragon Q6A (vamOS target): only esp + rootfs.
-# Comma devices mounted dsp_a/persist/cache/userdata here; those partitions
-# don't exist on Dragon. If a future build adds them, wire up mount_part calls.
-echo "=> Skipping optional partition mounts (Dragon layout is esp+rootfs only)"
+# New vamOS installations keep identity, params, routes, and openpilot outside
+# both replaceable OS slots. Legacy two-partition installations continue using
+# the rootfs /data directory until `vamos-update initialize` migrates them.
+if [ -b /dev/nvme0n1p5 ] || [ -e /dev/disk/by-partlabel/userdata ]; then
+    echo "=> Mounting persistent userdata"
+    userdata_dev="/dev/disk/by-partlabel/userdata"
+    [ -e "$userdata_dev" ] || userdata_dev="/dev/nvme0n1p5"
+    mount -o "rw,discard,noatime,nodiratime,nosuid,nodev" "$userdata_dev" /data ||
+        echo "WARN: /data mount failed"
+    if ! mountpoint -q /data; then
+        echo "ERROR: persistent userdata exists but could not be mounted"
+    elif [ ! -f /data/.vamos-userdata ]; then
+        echo "WARN: userdata lacks the vamOS migration marker"
+    fi
+elif [ -f /VAMOS ]; then
+    echo "WARN: legacy vamOS layout; /data is still part of the active rootfs"
+fi
+
+if [ -f /VAMOS ] && [ -x /usr/bin/vamos-boot ]; then
+    if ! /usr/bin/vamos-boot early 2>/run/vamos-boot-early.err; then
+        echo "ERROR: failed to start vamOS trial watchdog; returning to the fallback slot"
+        if mountpoint -q /data; then
+            mkdir -p /data/vamos-update
+            {
+                echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) trial watchdog startup failed ==="
+                cat /run/vamos-boot-early.err 2>/dev/null || true
+                cat /run/vamos-watchdog.log 2>/dev/null || true
+                ls -l /dev/watchdog* 2>&1 || true
+                dmesg 2>/dev/null | grep -i -E 'watchdog|qcom_wdt|deferred probe' | tail -100 || true
+            } >> /data/vamos-update/trial-failure.log
+        fi
+        sync
+        reboot -f
+        while true; do sleep 60; done
+    fi
+    /usr/bin/vamos-boot reconcile || echo "WARN: failed to reconcile vamOS boot state"
+fi
 
 # readonly_setup moved /home to /usr/default/home at build time. comma's
-# fs_setup service overlay-mounts it back at runtime from /data — we don't
-# run fs_setup on Dragon (no /data partition), so restore /home/comma
-# with a plain copy on first boot if missing.
+# fs_setup service overlay-mounts it back at runtime. Dragon restores a plain
+# home directory while the rest of persistent state remains under /data.
 if [ -d /usr/default/home/comma ] && [ ! -e /home/comma/.bashrc ]; then
   echo "=> Restoring /home/comma from /usr/default/home/comma"
   mkdir -p /home
@@ -190,8 +205,8 @@ if [ -d /usr/default/home/comma ] && [ ! -e /home/comma/.bashrc ]; then
   chown -R comma:comma /home/comma
 fi
 
-# /data writable scaffolding (comma mounted /data from a real partition; we
-# fake it by keeping directories writable on the rw rootfs).
+# /data writable scaffolding. This is persistent after A/B initialization and
+# remains a writable rootfs fallback on legacy installations.
 for d in /data/scons_cache /data/media/0/realdata /data/log /data/params/d /data/stats /data/safe_staging; do
   mkdir -p "$d" 2>/dev/null || true
 done
@@ -222,4 +237,5 @@ for f in /etc/runit/core-services/*.sh; do
     "$f" || echo "WARN: $f failed"
 done
 
+touch /run/vamos-stage1-ready
 echo "=> Stage 1 complete, entering stage 2"
