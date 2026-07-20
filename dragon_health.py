@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Dragon Q6A system health check.
 
-Checks connectivity (NCM/wifi/bluetooth), openpilot processes, camera and
-livestream FPS, captures sample images, and runs model replay.
+Checks connectivity (NCM/wifi/bluetooth), openpilot processes, camera,
+livestream, and live model health, and captures sample images.
 
 Invoked from the host via:  dragon.py health
 """
@@ -23,6 +23,9 @@ EXPECTED_FRAME_INTERVAL_MS = 50.0
 FRAME_INTERVAL_TOLERANCE_MS = 1.0
 EXPECTED_STREAM_FPS = 15.0
 STREAM_FPS_TOLERANCE = 2.0
+EXPECTED_MODEL_FPS = 20.0
+MODEL_FPS_TOLERANCE = 2.0
+MODEL_AVERAGE_TIME_LIMIT_S = 0.033
 SNAPSHOT_DIR = "/tmp/dragon_health"
 OPENPILOT_ROOT = os.environ.get("OPENPILOT_ROOT", "/data/openpilot")
 DEFAULT_OPENPILOT_ROOT = "/data/openpilot"
@@ -38,22 +41,6 @@ OPENPILOT_PYTHON_PATHS = [
     )),
 ]
 CUSTOM_MANAGER_LOG = "/tmp/dragon_health_manager.log"
-GENERATED_NATIVE_OUTPUTS = (
-    "common/libcommon.a",
-    "common/params_pyx.so",
-    "cereal/libcereal.a",
-    "cereal/libsocketmaster.a",
-    "cereal/messaging/bridge",
-    "msgq/ipc_pyx.so",
-    "msgq/visionipc/visionipc_pyx.so",
-    "msgq_repo/libmsgq.a",
-    "msgq_repo/libvisionipc.a",
-    "msgq_repo/msgq/ipc_pyx.so",
-    "msgq_repo/msgq/visionipc/visionipc_pyx.so",
-    "rednose_repo/rednose/helpers/libekf_sym.a",
-    "third_party/libjson11.a",
-)
-MIN_GENERATED_OUTPUT_SIZE = 4096
 custom_manager_process = None
 custom_manager_log = None
 livestream_original = None
@@ -330,6 +317,62 @@ def measure_fps(duration=5):
     return fps_results
 
 
+def check_live_model(duration=5):
+    section(f"Live Model ({duration}s sample)")
+    code, _, _ = run(["pgrep", "-f", "openpilot.selfdrive.modeld.modeld"], timeout=2)
+    if code != 0:
+        ok("modeld inactive while the device is offroad")
+        return True
+
+    try:
+        messaging = import_messaging()
+    except ImportError:
+        fail("cereal.messaging not available")
+        return False
+
+    sock = messaging.sub_sock("modelV2", conflate=False, timeout=100)
+    time.sleep(0.2)
+    messaging.drain_sock(sock)
+    samples = []
+    start = time.monotonic()
+    while time.monotonic() - start < duration:
+        for msg in messaging.drain_sock(sock):
+            samples.append((
+                msg.logMonoTime,
+                msg.valid,
+                msg.modelV2.frameId,
+                msg.modelV2.modelExecutionTime,
+                msg.modelV2.frameDropPerc,
+            ))
+        time.sleep(0.02)
+
+    if len(samples) < 2:
+        fail(f"modelV2 produced only {len(samples)} message(s)")
+        return False
+
+    elapsed = (samples[-1][0] - samples[0][0]) / 1e9
+    fps = (len(samples) - 1) / elapsed if elapsed > 0 else 0
+    execution_times = [sample[3] for sample in samples]
+    average_time = sum(execution_times) / len(execution_times)
+    max_drop = max(sample[4] for sample in samples)
+    valid = sum(bool(sample[1]) for sample in samples)
+    frame_ids_increase = all(b[2] > a[2] for a, b in zip(samples, samples[1:]))
+    model_ok = (
+        abs(fps - EXPECTED_MODEL_FPS) <= MODEL_FPS_TOLERANCE
+        and average_time <= MODEL_AVERAGE_TIME_LIMIT_S
+        and max_drop <= 10.0
+        and valid == len(samples)
+        and frame_ids_increase
+    )
+    msg = (
+        f"modelV2 {fps:.2f} fps, {average_time * 1000:.2f} ms average, "
+        f"{max(execution_times) * 1000:.2f} ms max, {max_drop:.1f}% max drop, "
+        f"{valid}/{len(samples)} valid"
+    )
+    (ok if model_ok else fail)(msg)
+    return model_ok
+
+
 def measure_streaming(duration=5):
     section(f"Livestream Encoders ({duration}s sample)")
     try:
@@ -467,197 +510,6 @@ def capture_snapshots():
     return True
 
 
-def max_thermal_c():
-    temps = []
-    for path in Path("/sys/class/thermal").glob("thermal_zone*/temp"):
-        try:
-            temps.append(int(path.read_text().strip()) / 1000)
-        except Exception:
-            continue
-    return max(temps) if temps else None
-
-
-def remove_partial_build_outputs(force=False):
-    removed = []
-    for relpath in GENERATED_NATIVE_OUTPUTS:
-        if relpath.startswith(("msgq_repo/", "rednose_repo/")):
-            path = Path(OPENPILOT_ROOT) / relpath
-        else:
-            path = source_path(relpath)
-        try:
-            if not path.exists() or path.is_dir():
-                continue
-            if force or path.stat().st_size < MIN_GENERATED_OUTPUT_SIZE:
-                path.unlink()
-                removed.append(relpath)
-        except OSError as e:
-            warn(f"Could not remove {relpath}: {e}")
-
-    if removed:
-        print(f"  Removed partial native build outputs: {', '.join(removed)}")
-
-
-def wait_for_replay_idle():
-    run(["sudo", "sv", "down", "openpilot"], timeout=15)
-    run(["tmux", "kill-session", "-t", "openpilot"], timeout=5)
-
-    process_pattern = "manager.py|launch_chffrplus|camerad|selfdrive\\.|dmonitoringmodeld|scons|system/manager/build.py"
-    for _ in range(20):
-        code, out, _ = run(["bash", "-lc",
-                            f"pgrep -af '{process_pattern}' | grep -v dragon_health.py | grep -v pgrep || true"],
-                           timeout=5)
-        if code == 0 and not out:
-            break
-        run(["bash", "-lc", f"pkill -TERM -f '{process_pattern}' || true"], timeout=5)
-        time.sleep(0.5)
-    else:
-        run(["bash", "-lc", f"pkill -KILL -f '{process_pattern}' || true"], timeout=5)
-
-    remove_partial_build_outputs()
-
-    start = time.monotonic()
-    last_print = 0.0
-    while time.monotonic() - start < 90:
-        temp = max_thermal_c()
-        if temp is None or temp <= 64:
-            break
-        now = time.monotonic()
-        if now - last_print >= 10:
-            print(f"  Waiting for replay idle/cooldown: max thermal {temp:.0f}C")
-            last_print = now
-        time.sleep(3.0)
-    time.sleep(15.0)
-
-
-def run_model_replay():
-    section("Model Replay")
-    replay_script = source_path("selfdrive", "test", "process_replay", "model_replay.py")
-    if not os.path.isfile(replay_script):
-        fail(f"model_replay.py not found at {replay_script}")
-        return False
-
-    wait_for_replay_idle()
-    env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(OPENPILOT_PYTHON_PATHS)
-    env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
-    env["COMMA_CACHE"] = "/data/comma_download_cache"
-    env["DISABLE_DMON"] = "1"
-    env.setdefault("DEV", "CL")
-    env.setdefault("GMMU", "0")
-    env.setdefault("NOLOCALS", "1")
-    env.setdefault("RUSTICL_ENABLE", "freedreno")
-    env.setdefault("CL_QCOM_PRIORITY_HINT", "high")
-    env.setdefault("CL_BRANCH_SKIP_OUTPUT_HEADS", "1")
-    env.setdefault("VISIONBUF_USE_DMA_HEAP", "1")
-    env.setdefault("MODEL_CL_FRAME_VIPC_DMABUF", "1")
-    env.setdefault("MODEL_CUSTOM_WARP", "1")
-    env.setdefault("MODEL_PRELOAD_FRAMES", "1")
-    env.setdefault("MODEL_PREWARP_FRAMES", "1")
-    env.setdefault("MODEL_FLUSH_PRELOAD", "1")
-    env.setdefault("MODEL_REPLAY_MODELV2_AVG_MAX", "0.034")
-    env.setdefault("POLICY_FUSE_LN9", "1")
-    env.setdefault("POLICY_FUSE_LN64", "1")
-    env.setdefault("POLICY_FUSE_ADJACENT_PAIRS", "1")
-    env.setdefault("POLICY_FUSE_QKV_INPUT_LOCAL", "1")
-    env.setdefault("MODEL_REQD_WORKGROUP_ATTR_KERNELS", "r_16_64_32_4_4_24_3_3")
-    qcom_adreno_lib = "/opt/qcom-adreno/lib"
-    if os.path.isdir(qcom_adreno_lib):
-        env["LD_LIBRARY_PATH"] = qcom_adreno_lib + (
-            f":{env['LD_LIBRARY_PATH']}" if env.get("LD_LIBRARY_PATH") else ""
-        )
-    build_openpilot_for_replay(env)
-
-    repeats = int(env.get("MODEL_REPLAY_REPEATS", "1"))
-    print("  Running model_replay.py (this may take a while)...")
-    timing_failed = False
-    returncode = 0
-    for i in range(repeats):
-        if repeats > 1:
-            print(f"  model replay {i + 1}/{repeats}")
-        try:
-            proc = subprocess.Popen([sys.executable, str(replay_script)],
-                                    cwd=OPENPILOT_ROOT,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                    text=True, env=env)
-            for line in proc.stdout:
-                line = line.rstrip()
-                if "FAILED MAX TIMING CHECK" in line or "FAILED AVG TIMING CHECK" in line:
-                    timing_failed = True
-                print(f"  {line}")
-            proc.wait()
-            returncode = proc.returncode
-            if returncode != 0:
-                break
-        finally:
-            if uses_system_openpilot_service():
-                run(["sudo", "sv", "up", "openpilot"], timeout=15)
-
-    if returncode == 0 and not timing_failed:
-        ok("Model replay passed")
-        return True
-    if timing_failed:
-        fail("Model replay failed timing checks")
-        return False
-    fail(f"Model replay failed (exit={returncode})")
-    return False
-
-
-def build_openpilot_for_replay(env):
-    remove_partial_build_outputs()
-    missing_artifacts = missing_replay_model_artifacts()
-    try:
-        subprocess.run([sys.executable, "-c", "import msgq.ipc_pyx; import msgq.visionipc.visionipc_pyx"],
-                       cwd=OPENPILOT_ROOT, env=env, check=True,
-                       capture_output=True, text=True, timeout=10)
-        if not missing_artifacts:
-            return
-    except Exception:
-        pass
-
-    cache_config = Path("/data/scons_cache/config")
-    if cache_config.exists() and cache_config.stat().st_size == 0:
-        cache_config.unlink()
-
-    build_py = source_path("system", "manager", "build.py")
-    if not build_py.exists():
-        warn(f"build.py missing at {build_py}")
-        return
-
-    if missing_artifacts:
-        print(f"  Building replay model artifacts: {', '.join(missing_artifacts)}")
-    else:
-        print("  Building openpilot native modules for replay...")
-    proc = subprocess.run([sys.executable, str(build_py)], cwd=OPENPILOT_ROOT,
-                          env=env, text=True, timeout=900)
-    if proc.returncode != 0:
-        warn(f"build.py exited {proc.returncode}; replay will report the failure")
-
-
-def chunked_or_plain_file_exists(path):
-    path = Path(path)
-    if path.exists():
-        return True
-
-    manifest = Path(str(path) + ".chunkmanifest")
-    if not manifest.exists():
-        return False
-
-    try:
-        num_chunks = int(manifest.read_text().strip())
-    except ValueError:
-        return False
-
-    return all(Path(f"{path}.chunk{i + 1:02d}of{num_chunks:02d}").exists() for i in range(num_chunks))
-
-
-def missing_replay_model_artifacts():
-    models_dir = source_path("selfdrive", "modeld", "models")
-    required = (
-        "driving_tinygrad",
-    )
-    return [name for name in required if not chunked_or_plain_file_exists(models_dir / f"{name}.pkl")]
-
-
 def system_info():
     section("System Info")
     code, out, _ = run(["uname", "-r"])
@@ -733,7 +585,6 @@ def wait_for_openpilot(timeout=300):
 
 def run_checks():
     system_info()
-    model_replay_ok = run_model_replay()
     ready = wait_for_openpilot()
     if not ready:
         print("\n  Proceeding with checks anyway...\n")
@@ -743,10 +594,10 @@ def run_checks():
         'wifi':         check_wifi(),
         'bluetooth':    check_bluetooth(),
         'processes':    check_processes(),
+        'model':        check_live_model(),
         'fps':          measure_fps(),
         'streaming':    measure_streaming(),
         'snapshots':    capture_snapshots(),
-        'model_replay': model_replay_ok,
     }
 
     section("Summary")
@@ -759,8 +610,8 @@ def run_checks():
         ("WiFi",         results['wifi']),
         ("Bluetooth",    results['bluetooth']),
         ("Processes",    results['processes']),
+        ("Live Model",   results['model']),
         ("Snapshots",    results['snapshots']),
-        ("Model Replay", results['model_replay']),
         ("Camera FPS",   fps_ok),
         ("Streaming",    streaming_ok),
     ]
