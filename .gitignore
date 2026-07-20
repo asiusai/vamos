@@ -5,18 +5,3 @@
 **/*.tar.xz
 
 __pycache__/
-
-# disabled/experimental patches
-kernel/patches/*.disabled
-kernel/patches/*.disabled2
-
-# debug configs
-kernel/configs/vamos_full.config
-
-# debug/temp files
-kernel/dtb/
-userspace/apply_overlay.c
-
-# baked runtime artifacts (pulled from device, not committed)
-userspace/root/home/comma/.cache/
-userspace/root/vendor/
