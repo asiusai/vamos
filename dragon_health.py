@@ -397,9 +397,7 @@ def boost_saturation(img, factor=4.0):
     return (luma + (rgb - luma) * factor).clip(0, 255).astype("uint8")
 
 
-def capture_snapshots():
-    section("Camera Snapshots")
-    os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+def capture_snapshots_worker():
     try:
         from msgq.visionipc import VisionIpcClient, VisionStreamType
         from openpilot.system.camerad.snapshot import extract_image, jpeg_write
@@ -440,6 +438,39 @@ def capture_snapshots():
             fail(f"{name}: {e}")
             all_ok = False
     return all_ok
+
+
+def capture_snapshots():
+    section("Camera Snapshots")
+    snapshot_dir = Path(SNAPSHOT_DIR)
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    for path in snapshot_dir.glob("*.jpg"):
+        path.unlink()
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(OPENPILOT_PYTHON_PATHS)
+    env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-u", __file__, "--snapshot-worker"],
+            cwd=OPENPILOT_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=45,
+        )
+    except subprocess.TimeoutExpired:
+        fail("Snapshot worker timed out")
+        return False
+
+    if proc.stdout:
+        print(proc.stdout.rstrip())
+    if proc.stderr:
+        print(proc.stderr.rstrip())
+    if proc.returncode != 0:
+        fail(f"Snapshot worker failed (exit={proc.returncode})")
+        return False
+    return True
 
 
 def max_thermal_c():
@@ -755,6 +786,9 @@ def run_checks():
 
 
 def main():
+    if sys.argv[1:] == ["--snapshot-worker"]:
+        return 0 if capture_snapshots_worker() else 1
+
     print(f"Dragon Q6A Health Check — {time.strftime('%Y-%m-%d %H:%M:%S')}")
     try:
         return run_checks()
