@@ -19,14 +19,24 @@ a new operating system for comma 3X and comma four
 ./vamos device-update comma@192.168.88.20
 ```
 
-`device-update` validates that the local openpilot `one` branch is clean and
-pushed, rsyncs a small trigger helper to the target, signals openpilot's normal
-offroad updater, and waits for that exact commit to be finalized. It does not
-overwrite the running `/data/openpilot` tree. Add `--install` to request the
-reboot after staging:
+`device-update` packages the locally built `build/system.img` and
+`build/esp.img`, rsyncs them directly to the device, and installs them into the
+inactive vamOS A/B slot. It does not use GitHub, R2, an openpilot branch, or the
+`VAMOS_VERSION` update gate. The image's existing `/VERSION` is used only for
+post-write verification, so rebuilding and reinstalling the same version works.
+
+The device reboots into a one-shot trial of the new slot by default:
 
 ```bash
-./vamos device-update comma@192.168.88.20 --install
+./vamos device-update comma@192.168.88.20
+```
+
+Build the system and ESP first in the same command, or leave the verified trial
+slot ready without rebooting:
+
+```bash
+./vamos device-update comma@192.168.88.20 --build
+./vamos device-update comma@192.168.88.20 --no-reboot
 ```
 
 ## Dragon OTA Updates

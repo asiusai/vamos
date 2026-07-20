@@ -2,18 +2,23 @@
 from __future__ import annotations
 
 import argparse
-import json
+import hashlib
 import os
 import shlex
 import subprocess
 import sys
-import time
+from dataclasses import dataclass
 from pathlib import Path
 
 
 VAMOS_ROOT = Path(__file__).resolve().parents[1]
-REMOTE_HELPER = "/tmp/vamos-device-update.py"
-SSH_HOSTKEY_OPTIONS = (
+DEFAULT_BUILD_DIR = VAMOS_ROOT / "build"
+DEFAULT_REMOTE_DIR = "/data/vamos-local"
+IMAGE_SIZES = {
+  "esp": 256 * 1024 * 1024,
+  "system": 10 * 1024 * 1024 * 1024,
+}
+SSH_OPTIONS = (
   "BatchMode=yes",
   "ConnectTimeout=10",
   "ServerAliveInterval=5",
@@ -29,6 +34,22 @@ class DeviceUpdateError(RuntimeError):
   pass
 
 
+@dataclass(frozen=True)
+class PreparedImage:
+  name: str
+  source: Path
+  compressed: Path
+  sha256: str
+
+
+@dataclass(frozen=True)
+class Payload:
+  version: str
+  version_file: Path
+  updater: Path
+  images: tuple[PreparedImage, ...]
+
+
 def command_output(command: list[str], cwd: Path | None = None) -> str:
   try:
     return subprocess.check_output(
@@ -40,38 +61,8 @@ def command_output(command: list[str], cwd: Path | None = None) -> str:
     ) from error
 
 
-def git_output(openpilot: Path, *args: str) -> str:
-  return command_output(["git", *args], cwd=openpilot)
-
-
 def normalize_target(target: str) -> str:
   return target if "@" in target else f"comma@{target}"
-
-
-def validate_checkout(openpilot: Path, branch: str) -> str:
-  if not (openpilot / ".git").exists():
-    raise DeviceUpdateError(f"openpilot checkout not found at {openpilot}")
-  current_branch = git_output(openpilot, "branch", "--show-current")
-  if current_branch != branch:
-    raise DeviceUpdateError(
-      f"openpilot is on {current_branch!r}; switch it to {branch!r} first"
-    )
-  dirty = git_output(openpilot, "status", "--porcelain")
-  if dirty:
-    raise DeviceUpdateError(
-      "openpilot has uncommitted changes; commit and push them before updating a device"
-    )
-
-  commit = git_output(openpilot, "rev-parse", "HEAD")
-  remote_line = git_output(
-    openpilot, "ls-remote", "--exit-code", "origin", f"refs/heads/{branch}"
-  )
-  remote_commit = remote_line.split()[0] if remote_line else ""
-  if remote_commit != commit:
-    raise DeviceUpdateError(
-      f"local {branch} commit {commit[:10]} is not pushed to origin ({remote_commit[:10] or 'missing'})"
-    )
-  return commit
 
 
 def ssh_options(identity: Path | None) -> list[str]:
@@ -80,154 +71,260 @@ def ssh_options(identity: Path | None) -> list[str]:
     if not identity.is_file():
       raise DeviceUpdateError(f"SSH identity not found: {identity}")
     options += ["-i", str(identity)]
-  for option in SSH_HOSTKEY_OPTIONS:
+  for option in SSH_OPTIONS:
     options += ["-o", option]
   return options
 
 
-def sync_helper(target: str, options: list[str]) -> None:
-  helper = VAMOS_ROOT / "tools/device_update_remote.py"
-  ssh_command = shlex.join(["ssh", *options])
+def sha256_file(path: Path) -> str:
+  digest = hashlib.sha256()
+  with path.open("rb", buffering=0) as source:
+    while chunk := source.read(8 * 1024 * 1024):
+      digest.update(chunk)
+  return digest.hexdigest()
+
+
+def validate_image(path: Path, name: str) -> None:
+  if not path.is_file():
+    raise DeviceUpdateError(
+      f"missing {path}; build it with ./vamos build {'system' if name == 'system' else 'esp'}"
+    )
+  expected_size = IMAGE_SIZES[name]
+  actual_size = path.stat().st_size
+  if actual_size != expected_size:
+    raise DeviceUpdateError(f"{path} is {actual_size} bytes, expected {expected_size}")
+
+
+def system_image_version(path: Path) -> str:
+  result = subprocess.run(
+    ["debugfs", "-R", "cat /VERSION", str(path)],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    text=True,
+    check=False,
+  )
+  version = result.stdout.strip()
+  if result.returncode != 0 or not version:
+    detail = result.stderr.strip() or "VERSION is missing"
+    raise DeviceUpdateError(f"cannot read /VERSION from {path}: {detail}")
+  return version
+
+
+def compress_image(
+  name: str, source: Path, digest: str, build_dir: Path, cache_dir: Path
+) -> Path:
+  filename = f"{name}-{digest}.img.xz"
+  for directory in (cache_dir, build_dir / "ota"):
+    candidate = directory / filename
+    if candidate.is_file() and candidate.stat().st_size > 0:
+      print(f"[device-update] reusing {candidate}", flush=True)
+      return candidate
+
+  cache_dir.mkdir(parents=True, exist_ok=True)
+  destination = cache_dir / filename
+  temporary = destination.with_suffix(destination.suffix + ".tmp")
+  temporary.unlink(missing_ok=True)
+  print(f"[device-update] compressing {source.name}", flush=True)
+  try:
+    with temporary.open("wb") as output:
+      subprocess.run(
+        ["xz", "-T0", "-1", "--check=crc64", "--stdout", str(source)],
+        stdout=output,
+        check=True,
+      )
+    os.replace(temporary, destination)
+  finally:
+    temporary.unlink(missing_ok=True)
+  return destination
+
+
+def prepare_payload(build_dir: Path) -> Payload:
+  system = build_dir / "system.img"
+  esp = build_dir / "esp.img"
+  validate_image(system, "system")
+  validate_image(esp, "esp")
+
+  version = system_image_version(system)
+  cache_dir = build_dir / "device-update"
+  prepared: list[PreparedImage] = []
+  for name, source in (("system", system), ("esp", esp)):
+    print(f"[device-update] hashing {source}", flush=True)
+    digest = sha256_file(source)
+    compressed = compress_image(name, source, digest, build_dir, cache_dir)
+    prepared.append(PreparedImage(name, source, compressed, digest))
+
+  cache_dir.mkdir(parents=True, exist_ok=True)
+  version_file = cache_dir / "VERSION"
+  version_file.write_text(version + "\n", encoding="utf-8")
+  updater = VAMOS_ROOT / "userspace/root/usr/lib/vamos/update.py"
+  if not updater.is_file():
+    raise DeviceUpdateError(f"local updater not found: {updater}")
+  return Payload(version, version_file, updater, tuple(prepared))
+
+
+def build_images(build_kernel: bool) -> None:
+  scripts: list[Path] = []
+  if build_kernel:
+    scripts.append(VAMOS_ROOT / "tools/build/build_kernel.sh")
+  scripts.extend(
+    (
+      VAMOS_ROOT / "tools/build/build_system.sh",
+      VAMOS_ROOT / "tools/build/build_esp.sh",
+    )
+  )
+  for script in scripts:
+    subprocess.run([str(script)], cwd=VAMOS_ROOT, check=True)
+
+
+def remote_command(
+  target: str, options: list[str], command: list[str], *, capture: bool = False
+) -> str:
+  ssh = ["ssh", *options, target, shlex.join(command)]
+  if capture:
+    return command_output(ssh)
+  subprocess.run(ssh, check=True)
+  return ""
+
+
+def preflight_remote(target: str, options: list[str], remote_dir: str) -> None:
+  if not remote_dir.startswith("/data/"):
+    raise DeviceUpdateError("--remote-dir must be below /data")
+  probe = (
+    "test -f /VAMOS && "
+    "sudo -n true && "
+    "test -b /dev/disk/by-partlabel/rootfs_a && "
+    "test -b /dev/disk/by-partlabel/rootfs_b && "
+    f"mkdir -p {shlex.quote(remote_dir)} && "
+    f"test -w {shlex.quote(remote_dir)}"
+  )
+  command_output(["ssh", *options, target, probe])
+  remote_command(
+    target,
+    options,
+    ["rm", "-f", f"{remote_dir}/system.img", f"{remote_dir}/esp.img"],
+  )
+
+
+def rsync_file(
+  source: Path,
+  target: str,
+  options: list[str],
+  destination: str,
+) -> None:
+  ssh = shlex.join(["ssh", *options])
   subprocess.run(
     [
       "rsync",
-      "-az",
-      "--chmod=F755",
+      "-ah",
+      "--partial",
+      "--info=progress2",
+      "--chmod=F644",
       "-e",
-      ssh_command,
-      str(helper),
-      f"{target}:{REMOTE_HELPER}",
+      ssh,
+      str(source),
+      f"{target}:{destination}",
     ],
     check=True,
   )
 
 
-def remote_call(
+def sync_payload(
+  payload: Payload,
   target: str,
   options: list[str],
-  remote_root: str,
-  command: str,
-  branch: str | None = None,
-) -> dict[str, object]:
-  remote_command = ["python3", REMOTE_HELPER, "--root", remote_root, command]
-  if branch is not None:
-    remote_command += ["--branch", branch]
-  output = command_output(["ssh", *options, target, shlex.join(remote_command)])
-  try:
-    result = json.loads(output)
-  except json.JSONDecodeError as error:
-    raise DeviceUpdateError(f"invalid response from device: {output}") from error
-  if not isinstance(result, dict):
-    raise DeviceUpdateError(f"invalid response from device: {output}")
-  if result.get("error"):
-    raise DeviceUpdateError(str(result["error"]))
-  return result
-
-
-def staged_commit_matches(status: dict[str, object], branch: str, commit: str) -> bool:
-  return (
-    status.get("staged_branch") == branch
-    and status.get("staged_commit") == commit
-    and status.get("staged_consistent") is True
-    and status.get("update_available") is True
+  remote_dir: str,
+) -> None:
+  files = (
+    (payload.updater, "update.py"),
+    (payload.version_file, "VERSION"),
+    *((image.compressed, f"{image.name}.img.xz") for image in payload.images),
   )
+  for source, name in files:
+    print(f"[device-update] rsync {name}", flush=True)
+    rsync_file(source, target, options, f"{remote_dir}/{name}")
 
 
-def current_commit_matches(status: dict[str, object], branch: str, commit: str) -> bool:
-  return (
-    status.get("current_branch") == branch and status.get("current_commit") == commit
-  )
-
-
-def print_status(status: dict[str, object]) -> None:
-  state = status.get("updater_state") or "unknown"
-  current = str(status.get("current_commit") or "missing")[:10]
-  staged = str(status.get("staged_commit") or "none")[:10]
-  print(f"[device-update] state={state} current={current} staged={staged}", flush=True)
+def install_remote(
+  target: str,
+  options: list[str],
+  remote_dir: str,
+  *,
+  reboot: bool,
+) -> None:
+  command = [
+    "sudo",
+    "-n",
+    "python3",
+    f"{remote_dir}/update.py",
+    "local",
+    remote_dir,
+  ]
+  if reboot:
+    command.append("--reboot")
+  print("[device-update] writing and verifying the inactive vamOS slot", flush=True)
+  remote_command(target, options, command)
 
 
 def main(argv: list[str] | None = None) -> int:
   parser = argparse.ArgumentParser(
-    description="Stage a pushed openpilot update on an SSH-connected device"
+    description="Deploy locally built vamOS images to an SSH-connected Dragon"
   )
   parser.add_argument("target", help="SSH target, for example comma@192.168.88.20")
-  parser.add_argument("--branch", default="one")
-  parser.add_argument("--openpilot", type=Path, default=VAMOS_ROOT.parent / "openpilot")
-  parser.add_argument("--remote-root", default="/data/openpilot")
+  parser.add_argument("--build-dir", type=Path, default=DEFAULT_BUILD_DIR)
+  parser.add_argument("--remote-dir", default=DEFAULT_REMOTE_DIR)
   parser.add_argument(
     "--identity",
     type=Path,
     default=Path(os.environ.get("DRAGON_SSH_KEY", "~/.ssh/comma_setup")).expanduser(),
   )
-  parser.add_argument("--timeout", type=float, default=600.0)
-  parser.add_argument("--poll-interval", type=float, default=2.0)
   parser.add_argument(
-    "--install",
+    "--build",
     action="store_true",
-    help="request a reboot after the exact commit is finalized",
+    help="build system.img and esp.img before deploying",
+  )
+  parser.add_argument(
+    "--build-kernel",
+    action="store_true",
+    help="also rebuild the kernel; implies --build",
+  )
+  parser.add_argument(
+    "--no-reboot",
+    action="store_true",
+    help="arm the trial slot but leave rebooting to the user",
   )
   args = parser.parse_args(argv)
 
   try:
     target = normalize_target(args.target)
-    openpilot = args.openpilot.expanduser().resolve()
-    commit = validate_checkout(openpilot, args.branch)
     options = ssh_options(args.identity)
+    build_dir = args.build_dir.expanduser().resolve()
+    if args.build or args.build_kernel:
+      build_images(args.build_kernel)
+
+    payload = prepare_payload(build_dir)
+    compressed_size = sum(image.compressed.stat().st_size for image in payload.images)
     print(
-      f"[device-update] target={target} branch={args.branch} commit={commit[:10]}",
+      f"[device-update] target={target} vamOS={payload.version} transfer={compressed_size / (1024**3):.2f} GiB",
       flush=True,
     )
-
-    sync_helper(target, options)
-    status = remote_call(target, options, args.remote_root, "status")
-    print_status(status)
-
-    if current_commit_matches(status, args.branch, commit):
-      print("[device-update] device is already running this commit")
-      return 0
-
-    if not staged_commit_matches(status, args.branch, commit):
-      if status.get("updater_running") is not True:
-        raise DeviceUpdateError(
-          "openpilot updated is not running; bootstrap the device updater first"
-        )
-      failed_count_before = int(status.get("update_failed_count") or 0)
-      remote_call(target, options, args.remote_root, "trigger", args.branch)
-
-      deadline = time.monotonic() + args.timeout
-      previous_summary = None
-      while time.monotonic() < deadline:
-        status = remote_call(target, options, args.remote_root, "status")
-        summary = (
-          status.get("updater_state"),
-          status.get("staged_branch"),
-          status.get("staged_commit"),
-          status.get("update_available"),
-        )
-        if summary != previous_summary:
-          print_status(status)
-          previous_summary = summary
-        if staged_commit_matches(status, args.branch, commit):
-          break
-        failed_count = int(status.get("update_failed_count") or 0)
-        if status.get("updater_state") == "idle" and failed_count > failed_count_before:
-          raise DeviceUpdateError(
-            str(status.get("last_update_exception") or "device updater failed")
-          )
-        time.sleep(args.poll_interval)
-      else:
-        raise DeviceUpdateError(
-          f"timed out after {args.timeout:g}s waiting for the finalized update"
-        )
-
-    print(f"[device-update] finalized {args.branch} at {commit[:10]}")
-    if args.install:
-      remote_call(target, options, args.remote_root, "install")
-      print("[device-update] install requested; the device will reboot")
+    preflight_remote(target, options, args.remote_dir)
+    sync_payload(payload, target, options, args.remote_dir)
+    install_remote(
+      target,
+      options,
+      args.remote_dir,
+      reboot=not args.no_reboot,
+    )
+    if args.no_reboot:
+      print("[device-update] trial slot is ready; reboot the device to test it")
     else:
-      print("[device-update] staged only; rerun with --install to reboot and apply it")
+      print("[device-update] reboot requested; the device will trial the new slot")
     return 0
-  except (DeviceUpdateError, subprocess.CalledProcessError) as error:
+  except (
+    DeviceUpdateError,
+    FileNotFoundError,
+    subprocess.CalledProcessError,
+  ) as error:
     print(f"device-update: {error}", file=sys.stderr)
     return 1
 
