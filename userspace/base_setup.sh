@@ -71,7 +71,6 @@ xbps-install -y \
   libtool \
   libusb-devel \
   libuv-devel \
-  llvm \
   logrotate \
   lz4 \
   mesa-dri \
