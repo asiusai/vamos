@@ -70,6 +70,10 @@ jobs:
       - name: Install AWS CLI
         run: |
           set -euo pipefail
+          if command -v aws >/dev/null; then
+            aws --version
+            exit 0
+          fi
           case "$(uname -m)" in
             aarch64|arm64) aws_arch=aarch64 ;;
             x86_64) aws_arch=x86_64 ;;
