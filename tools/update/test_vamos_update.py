@@ -125,10 +125,13 @@ class ImageWriteTest(unittest.TestCase):
         output.write(raw)
       spec = update.ImageSpec("system", source.as_uri(), len(raw), hashlib.sha256(raw).hexdigest(), "xz")
 
+      progress: list[tuple[str, int]] = []
       with mock.patch.object(update, "block_size", return_value=len(raw)):
-        update.write_image(spec, destination)
+        update.write_image(spec, destination, progress_callback=lambda phase, percent: progress.append((phase, percent)))
 
       self.assertEqual(destination.read_bytes(), raw)
+      self.assertIn(("writing", 100), progress)
+      self.assertIn(("verifying", 100), progress)
 
   def test_hash_mismatch_is_rejected(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
@@ -195,7 +198,7 @@ class ActivationSafetyTest(unittest.TestCase):
       mock.patch.object(update, "current_slot", return_value="a"),
       mock.patch.object(update, "partition_path", side_effect=lambda slot, name: Path(f"/{slot}/{name}")),
       mock.patch.object(update, "rollback_boot", return_value="0001") as rollback,
-      mock.patch.object(update, "write_image", side_effect=lambda spec, destination: writes.append(spec.name)),
+      mock.patch.object(update, "write_image", side_effect=lambda spec, destination, progress_callback=None: writes.append(spec.name)),
       mock.patch.object(update, "verify_system_contents"),
       mock.patch.object(update, "verify_esp_contents"),
       mock.patch.object(update, "activate_staged", return_value={"state": "ready"}) as activate,
@@ -253,7 +256,7 @@ class ActivationSafetyTest(unittest.TestCase):
     self.assertEqual(state["state"], "ready")
 
   def test_failed_image_never_arms_bootnext(self) -> None:
-    def fail_esp(spec: update.ImageSpec, destination: Path) -> None:
+    def fail_esp(spec: update.ImageSpec, destination: Path, progress_callback=None) -> None:
       if spec.name == "esp":
         raise update.UpdateError("injected image failure")
 

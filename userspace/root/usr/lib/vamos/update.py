@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import BinaryIO, Iterator, Sequence
+from typing import BinaryIO, Callable, Iterator, Sequence
 
 
 UPDATER_VERSION = 1
@@ -149,9 +149,11 @@ def update_lock() -> Iterator[None]:
     yield
 
 
-def sha256_file(path: Path, size: int | None = None) -> str:
+def sha256_file(path: Path, size: int | None = None, progress_callback: Callable[[int], None] | None = None) -> str:
   digest = hashlib.sha256()
   remaining = size
+  read = 0
+  last_progress = -1
   with path.open("rb", buffering=0) as source:
     while remaining is None or remaining > 0:
       read_size = IO_CHUNK_SIZE if remaining is None else min(IO_CHUNK_SIZE, remaining)
@@ -159,8 +161,14 @@ def sha256_file(path: Path, size: int | None = None) -> str:
       if not chunk:
         break
       digest.update(chunk)
+      read += len(chunk)
       if remaining is not None:
         remaining -= len(chunk)
+      if progress_callback is not None and size is not None and size > 0:
+        progress = int(read * 100 / size)
+        if progress >= last_progress + 5 or progress == 100:
+          progress_callback(progress)
+          last_progress = progress
   if remaining not in (None, 0):
     raise UpdateError(f"{path} is shorter than the expected {size} bytes")
   return digest.hexdigest()
@@ -368,7 +376,8 @@ def block_size(path: Path) -> int:
   return int(run(["blockdev", "--getsize64", str(path)]).stdout.strip())
 
 
-def write_image(spec: ImageSpec, destination: Path) -> None:
+def write_image(spec: ImageSpec, destination: Path,
+                progress_callback: Callable[[str, int], None] | None = None) -> None:
   actual_size = block_size(destination)
   if actual_size < spec.size:
     raise UpdateError(f"{destination} is {actual_size} bytes, smaller than {spec.size}")
@@ -387,6 +396,8 @@ def write_image(spec: ImageSpec, destination: Path) -> None:
       progress = int(written * 100 / spec.size)
       if progress >= last_progress + 5:
         log(f"{spec.name}: {progress}%")
+        if progress_callback is not None:
+          progress_callback("writing", progress)
         last_progress = progress
     output.flush()
     os.fsync(output.fileno())
@@ -397,7 +408,11 @@ def write_image(spec: ImageSpec, destination: Path) -> None:
     raise UpdateError(f"{spec.name} source SHA-256 mismatch")
 
   log(f"verifying {spec.name} from disk")
-  actual_hash = sha256_file(destination, spec.size)
+  actual_hash = sha256_file(
+    destination,
+    spec.size,
+    None if progress_callback is None else lambda progress: progress_callback("verifying", progress),
+  )
   if actual_hash != spec.sha256:
     raise UpdateError(f"{spec.name} on-device SHA-256 mismatch")
 
@@ -588,6 +603,9 @@ def activate_staged(*, reboot: bool = False) -> dict:
   if state.get("active_slot") != active or target not in ("a", "b") or target == active:
     raise UpdateError("staged update does not target the inactive slot")
 
+  state.update({"phase": "activating", "progress": 100})
+  save_state(state)
+
   images = state.get("images")
   if not isinstance(images, dict):
     raise UpdateError("staged update has no image metadata")
@@ -601,6 +619,8 @@ def activate_staged(*, reboot: bool = False) -> dict:
     stable_entry, trial_entry = prepare_trial_boot(active, target)
     state.update({
       "state": "ready",
+      "phase": "ready",
+      "progress": 100,
       "previous_entry": stable_entry,
       "trial_entry": trial_entry,
       "ready_at": int(time.time()),
@@ -613,6 +633,7 @@ def activate_staged(*, reboot: bool = False) -> dict:
     except Exception as rollback_exc:
       rollback_error = str(rollback_exc)
     state["state"] = "failed"
+    state["phase"] = "failed"
     state["error"] = str(exc)
     if rollback_error is not None:
       state["rollback_error"] = rollback_error
@@ -640,6 +661,8 @@ def install(manifest: Manifest, *, reboot: bool = False, activate: bool = True) 
   state = {
     "schema": 1,
     "state": "writing",
+    "phase": "preparing",
+    "progress": 0,
     "version": manifest.version,
     "manifest_source": manifest.source,
     "active_slot": active,
@@ -651,13 +674,34 @@ def install(manifest: Manifest, *, reboot: bool = False, activate: bool = True) 
 
   try:
     # Root first and ESP last keeps an interrupted target as far from bootable as possible.
+    total_work = 2 * sum(image.size for image in manifest.images)
+    completed_work = 0
     for name in ("system", "esp"):
       spec = next(image for image in manifest.images if image.name == name)
-      write_image(spec, partition_path(target, name))
+      work_before_image = completed_work
+
+      def report_progress(phase: str, image_progress: int) -> None:
+        phase_offset = 0 if phase == "writing" else spec.size
+        current_work = work_before_image + phase_offset + spec.size * image_progress / 100
+        state.update({
+          "phase": phase,
+          "image": spec.name,
+          "image_progress": image_progress,
+          "progress": min(98, int(current_work * 98 / total_work)),
+        })
+        save_state(state)
+
+      write_image(spec, partition_path(target, name), progress_callback=report_progress)
+      completed_work += 2 * spec.size
+
+    state.update({"phase": "validating", "progress": 99})
+    state.pop("image", None)
+    state.pop("image_progress", None)
+    save_state(state)
     verify_system_contents(partition_path(target, "system"), manifest.version)
     verify_esp_contents(partition_path(target, "esp"))
 
-    state["state"] = "verified"
+    state.update({"state": "verified", "phase": "verified", "progress": 100})
     state["verified_at"] = int(time.time())
     save_state(state, "images-verified")
   except Exception as exc:
@@ -667,6 +711,7 @@ def install(manifest: Manifest, *, reboot: bool = False, activate: bool = True) 
     except Exception as rollback_exc:
       rollback_error = str(rollback_exc)
     state["state"] = "failed"
+    state["phase"] = "failed"
     state["error"] = str(exc)
     if rollback_error is not None:
       state["rollback_error"] = rollback_error
