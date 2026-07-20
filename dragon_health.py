@@ -26,6 +26,16 @@ STREAM_FPS_TOLERANCE = 2.0
 SNAPSHOT_DIR = "/tmp/dragon_health"
 OPENPILOT_ROOT = os.environ.get("OPENPILOT_ROOT", "/data/openpilot")
 DEFAULT_OPENPILOT_ROOT = "/data/openpilot"
+OPENPILOT_PYTHON_PATHS = [
+    OPENPILOT_ROOT,
+    *(str(Path(OPENPILOT_ROOT) / submodule) for submodule in (
+        "opendbc_repo",
+        "msgq_repo",
+        "rednose_repo",
+        "teleoprtc_repo",
+        "tinygrad_repo",
+    )),
+]
 CUSTOM_MANAGER_LOG = "/tmp/dragon_health_manager.log"
 GENERATED_NATIVE_OUTPUTS = (
     "common/libcommon.a",
@@ -47,6 +57,10 @@ custom_manager_process = None
 custom_manager_log = None
 livestream_original = None
 livestream_changed = False
+
+for python_path in reversed(OPENPILOT_PYTHON_PATHS):
+    if Path(python_path).is_dir() and python_path not in sys.path:
+        sys.path.insert(0, python_path)
 
 
 def source_path(*parts):
@@ -493,7 +507,7 @@ def run_model_replay():
 
     wait_for_replay_idle()
     env = os.environ.copy()
-    env["PYTHONPATH"] = f"{OPENPILOT_ROOT}:{OPENPILOT_ROOT}/tinygrad_repo"
+    env["PYTHONPATH"] = os.pathsep.join(OPENPILOT_PYTHON_PATHS)
     env["OPENPILOT_ROOT"] = OPENPILOT_ROOT
     env["COMMA_CACHE"] = "/data/comma_download_cache"
     env["DISABLE_DMON"] = "1"
