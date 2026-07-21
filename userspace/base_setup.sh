@@ -45,7 +45,7 @@ xbps-install -y \
   dhcpcd \
   dnsmasq \
   evtest \
-  freetype-devel \
+  freetype \
   fuse-sshfs \
   gdbm-devel \
   git \
