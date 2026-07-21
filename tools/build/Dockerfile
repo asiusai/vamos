@@ -54,8 +54,7 @@ RUN xbps-install -y \
   wavemon \
   android-tools \
   avahi-utils \
-  usbutils \
-  vim
+  usbutils
 
 # Python packages via uv
 ARG XDG_DATA_HOME="/usr/local"
