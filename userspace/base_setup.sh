@@ -60,7 +60,7 @@ xbps-install -y \
   jq \
   kmod \
   libarchive-devel \
-  libcurl-devel \
+  libcurl \
   libffi-devel \
   libgpiod \
   liblzma-devel \
