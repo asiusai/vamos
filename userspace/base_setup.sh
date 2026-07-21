@@ -82,7 +82,7 @@ xbps-install -y \
   rsync \
   rsyslog \
   smartmontools \
-  sqlite-devel \
+  sqlite \
   squashfs-tools \
   tmux \
   traceroute \
