@@ -1,0 +1,33 @@
+From 5c50a686f50d2d91b508778d0f0c24b95771f938 Mon Sep 17 00:00:00 2001
+From: Asius <dev@asius.ai>
+Date: Tue, 21 Jul 2026 20:45:00 +0000
+Subject: [PATCH] media: qcom: venus: use realtime encoder sessions
+
+Camera recording and live streaming are realtime workloads. Tell the Venus
+firmware so that adding a new encoder session does not leave it scheduled at a
+reduced rate behind sessions that were already running.
+
+---
+ drivers/media/platform/qcom/venus/venc.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/media/platform/qcom/venus/venc.c b/drivers/media/platform/qcom/venus/venc.c
+index e4b5be0dd594..89f80b89b908 100644
+--- a/drivers/media/platform/qcom/venus/venc.c
++++ b/drivers/media/platform/qcom/venus/venc.c
+@@ -677,6 +677,13 @@ static int venc_set_properties(struct venus_inst *inst)
+ 	if (ret)
+ 		return ret;
+ 
++	ptype = HFI_PROPERTY_CONFIG_REALTIME;
++	en.enable = 1;
++
++	ret = hfi_session_set_property(inst, ptype, &en);
++	if (ret)
++		return ret;
++
+ 	ptype = HFI_PROPERTY_CONFIG_FRAME_RATE;
+ 	frate.buffer_type = HFI_BUFFER_OUTPUT;
+ 	frate.framerate = inst->fps * (1 << 16);
+-- 
+2.50.1
