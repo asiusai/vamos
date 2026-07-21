@@ -70,6 +70,10 @@ RUN ln -sf aic8800_fw/USB/aic8800D80 /lib/firmware/aic8800D80
 # Qualcomm GENI firmware for I2C/SPI/UART serial engines.
 COPY ./kernel/firmware/qcom/qcm6490/qupv3fw.elf /lib/firmware/qcom/qcm6490/qupv3fw.elf
 
+# Qualcomm Venus video encoder/decoder firmware from linux-firmware.
+COPY ./kernel/firmware/qcom/vpu-2.0/venus.mbn /lib/firmware/qcom/vpu-2.0/venus.mbn
+COPY ./kernel/firmware/LICENSES/LICENSE.qcom ./kernel/firmware/LICENSES/NOTICE.qcom /usr/share/licenses/linux-firmware/
+
 # Kernel modules are installed after Docker export in build_system.sh
 # (in-tree from build/modules_install + out-of-tree prebuilt from kernel/modules/)
 

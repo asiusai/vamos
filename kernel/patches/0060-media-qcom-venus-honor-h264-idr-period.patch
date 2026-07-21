@@ -1,0 +1,33 @@
+From 5d66e719dbba00bcf89e896814bd79eb5a37e548 Mon Sep 17 00:00:00 2001
+From: Asius <dev@asius.ai>
+Date: Tue, 21 Jul 2026 19:20:00 +0000
+Subject: [PATCH] media: qcom: venus: program periodic H.264 and HEVC IDRs
+
+The encoder registers V4L2_CID_MPEG_VIDEO_H264_I_PERIOD and stores its
+value, but always programs an IDR period of zero. This makes only the first
+I-frame an IDR frame and prevents a streaming decoder from joining or
+recovering at later GOP boundaries.
+
+Pass the configured H.264 period to firmware. Venus does not expose the HEVC
+refresh-period control, so make every HEVC I-frame an IDR. This keeps raw HEVC
+recordings independently decodable at GOP and segment boundaries.
+---
+ drivers/media/platform/qcom/venus/venc.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/qcom/venus/venc.c b/drivers/media/platform/qcom/venus/venc.c
+index f7e8c4e55e12..60fbfc0d8d4b 100644
+--- a/drivers/media/platform/qcom/venus/venc.c
++++ b/drivers/media/platform/qcom/venus/venc.c
+@@ -765,7 +765,8 @@ static int venc_set_properties(struct venus_inst *inst)
+ 		 * n > 1 - every n-th I-frame will be IDR frame
+ 		 */
+ 		ptype = HFI_PROPERTY_CONFIG_VENC_IDR_PERIOD;
+-		idrp.idr_period = 0;
++		idrp.idr_period = inst->fmt_cap->pixfmt == V4L2_PIX_FMT_H264 ?
++				    ctr->h264_i_period : 1;
+ 		ret = hfi_session_set_property(inst, ptype, &idrp);
+ 		if (ret)
+ 			return ret;
+-- 
+2.50.1
