@@ -127,16 +127,23 @@ PACKAGES_JSON="[]"
 PKG_COUNT=0
 PKGDB="$ROOTFS_DIR/usr/lib/xbps-db/pkgdb-0.38.plist"
 if exec_container test -f "$PKGDB" 2>/dev/null; then
-  PACKAGES_RAW=$(exec_container awk '
-    /<key>pkgver<\/key>/ { getline; gsub(/.*<string>|<\/string>.*/, ""); pkgver=$0 }
-    /<key>installed_size<\/key>/ { getline; gsub(/.*<integer>|<\/integer>.*/, ""); if(pkgver) print $0 "\t" pkgver; pkgver="" }
-  ' "$PKGDB")
-  if [ -n "$PACKAGES_RAW" ]; then
-    PACKAGES_JSON=$(echo "$PACKAGES_RAW" | sort -rn | jq -Rn '
-      [inputs | split("\t") | {name: .[1], bytes: (.[0] | tonumber)}]
-    ')
-    PKG_COUNT=$(echo "$PACKAGES_JSON" | jq 'length')
-  fi
+  PACKAGES_JSON=$(exec_container python3 -c '
+import json
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as f:
+  database = plistlib.load(f)
+
+packages = [
+  {"name": entry["pkgver"], "bytes": entry.get("installed_size", 0)}
+  for entry in database.values()
+  if isinstance(entry, dict) and "pkgver" in entry
+]
+packages.sort(key=lambda package: package["bytes"], reverse=True)
+print(json.dumps(packages, separators=(",", ":")))
+' "$PKGDB")
+  PKG_COUNT=$(echo "$PACKAGES_JSON" | jq 'length')
 fi
 
 # Top 30 directories by size
