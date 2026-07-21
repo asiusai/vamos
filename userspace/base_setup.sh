@@ -58,9 +58,7 @@ xbps-install -y \
   kmod \
   libarchive \
   libcurl \
-  libffi-devel \
   libgpiod \
-  liblzma-devel \
   libomp-devel \
   libtool \
   libusb-devel \
