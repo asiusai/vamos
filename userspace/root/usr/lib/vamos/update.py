@@ -31,6 +31,7 @@ PARTLABEL_DIR = Path("/dev/disk/by-partlabel")
 STATE_DIR = Path("/data/vamos-update")
 STATE_FILE = STATE_DIR / "state.json"
 HISTORY_FILE = STATE_DIR / "history.jsonl"
+USERDATA_MARKER = Path("/data/.vamos-userdata")
 LOCK_FILE = Path("/run/lock/vamos-update.lock")
 CMDLINE_FILE = Path("/proc/cmdline")
 TRIAL_MARKER = Path("/run/vamos-trial-boot")
@@ -800,6 +801,50 @@ def _layout_json() -> dict:
   return json.loads(output[json_start:])["partitiontable"]
 
 
+def _rsync_userdata(source: Path, destination: Path) -> None:
+  completed = run([
+    "rsync", "-aHAXx", "--numeric-ids", "--exclude=.tmp_value_*",
+    f"{source}/", f"{destination}/",
+  ], check=False, capture=False)
+  if completed.returncode == 24:
+    log("userdata changed while it was copied; continuing after rsync warning 24")
+  elif completed.returncode != 0:
+    raise UpdateError(f"userdata rsync failed with status {completed.returncode}")
+
+
+def _migrate_userdata(userdata_device: Path) -> None:
+  if os.path.ismount("/data"):
+    # A reboot after partition creation mounts the partial userdata volume at
+    # /data. Bind-mounting / exposes the legacy rootfs /data below that mount.
+    with tempfile.TemporaryDirectory(prefix="vamos-legacy-root-") as legacy_root:
+      run(["mount", "--bind", "/", legacy_root], capture=False)
+      try:
+        _rsync_userdata(Path(legacy_root) / "data", Path("/data"))
+        USERDATA_MARKER.touch()
+        os.sync()
+      finally:
+        run(["umount", legacy_root], capture=False)
+    return
+
+  with tempfile.TemporaryDirectory(prefix="vamos-data-") as mount_dir:
+    run(["mount", str(userdata_device), mount_dir], capture=False)
+    try:
+      destination = Path(mount_dir)
+      _rsync_userdata(Path("/data"), destination)
+      (destination / USERDATA_MARKER.name).touch()
+      os.sync()
+    finally:
+      run(["umount", mount_dir], capture=False)
+
+
+def _finish_layout_initialization() -> None:
+  active_entry = create_efi_entry("a", trial=False)
+  set_boot_order([active_entry])
+  clear_boot_next()
+  delete_efi_entries(EFI_LABEL["a"], except_entry=active_entry)
+  log("A/B partitions and persistent userdata are ready; reboot into slot A")
+
+
 def initialize_layout(*, confirm: bool) -> None:
   if os.geteuid() != 0:
     raise UpdateError("layout initialization must run as root")
@@ -810,7 +855,12 @@ def initialize_layout(*, confirm: bool) -> None:
   partitions = table.get("partitions", [])
   labels = [partition.get("name") for partition in partitions]
   if labels[:5] == ["esp_a", "rootfs_a", "esp_b", "rootfs_b", "userdata"]:
-    log("A/B layout already exists")
+    if USERDATA_MARKER.exists():
+      log("A/B layout already exists")
+      return
+    log("resuming incomplete A/B userdata migration")
+    _migrate_userdata(Path(f"{DISK}p5"))
+    _finish_layout_initialization()
     return
   if len(partitions) != 2 or labels not in (["esp", "rootfs"], ["esp_a", "rootfs_a"]):
     raise UpdateError(f"refusing to migrate unexpected partition layout: {labels}")
@@ -882,20 +932,8 @@ def initialize_layout(*, confirm: bool) -> None:
   run(["mkfs.ext4", "-F", "-L", "VAMOS-B", f"{DISK}p4"], capture=False)
   run(["mkfs.ext4", "-F", "-L", "VAMOS-DATA", f"{DISK}p5"], capture=False)
 
-  with tempfile.TemporaryDirectory(prefix="vamos-data-") as mount_dir:
-    run(["mount", f"{DISK}p5", mount_dir], capture=False)
-    try:
-      run(["rsync", "-aHAXx", "--numeric-ids", "/data/", f"{mount_dir}/"], capture=False)
-      (Path(mount_dir) / ".vamos-userdata").touch()
-      os.sync()
-    finally:
-      run(["umount", mount_dir], capture=False)
-
-  active_entry = create_efi_entry("a", trial=False)
-  set_boot_order([active_entry])
-  clear_boot_next()
-  delete_efi_entries(EFI_LABEL["a"], except_entry=active_entry)
-  log("A/B partitions and persistent userdata are ready; reboot into slot A")
+  _migrate_userdata(Path(f"{DISK}p5"))
+  _finish_layout_initialization()
 
 
 def _sfdisk_partition_line(number: int, partition: dict, name: str) -> str:

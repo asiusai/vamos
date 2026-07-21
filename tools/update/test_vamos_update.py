@@ -121,6 +121,46 @@ class StateFileTest(unittest.TestCase):
       self.assertEqual(state_file.stat().st_mode & 0o777, 0o644)
 
 
+class LayoutInitializationTest(unittest.TestCase):
+  def test_userdata_rsync_tolerates_files_vanishing(self) -> None:
+    result = subprocess.CompletedProcess(["rsync"], 24)
+    with mock.patch.object(update, "run", return_value=result) as run:
+      update._rsync_userdata(Path("/source"), Path("/destination"))
+
+    command = run.call_args.args[0]
+    self.assertIn("--exclude=.tmp_value_*", command)
+
+  def test_userdata_rsync_rejects_other_errors(self) -> None:
+    result = subprocess.CompletedProcess(["rsync"], 23)
+    with mock.patch.object(update, "run", return_value=result):
+      with self.assertRaises(update.UpdateError):
+        update._rsync_userdata(Path("/source"), Path("/destination"))
+
+  def test_incomplete_ab_layout_resumes_userdata_migration(self) -> None:
+    table = {
+      "partitions": [
+        {"name": "esp_a"},
+        {"name": "rootfs_a"},
+        {"name": "esp_b"},
+        {"name": "rootfs_b"},
+        {"name": "userdata"},
+      ],
+    }
+    with tempfile.TemporaryDirectory() as temporary:
+      marker = Path(temporary) / ".vamos-userdata"
+      with (
+        mock.patch.object(update.os, "geteuid", return_value=0),
+        mock.patch.object(update, "USERDATA_MARKER", marker),
+        mock.patch.object(update, "_layout_json", return_value=table),
+        mock.patch.object(update, "_migrate_userdata") as migrate,
+        mock.patch.object(update, "_finish_layout_initialization") as finish,
+      ):
+        update.initialize_layout(confirm=True)
+
+    migrate.assert_called_once_with(Path(f"{update.DISK}p5"))
+    finish.assert_called_once_with()
+
+
 class ImageWriteTest(unittest.TestCase):
   def test_write_and_verify_xz_image(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
