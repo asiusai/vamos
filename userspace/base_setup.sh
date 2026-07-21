@@ -39,7 +39,6 @@ xbps-install -y \
   bluez \
   clang \
   cmake \
-  czmq-devel \
   dbus-devel \
   dfu-util \
   dhcpcd \
