@@ -72,7 +72,6 @@ xbps-install -y \
   libuv-devel \
   logrotate \
   lz4 \
-  mesa-dri \
   mesa-opencl \
   nano \
   ncurses-devel \

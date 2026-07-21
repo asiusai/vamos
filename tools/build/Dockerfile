@@ -32,6 +32,10 @@ RUN cd /tmp/vamos/irsc_util && \
     gcc -Wall -O2 -o /usr/bin/irsc_util irsc_util.c && \
     rm -rf /tmp/vamos/irsc_util
 
+# Mesa DRI drivers (freedreno for Qualcomm Adreno GPU)
+# Required for EGL/GBM to work with the display
+RUN yes | xbps-install -Sy mesa-dri
+
 # Extra packages (nice-to-haves for development)
 RUN xbps-install -y \
   bash-completion \
