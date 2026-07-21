@@ -47,7 +47,6 @@ xbps-install -y \
   evtest \
   freetype-devel \
   fuse-sshfs \
-  gdb \
   gdbm-devel \
   git \
   git-lfs \
