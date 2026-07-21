@@ -115,7 +115,6 @@ def camera_list(selection: str) -> list[str]:
 
 
 def remote_env(selection: str, exposure_lines: int, target_grey: float,
-               preview_saturation: float, preview_median: float, enhance_preview: bool,
                pix_ioctl: bool, debug_frames: bool, log_awb: bool, log_ae: bool,
                extra_env: list[str]) -> list[str]:
   selected = camera_list(selection)
@@ -125,11 +124,6 @@ def remote_env(selection: str, exposure_lines: int, target_grey: float,
     "LOGPRINT=debug",
     f"ASIUS_CAM_START_EXPOSURE_LINES={exposure_lines}",
   ]
-  if enhance_preview:
-    env.extend([
-      f"ASIUS_SNAPSHOT_SATURATION={preview_saturation}",
-      f"ASIUS_SNAPSHOT_TARGET_MEDIAN={preview_median}",
-    ])
   if target_grey > 0.0:
     env.append(f"ASIUS_CAM_TARGET_GREY={target_grey}")
   if debug_frames:
@@ -151,7 +145,6 @@ def remote_env(selection: str, exposure_lines: int, target_grey: float,
 
 
 def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_lines: int, target_grey: float,
-                  preview_saturation: float, preview_median: float, enhance_preview: bool,
                   pix_ioctl: bool, raw_debug: bool, monitor_duration: float,
                   debug_frames: bool, log_awb: bool, log_ae: bool,
                   capture_dmesg: bool, extra_env: list[str]) -> str:
@@ -159,10 +152,8 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
   targets_literal = repr(cameras)
   raw_images_literal = repr(REMOTE_RAW_IMAGES)
   raw_stats_literal = repr(REMOTE_RAW_STATS)
-  enhance_preview_literal = repr(enhance_preview)
   env_words = " ".join(bash_env_word(word) for word in remote_env(
-    selection, exposure_lines, target_grey, preview_saturation, preview_median, enhance_preview,
-    pix_ioctl, debug_frames, log_awb, log_ae, extra_env))
+    selection, exposure_lines, target_grey, pix_ioctl, debug_frames, log_awb, log_ae, extra_env))
   openpilot_dir_q = shlex.quote(openpilot_dir)
   capture_dmesg_value = "1" if capture_dmesg else "0"
   return textwrap.dedent(f"""\
@@ -263,7 +254,6 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
 
     selected = {targets_literal}
     raw_debug = {raw_debug!r}
-    enhance_preview = {enhance_preview_literal}
     raw_images = {raw_images_literal}
     raw_stats = {raw_stats_literal}
     streams = {{
@@ -443,10 +433,7 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
           raw_frame_stats["frame_id"] = frame_id
           with open(raw_stats[key], "w") as f:
             json.dump(raw_frame_stats, f, indent=2, sort_keys=True)
-        if enhance_preview:
-          Image.fromarray(img).save(out, "JPEG")
-        else:
-          Image.fromarray(img).save(out, "JPEG", quality=95)
+        Image.fromarray(img).save(out, "JPEG", quality=95)
         saved[key] = True
         capture_stats[key] = {{
           "saved_frame_id": frame_id,
@@ -546,9 +533,6 @@ def main() -> int:
   parser.add_argument("--settle", type=float, default=7.0, help="seconds to let AE settle before saving")
   parser.add_argument("--exposure-lines", type=int, default=600, help="initial OS04 exposure lines")
   parser.add_argument("--target-grey", type=float, default=0.0, help="OS04 AE target grey fraction; 0 uses camerad defaults")
-  parser.add_argument("--enhance-preview", action="store_true", help="save tone-mapped preview JPEGs instead of unenhanced VisionIPC frames")
-  parser.add_argument("--preview-saturation", type=float, default=1.00, help="JPEG preview saturation boost used with --enhance-preview")
-  parser.add_argument("--preview-median", type=float, default=115.0, help="JPEG preview target median luma used with --enhance-preview")
   parser.add_argument("--pix-ioctl", action="store_true", help="use the experimental liberation-day-style VFE userspace ioctl path")
   parser.add_argument("--raw-debug", action="store_true", help="save unenhanced NV12-derived JPEGs and JSON stats beside the normal preview JPEG")
   parser.add_argument("--monitor-duration", type=float, default=5.0, help="seconds to keep camerad running before the one-shot JPEG capture")
@@ -580,7 +564,6 @@ def main() -> int:
 
   out_dir = Path(args.out_dir)
   script = remote_script(args.openpilot_dir, args.cam, args.settle, args.exposure_lines, args.target_grey,
-                         args.preview_saturation, args.preview_median, args.enhance_preview,
                          args.pix_ioctl, args.raw_debug, args.monitor_duration,
                          args.camerad_debug_frames, args.log_awb, args.log_ae,
                          args.check_dmesg, args.env)
@@ -662,8 +645,7 @@ def main() -> int:
     ]
     if args.check_dmesg:
       validator_cmd.extend(["--check-dmesg", "--max-dmesg-matches", str(args.validate_max_dmesg_matches)])
-    if not args.enhance_preview:
-      validator_cmd.append("--require-latest-raw-match")
+    validator_cmd.append("--require-latest-raw-match")
     if args.validate_ae_rgb_clip_guard:
       validator_cmd.extend([
         "--require-ae-rgb-clip-guard",
