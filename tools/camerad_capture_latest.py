@@ -259,7 +259,7 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
     import numpy as np
     from PIL import Image
     from msgq.visionipc import VisionIpcClient, VisionStreamType
-    from openpilot.system.camerad.snapshot import extract_image, jpeg_write
+    from openpilot.system.camerad.snapshot import extract_image
 
     selected = {targets_literal}
     raw_debug = {raw_debug!r}
@@ -444,7 +444,7 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
           with open(raw_stats[key], "w") as f:
             json.dump(raw_frame_stats, f, indent=2, sort_keys=True)
         if enhance_preview:
-          jpeg_write(out, img)
+          Image.fromarray(img).save(out, "JPEG")
         else:
           Image.fromarray(img).save(out, "JPEG", quality=95)
         saved[key] = True

@@ -436,8 +436,9 @@ def image_has_color(img):
 
 def capture_snapshots_worker():
     try:
+        from PIL import Image
         from msgq.visionipc import VisionIpcClient, VisionStreamType
-        from openpilot.system.camerad.snapshot import extract_image, jpeg_write
+        from openpilot.system.camerad.snapshot import extract_image
     except ImportError as e:
         fail(f"Cannot import snapshot deps: {e}")
         return False
@@ -465,7 +466,7 @@ def capture_snapshots_worker():
                 continue
             img = extract_image(buf)
             path = os.path.join(SNAPSHOT_DIR, f"{name}.jpg")
-            jpeg_write(path, img)
+            Image.fromarray(img).save(path, "JPEG")
             if image_has_color(img):
                 ok(f"{name}: {img.shape[1]}x{img.shape[0]} color saved to {path}")
             else:
