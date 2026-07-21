@@ -45,6 +45,7 @@ xbps-install -y \
   evtest \
   freetype \
   fuse-sshfs \
+  gdb \
   gdbm \
   git \
   git-lfs \
@@ -66,6 +67,7 @@ xbps-install -y \
   logrotate \
   lz4 \
   mesa-opencl \
+  nano \
   ncurses-devel \
   net-tools \
   NetworkManager \
