@@ -49,7 +49,8 @@ SYSTEM_SIZE = 10 * 1024 * 1024 * 1024
 IO_CHUNK_SIZE = 4 * 1024 * 1024
 MAX_MANIFEST_SIZE = 1024 * 1024
 ED25519_SIGNATURE_SIZE = 64
-EFI_LOADER = r"\EFI\BOOT\BOOTAA64.EFI"
+EFI_LOADER = r"\Image"
+EFI_RECOVERY_LOADER = Path("EFI/BOOT/BOOTAA64.EFI")
 EFI_LABEL = {"a": "vamOS A", "b": "vamOS B"}
 EFI_TRIAL_LABEL = {"a": "vamOS A trial", "b": "vamOS B trial"}
 EFI_PARTITION = {"a": 1, "b": 3}
@@ -465,14 +466,16 @@ def verify_esp_contents(device: Path) -> None:
     run(["mount", "-o", "ro", str(device), str(mount_path)])
     try:
       required = (
-        mount_path / "EFI/BOOT/BOOTAA64.EFI",
+        mount_path / EFI_RECOVERY_LOADER,
+        mount_path / "Image",
         mount_path / "qcs6490-radxa-dragon-q6a.dtb",
       )
       missing = [str(path.relative_to(mount_path)) for path in required if not path.is_file()]
       if missing:
         raise UpdateError(f"ESP image is not bootable: {', '.join(missing)}")
       verify_arm64_efi(required[0])
-      if required[1].read_bytes()[:4] != b"\xd0\r\xfe\xed":
+      verify_arm64_efi(required[1])
+      if required[2].read_bytes()[:4] != b"\xd0\r\xfe\xed":
         raise UpdateError("ESP device tree has an invalid FDT header")
     finally:
       run(["umount", str(mount_path)], capture=False)
@@ -489,6 +492,32 @@ def verify_arm64_efi(path: Path) -> None:
   machine = struct.unpack_from("<H", header, pe_offset + 4)[0]
   if machine != 0xaa64:
     raise UpdateError(f"ESP kernel is for unsupported PE machine 0x{machine:04x}")
+
+
+def sync_recovery_loader(source_slot: str, destination_slot: str) -> None:
+  """Refresh the removable-media fallback without replacing a rollback kernel."""
+  source_device = partition_path(source_slot, "esp")
+  destination_device = partition_path(destination_slot, "esp")
+  with tempfile.TemporaryDirectory(prefix="vamos-recovery-source-") as source_dir:
+    source_mount = Path(source_dir)
+    run(["mount", "-o", "ro", str(source_device), str(source_mount)])
+    try:
+      source = source_mount / EFI_RECOVERY_LOADER
+      verify_arm64_efi(source)
+      with tempfile.TemporaryDirectory(prefix="vamos-recovery-target-") as destination_dir:
+        destination_mount = Path(destination_dir)
+        run(["mount", "-o", "rw", str(destination_device), str(destination_mount)])
+        try:
+          destination = destination_mount / EFI_RECOVERY_LOADER
+          temporary = destination.with_name("BOOTAA64.NEW")
+          shutil.copyfile(source, temporary)
+          verify_arm64_efi(temporary)
+          os.replace(temporary, destination)
+          os.sync()
+        finally:
+          run(["umount", str(destination_mount)], capture=False)
+    finally:
+      run(["umount", str(source_mount)], capture=False)
 
 
 def efi_state() -> str:

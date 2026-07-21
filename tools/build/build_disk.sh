@@ -61,9 +61,9 @@ truncate -s "$TOTAL_BYTES" "$DISK_IMG"
 # GPT + partitions
 sgdisk --clear \
        --new=1:${ESP_START}:${ESP_END} \
-       --typecode=1:ef00 --change-name=1:esp \
+       --typecode=1:ef00 --change-name=1:esp_a \
        --new=2:${ROOTFS_START}:${ROOTFS_END} \
-       --typecode=2:8300 --change-name=2:rootfs \
+       --typecode=2:8300 --change-name=2:rootfs_a \
        "$DISK_IMG" >/dev/null
 
 # Copy partition contents into the disk image at the right offsets

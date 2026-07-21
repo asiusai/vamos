@@ -183,6 +183,19 @@ elif [ -f /VAMOS ]; then
     echo "WARN: legacy vamOS layout; /data is still part of the active rootfs"
 fi
 
+if [ -f /ASIUS ] && [ -f /VAMOS ] && [ -x /usr/bin/vamos-boot ] && mountpoint -q /data; then
+    /usr/bin/vamos-boot ensure
+    ensure_status=$?
+    if [ "$ensure_status" -eq 10 ]; then
+        echo "=> Rebooting into the committed vamOS slot after EFI repair"
+        sync
+        reboot -f
+        while true; do sleep 60; done
+    elif [ "$ensure_status" -ne 0 ]; then
+        echo "WARN: failed to ensure vamOS EFI boot entries"
+    fi
+fi
+
 if [ -f /VAMOS ] && [ -x /usr/bin/vamos-boot ]; then
     if ! /usr/bin/vamos-boot early 2>/run/vamos-boot-early.err; then
         echo "ERROR: failed to start vamOS trial watchdog; returning to the fallback slot"

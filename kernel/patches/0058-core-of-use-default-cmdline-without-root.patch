@@ -1,0 +1,18 @@
+diff --git a/drivers/of/fdt.c b/drivers/of/fdt.c
+index 2f489c6e42af..5c5bd0e4f8a1 100644
+--- a/drivers/of/fdt.c
++++ b/drivers/of/fdt.c
+@@ -1100,7 +1100,11 @@ handle_cmdline:
+ 	strscpy(cmdline, CONFIG_CMDLINE, COMMAND_LINE_SIZE);
+ #else
+-	/* No arguments from boot loader, use kernel's  cmdl*/
+-	if (!((char *)cmdline)[0])
++	/*
++	 * Qualcomm's removable-media fallback may pass only the EFI image
++	 * path. This kernel has no initramfs, so such a command line is no
++	 * more bootable than an empty one.
++	 */
++	if (!((char *)cmdline)[0] || !strstr(cmdline, "root="))
+ 		strscpy(cmdline, CONFIG_CMDLINE, COMMAND_LINE_SIZE);
+ #endif
+ #endif /* CONFIG_CMDLINE */
