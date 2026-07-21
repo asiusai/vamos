@@ -83,7 +83,6 @@ xbps-install -y \
   ocl-icd \
   opencl-headers \
   portaudio-devel \
-  ppp \
   pv \
   rsync \
   rsyslog \
@@ -102,10 +101,6 @@ xbps-install -y \
   wireless_tools \
   wpa_supplicant \
   zlib-devel \
-  libqmi \
-  libqmi-devel \
-  ModemManager \
-  ModemManager-devel \
   cronie \
   alacritty-terminfo \
   contour-terminfo \
