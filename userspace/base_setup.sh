@@ -78,7 +78,7 @@ xbps-install -y \
   nload \
   ocl-icd \
   opencl-headers \
-  portaudio-devel \
+  portaudio \
   pv \
   rsync \
   rsyslog \
