@@ -67,7 +67,7 @@ xbps-install -y \
   libomp-devel \
   libtool \
   libusb-devel \
-  libuv-devel \
+  libuv \
   logrotate \
   lz4 \
   mesa-opencl \
