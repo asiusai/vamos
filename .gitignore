@@ -1,4 +1,5 @@
 .ccache/
+.openpilot/
 /build/
 
 **/.DS_Store

@@ -8,6 +8,9 @@ VOID_ROOTFS_SHA256="01a30f17ae06d4d5b322cd579ca971bc479e02cc284ec1e5a4255bea6bac
 # Make sure we're in the correct spot
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null && pwd)"
 cd "$DIR"
+. "$DIR/tools/build/openpilot_checkout.sh"
+
+update_openpilot_checkout
 
 DOWNLOADS_DIR="$DIR/build/downloads"
 VOID_ROOTFS_FILE="$DOWNLOADS_DIR/void-aarch64-ROOTFS-20250202.tar.xz"
@@ -160,15 +163,12 @@ if [ -n "$KVER" ]; then
   exec_as_root depmod -b "$ROOTFS_DIR" -a "$KVER" 2>/dev/null || true
 fi
 
-# Use the sibling openpilot checkout to refresh the system Python environment.
+# Use the same managed checkout packaged by build_disk to refresh the system
+# Python environment.
 # /data is a separate userdata partition at runtime, so files baked below that
 # mount point would be hidden and only waste image space.
-OP_SRC=""
-for cand in "$DIR/../openpilot" "$(git -C "$DIR" rev-parse --show-superproject-working-tree 2>/dev/null)/openpilot"; do
-  [ -d "$cand" ] && OP_SRC="$(cd "$cand" && pwd)" && break
-done
-if [ -n "$OP_SRC" ]; then
-  echo "Staging tracked openpilot sources from $OP_SRC"
+echo "Staging tracked openpilot sources from $OP_SRC"
+if [ -d "$OP_SRC" ]; then
   exec_as_root mkdir -p "$ROOTFS_DIR/data/openpilot"
   GIT_LFS_SKIP_SMUDGE=1 git -C "$OP_SRC" archive HEAD |
     docker exec -i "$MOUNT_CONTAINER_ID" tar -xf - -C "$ROOTFS_DIR/data/openpilot"
@@ -205,16 +205,17 @@ if [ -n "$OP_SRC" ]; then
   '
   UV_STATUS=$?
   set -e
-  exec_as_root umount -l "$ROOTFS_DIR/sys" || true
-  exec_as_root umount -l "$ROOTFS_DIR/proc" || true
-  exec_as_root umount -l "$ROOTFS_DIR/dev" || true
+  exec_as_root umount "$ROOTFS_DIR/sys"
+  exec_as_root umount "$ROOTFS_DIR/proc"
+  exec_as_root umount "$ROOTFS_DIR/dev"
   exec_as_root rm -rf "$ROOTFS_DIR/data/openpilot"
   [ "$UV_STATUS" -eq 0 ] || exit "$UV_STATUS"
 
   echo "Deduplicating immutable Python environment files"
   exec_as_root hardlink -X -s 4096 "$ROOTFS_DIR/usr/local/venv"
 else
-  echo "WARN: openpilot not found next to vamos; Python dependencies may be stale"
+  echo "ERROR: managed openpilot checkout is missing: $OP_SRC" >&2
+  exit 1
 fi
 
 # Profile rootfs (before unmount)

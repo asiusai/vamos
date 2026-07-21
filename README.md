@@ -19,11 +19,33 @@ a new operating system for comma 3X and comma four
 ./vamos device-update comma@192.168.88.20
 ```
 
+The first system or disk build clones the Asius `openpilot` `one` branch into
+the gitignored `.openpilot/` checkout. Later builds fast-forward that checkout
+and its submodules. System builds use it for openpilot dependencies, and disk
+builds package it as a git-complete `/data/openpilot` checkout.
+The device therefore boots without downloading openpilot and can use normal
+Git commands afterward. OTA packages use `system.img`, which intentionally
+contains no `/data/openpilot` payload and cannot replace the device's existing
+openpilot checkout.
+
 `device-update` packages the locally built `build/system.img` and
 `build/esp.img`, rsyncs them directly to the device, and installs them into the
 inactive vamOS A/B slot. It does not use GitHub, R2, an openpilot branch, or the
 `VAMOS_VERSION` update gate. The image's existing `/VERSION` is used only for
 post-write verification, so rebuilding and reinstalling the same version works.
+
+## Dragon Hardware Video Encoding
+
+Dragon Q6A uses the mainline Qualcomm Venus V4L2 memory-to-memory driver. The
+root filesystem includes `qcom/vpu-2.0/venus.mbn`; openpilot can pass the VFE's
+NV12 DMA buffers directly to Venus without a CPU copy.
+
+Venus also requires `Hypervisor Settings -> Hypervisor Override` to be Enabled
+in Dragon UEFI so Linux boots at EL2. Without EL2, starting an encoder session
+can reboot the board. This setting is not changed automatically: on the tested
+firmware it also makes EFI variables unavailable to Linux, while the current
+A/B updater still requires EFI `BootNext`. Keep it manual until vamOS uses a
+filesystem-backed boot selector that works at EL2.
 
 Build the images separately, then deploy them. The device reboots into a
 one-shot trial of the new slot:
