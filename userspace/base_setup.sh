@@ -83,7 +83,6 @@ xbps-install -y \
   pv \
   rsync \
   rsyslog \
-  SDL2-devel \
   smartmontools \
   sqlite-devel \
   squashfs-tools \
