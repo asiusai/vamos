@@ -52,7 +52,6 @@ RUN xbps-install -y \
   tailscale \
   tree \
   wavemon \
-  android-tools \
   avahi-utils \
   usbutils
 

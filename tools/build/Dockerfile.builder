@@ -7,7 +7,6 @@ ARG UID
 ARG GID
 
 RUN apk add --no-cache \
-    android-tools \
     bash \
     bc \
     bison \
