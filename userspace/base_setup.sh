@@ -71,7 +71,6 @@ xbps-install -y \
   logrotate \
   lz4 \
   mesa-opencl \
-  nano \
   ncurses-devel \
   net-tools \
   NetworkManager \
