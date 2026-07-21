@@ -162,6 +162,13 @@ mount_part() {
 # both replaceable OS slots. Legacy two-partition installations continue using
 # the rootfs /data directory until `vamos-update initialize` migrates them.
 if [ -b /dev/nvme0n1p5 ] || [ -e /dev/disk/by-partlabel/userdata ]; then
+    # The Dragon continues general udev probing asynchronously for fast boot.
+    # Settle this one partition so the updater can rely on its persistent link.
+    if [ -b /dev/nvme0n1p5 ] && [ ! -e /dev/disk/by-partlabel/userdata ]; then
+        udevadm trigger --action=add /sys/class/block/nvme0n1p5
+        udevadm settle --timeout=2 ||
+            echo "WARN: userdata udev event did not settle"
+    fi
     echo "=> Mounting persistent userdata"
     userdata_dev="/dev/disk/by-partlabel/userdata"
     [ -e "$userdata_dev" ] || userdata_dev="/dev/nvme0n1p5"
