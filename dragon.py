@@ -378,7 +378,7 @@ def cmd_health(args):
     ssh_cmd = ["ssh", *ssh_opts, target,
                f"cd {root} && PYTHONPATH={root}:{root}/tinygrad_repo "
                f"OPENPILOT_ROOT={root} LD_LIBRARY_PATH=/opt/qcom-adreno/lib "
-               f"VISIONBUF_USE_DMA_HEAP=1 python3 -u {REMOTE_HEALTH_SCRIPT}"]
+               f"python3 -u {REMOTE_HEALTH_SCRIPT}"]
     ret = subprocess.run(ssh_cmd).returncode
     local_dir = "/tmp/dragon_health_local"
     os.makedirs(local_dir, exist_ok=True)
