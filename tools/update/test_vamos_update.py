@@ -286,6 +286,42 @@ class ActivationSafetyTest(unittest.TestCase):
 
 
 class EfiSafetyTest(unittest.TestCase):
+  def test_recovery_sync_preserves_slot_image(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      directory = Path(temporary)
+      source = directory / "source"
+      destination = directory / "destination"
+      (source / update.EFI_RECOVERY_LOADER.parent).mkdir(parents=True)
+      (destination / update.EFI_RECOVERY_LOADER.parent).mkdir(parents=True)
+      (source / update.EFI_RECOVERY_LOADER).write_bytes(b"new recovery")
+      (destination / update.EFI_RECOVERY_LOADER).write_bytes(b"old recovery")
+      (destination / "Image").write_bytes(b"rollback kernel")
+
+      class FixedTemporaryDirectory:
+        def __init__(self, path: Path):
+          self.path = path
+
+        def __enter__(self) -> str:
+          return str(self.path)
+
+        def __exit__(self, *_args) -> None:
+          return None
+
+      with (
+        mock.patch.object(update, "partition_path", side_effect=[Path("/esp_a"), Path("/esp_b")]),
+        mock.patch.object(update.tempfile, "TemporaryDirectory", side_effect=[
+          FixedTemporaryDirectory(source), FixedTemporaryDirectory(destination),
+        ]),
+        mock.patch.object(update, "verify_arm64_efi"),
+        mock.patch.object(update, "run") as run,
+        mock.patch.object(update.os, "sync"),
+      ):
+        update.sync_recovery_loader("a", "b")
+
+      self.assertEqual((destination / update.EFI_RECOVERY_LOADER).read_bytes(), b"new recovery")
+      self.assertEqual((destination / "Image").read_bytes(), b"rollback kernel")
+      self.assertEqual(run.call_count, 4)
+
   def test_entry_creation_does_not_modify_bootorder(self) -> None:
     with (
       mock.patch.object(update, "efi_entries", side_effect=[[], ["000A"]]),
@@ -297,6 +333,7 @@ class EfiSafetyTest(unittest.TestCase):
     command = run.call_args_list[0].args[0]
     self.assertIn("-C", command)
     self.assertNotIn("-c", command)
+    self.assertIn(update.EFI_LOADER, command)
 
   def test_clear_bootnext_falls_back_to_efivarfs(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
@@ -342,6 +379,81 @@ class BootSafetyTest(unittest.TestCase):
     with mock.patch.object(boot, "commit_boot") as commit_boot:
       with self.assertRaises(update.UpdateError):
         boot.commit()
+    commit_boot.assert_not_called()
+
+  def test_fallback_boot_repairs_entries_for_committed_slot(self) -> None:
+    state = {"state": "committed", "active_slot": "b"}
+    with (
+      mock.patch.object(boot, "is_trial_boot", return_value=False),
+      mock.patch.object(boot, "load_state", return_value=state),
+      mock.patch.object(boot, "current_slot", return_value="a"),
+      mock.patch.object(boot, "efi_state", return_value="Timeout: 0 seconds\n"),
+      mock.patch.object(boot, "commit_boot", return_value=("0000", "0001")) as commit_boot,
+    ):
+      reboot_needed = boot.ensure_boot_entries()
+
+    self.assertTrue(reboot_needed)
+    commit_boot.assert_called_once_with("b", "a")
+
+  def test_fallback_boot_without_state_keeps_running_slot(self) -> None:
+    with (
+      mock.patch.object(boot, "is_trial_boot", return_value=False),
+      mock.patch.object(boot, "load_state", return_value={}),
+      mock.patch.object(boot, "current_slot", return_value="a"),
+      mock.patch.object(boot, "efi_state", return_value="No BootOrder is set\n"),
+      mock.patch.object(boot, "commit_boot", return_value=("0000", "0001")) as commit_boot,
+    ):
+      reboot_needed = boot.ensure_boot_entries()
+
+    self.assertFalse(reboot_needed)
+    commit_boot.assert_called_once_with("a", "b")
+
+  def test_stable_boot_does_not_rewrite_entries(self) -> None:
+    firmware = (
+      "BootCurrent: 000A\n"
+      "BootOrder: 000A,000B\n"
+      "Boot000A* vamOS A HD(1,GPT,...)/\\Image\n"
+      "Boot000B* vamOS B HD(3,GPT,...)/\\Image\n"
+    )
+    with (
+      mock.patch.object(boot, "is_trial_boot", return_value=False),
+      mock.patch.object(boot, "load_state", return_value={"state": "committed", "active_slot": "a"}),
+      mock.patch.object(boot, "current_slot", return_value="a"),
+      mock.patch.object(boot, "efi_state", return_value=firmware),
+      mock.patch.object(boot, "commit_boot") as commit_boot,
+    ):
+      reboot_needed = boot.ensure_boot_entries()
+
+    self.assertFalse(reboot_needed)
+    commit_boot.assert_not_called()
+
+  def test_stable_boot_migrates_recovery_loader_entry(self) -> None:
+    firmware = (
+      "BootCurrent: 000A\n"
+      "BootOrder: 000A,000B\n"
+      "Boot000A* vamOS A HD(1,GPT,...)/\\EFI\\BOOT\\BOOTAA64.EFI\n"
+      "Boot000B* vamOS B HD(3,GPT,...)/\\EFI\\BOOT\\BOOTAA64.EFI\n"
+    )
+    with (
+      mock.patch.object(boot, "is_trial_boot", return_value=False),
+      mock.patch.object(boot, "load_state", return_value={"state": "committed", "active_slot": "a"}),
+      mock.patch.object(boot, "current_slot", return_value="a"),
+      mock.patch.object(boot, "efi_state", return_value=firmware),
+      mock.patch.object(boot, "commit_boot", return_value=("000C", "000D")) as commit_boot,
+    ):
+      reboot_needed = boot.ensure_boot_entries()
+
+    self.assertFalse(reboot_needed)
+    commit_boot.assert_called_once_with("a", "b")
+
+  def test_trial_boot_does_not_repair_entries(self) -> None:
+    with (
+      mock.patch.object(boot, "is_trial_boot", return_value=True),
+      mock.patch.object(boot, "commit_boot") as commit_boot,
+    ):
+      reboot_needed = boot.ensure_boot_entries()
+
+    self.assertFalse(reboot_needed)
     commit_boot.assert_not_called()
 
   def test_watchdog_launcher_uses_absolute_python_path(self) -> None:
@@ -415,12 +527,14 @@ class BootSafetyTest(unittest.TestCase):
       mock.patch.object(boot, "load_state", return_value=state),
       mock.patch.object(boot.time, "sleep", side_effect=disarm),
       mock.patch.object(boot, "commit_boot", side_effect=check_order) as commit_boot,
+      mock.patch.object(boot, "sync_recovery_loader") as sync_recovery_loader,
       mock.patch.object(boot, "save_state") as save_state,
       mock.patch.object(boot.os, "sync"),
     ):
       boot.commit()
 
     commit_boot.assert_called_once_with("b", "a")
+    sync_recovery_loader.assert_called_once_with("b", "a")
     self.assertEqual(state["state"], "committed")
     self.assertEqual(state["active_slot"], "b")
     self.assertEqual(state["previous_slot"], "a")
