@@ -8,8 +8,6 @@ dependencies = [
   "openpilot",
   "openpilot[testing]",
 
-  # hardware.py
-  "dbus-python",
   # bled.py
   "dbus-fast>=5.0.0,<6",
   # amplifier.py
