@@ -50,7 +50,6 @@ xbps-install -y \
   gdbm-devel \
   git \
   git-lfs \
-  glfw-devel \
   glib-devel \
   hostapd \
   htop \
