@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Assemble a compact initial disk image for Radxa Dragon Q6A.
 # `vamos-update initialize` migrates it to A/B plus persistent userdata.
-set -e
+set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null && pwd)"
 cd "$DIR"
@@ -12,6 +12,9 @@ DISK_IMG="$BUILD_DIR/dragon.img"
 KERNEL_IMAGE="$BUILD_DIR/Image"
 DTB_FILE="$BUILD_DIR/qcs6490-radxa-dragon-q6a.dtb"
 ROOTFS_IMG="$BUILD_DIR/system.img"
+INITIAL_DIR="$BUILD_DIR/tmp-disk"
+INITIAL_ROOTFS_IMG="$INITIAL_DIR/system.initial.img"
+. "$DIR/tools/build/openpilot_checkout.sh"
 
 if [ ! -f "$KERNEL_IMAGE" ]; then
   echo "ERROR: kernel Image not found at $KERNEL_IMAGE"
@@ -29,10 +32,138 @@ if [ ! -f "$ROOTFS_IMG" ]; then
   exit 1
 fi
 
+update_openpilot_checkout
+
+OP_COMMIT="$(git -C "$OP_SRC" rev-parse HEAD)"
+OP_DATE="$(git -C "$OP_SRC" log -1 --format=%ci)"
+OP_VERSION="$(sed -n 's/.*COMMA_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' "$OP_SRC/openpilot/common/version.h" | head -1)"
+
+mkdir -p "$INITIAL_DIR"
+echo "== Preparing initial rootfs with openpilot $OP_COMMIT =="
+cp --reflink=auto --sparse=always "$ROOTFS_IMG" "$INITIAL_ROOTFS_IMG"
+
+if ! docker image inspect vamos-builder >/dev/null 2>&1; then
+  docker build -f "$DIR/tools/build/Dockerfile.builder" -t vamos-builder "$DIR" \
+    --build-arg UNAME="$(id -nu)" \
+    --build-arg UID="$(id -u)" \
+    --build-arg GID="$(id -g)"
+fi
+
+MOUNT_ROOT="$(git -C "$DIR" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+[ -n "$MOUNT_ROOT" ] || MOUNT_ROOT="$(dirname "$DIR")"
+MOUNT_DIR="$INITIAL_DIR/rootfs"
+MOUNT_CONTAINER_ID="$(docker run -d --privileged -v /dev:/dev -v "$MOUNT_ROOT:$MOUNT_ROOT:z" vamos-builder)"
+mounted=0
+cleanup_mount() {
+  if [ "$mounted" -eq 1 ]; then
+    docker exec "$MOUNT_CONTAINER_ID" umount "$MOUNT_DIR" >/dev/null 2>&1 || true
+  fi
+  docker container rm -f "$MOUNT_CONTAINER_ID" >/dev/null 2>&1 || true
+}
+trap cleanup_mount EXIT
+
+docker exec "$MOUNT_CONTAINER_ID" mkdir -p "$MOUNT_DIR"
+docker exec "$MOUNT_CONTAINER_ID" mount -o loop "$INITIAL_ROOTFS_IMG" "$MOUNT_DIR"
+mounted=1
+
+OP_DST="$MOUNT_DIR/data/openpilot"
+CONTINUE="$MOUNT_DIR/data/continue.sh"
+docker exec "$MOUNT_CONTAINER_ID" rm -rf "$OP_DST"
+docker exec "$MOUNT_CONTAINER_ID" mkdir -p "$OP_DST"
+
+# The managed checkout is standalone, so copying it preserves working Git and
+# submodule metadata without rewriting paths on the target.
+tar -C "$OP_SRC" -cf - . \
+  | docker exec -i "$MOUNT_CONTAINER_ID" tar -C "$OP_DST" -xf -
+
+docker exec "$MOUNT_CONTAINER_ID" bash -c '
+set -euo pipefail
+
+OP_DST="$1"
+CONTINUE="$2"
+OP_COMMIT="$3"
+OP_DATE="$4"
+OP_REPO="$5"
+OP_VERSION="$6"
+
+git config --global --add safe.directory "$OP_DST"
+
+linked=0
+linked_bytes=0
+while read -r oid marker path; do
+  worktree="$OP_DST/$path"
+  object="$OP_DST/.git/lfs/objects/${oid:0:2}/${oid:2:2}/$oid"
+  [ -f "$object" ] && [ -f "$worktree" ] || continue
+  cmp -s "$object" "$worktree" || continue
+  mode="$(stat -c %a "$worktree")"
+  ln -f "$object" "$worktree"
+  chmod "$mode" "$worktree"
+  linked=$((linked + 1))
+  linked_bytes=$((linked_bytes + $(stat -c %s "$worktree")))
+done < <(git -C "$OP_DST" lfs ls-files -l)
+
+cat > "$OP_DST/build.json" <<BUILDJSON
+{
+  "channel": "one",
+  "openpilot": {
+    "version": "$OP_VERSION",
+    "release_notes": "",
+    "git_commit": "$OP_COMMIT",
+    "git_origin": "$OP_REPO",
+    "git_commit_date": "$OP_DATE",
+    "build_style": "source"
+  }
+}
+BUILDJSON
+
+cat >> "$OP_DST/.git/info/exclude" <<GITEXCLUDE
+/build.json
+/build/
+/scons_cache/
+/openpilot/selfdrive/modeld/models/*_tinygrad.pkl
+/openpilot/selfdrive/modeld/models/*_tinygrad.pkl.chunk*
+/openpilot/selfdrive/modeld/models/*_metadata.pkl
+/openpilot/selfdrive/modeld/models/*.prebuilt.pkl
+/openpilot/selfdrive/modeld/models/tg_compiled_flags.json
+GITEXCLUDE
+
+git -C "$OP_DST" lfs fsck
+if [ -n "$(git -C "$OP_DST" status --short --untracked-files=no)" ]; then
+  git -C "$OP_DST" status --short --untracked-files=no >&2
+  echo "ERROR: packaged openpilot checkout is dirty" >&2
+  exit 1
+fi
+if git -C "$OP_DST" submodule status --recursive | grep -q "^[+-U]"; then
+  git -C "$OP_DST" submodule status --recursive >&2
+  echo "ERROR: packaged openpilot submodules do not match their gitlinks" >&2
+  exit 1
+fi
+
+cat > "$CONTINUE.tmp" <<CONT
+#!/usr/bin/env bash
+cd /data/openpilot
+exec /data/openpilot/launch_openpilot.sh
+CONT
+chmod 755 "$CONTINUE.tmp"
+mv "$CONTINUE.tmp" "$CONTINUE"
+chown -R 1000:1000 "$OP_DST" "$CONTINUE"
+
+echo "Packaged openpilot $OP_COMMIT; hardlinked $linked LFS files ($linked_bytes bytes)"
+df -h "$(dirname "$OP_DST")"
+' _ "$OP_DST" "$CONTINUE" "$OP_COMMIT" "$OP_DATE" "$OP_REPO" "$OP_VERSION"
+
+docker exec "$MOUNT_CONTAINER_ID" sync
+docker exec "$MOUNT_CONTAINER_ID" umount "$MOUNT_DIR"
+mounted=0
+docker container rm -f "$MOUNT_CONTAINER_ID" >/dev/null
+trap - EXIT
+
+e2fsck -fn "$INITIAL_ROOTFS_IMG"
+
 ESP_SIZE_MB=256
 ESP_IMG="$BUILD_DIR/esp.img"
 
-ROOTFS_BYTES=$(stat -c%s "$ROOTFS_IMG")
+ROOTFS_BYTES=$(stat -c%s "$INITIAL_ROOTFS_IMG")
 ROOTFS_SECTORS=$(( (ROOTFS_BYTES + 511) / 512 ))
 
 ESP_SECTORS=$(( ESP_SIZE_MB * 1024 * 1024 / 512 ))
@@ -68,7 +199,7 @@ sgdisk --clear \
 
 # Copy partition contents into the disk image at the right offsets
 dd if="$ESP_IMG"    of="$DISK_IMG" bs=512 seek=$ESP_START    conv=notrunc status=none
-dd if="$ROOTFS_IMG" of="$DISK_IMG" bs=512 seek=$ROOTFS_START conv=notrunc status=none
+dd if="$INITIAL_ROOTFS_IMG" of="$DISK_IMG" bs=512 seek=$ROOTFS_START conv=notrunc,sparse status=none
 
 echo "== Done =="
 ls -lh "$DISK_IMG"

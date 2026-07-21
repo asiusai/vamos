@@ -55,16 +55,21 @@ ln -s /data/tmp/vscode-server ~/.vscode-server
 ln -s /data/tmp/vscode-server ~/.cursor-server
 ln -s /data/tmp/vscode-server ~/.windsurf-server
 
-# Auto-install openpilot if no continue.sh and no openpilot
-if [[ ! -f $CONTINUE && ! -d /data/openpilot ]]; then
-  echo "No openpilot found, cloning asiusai/openpilot one branch..."
-  git clone --depth 1 -b one https://github.com/asiusai/openpilot.git /data/openpilot
-  cat > $CONTINUE << 'CONT'
+# Initial Dragon images contain a git-complete openpilot checkout. OTA rootfs
+# images never contain /data, so an existing checkout remains untouched.
+if [[ ! -s $CONTINUE ]]; then
+  rm -f "$CONTINUE"
+  if git -C /data/openpilot rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    cat > "$CONTINUE.tmp" << 'CONT'
 #!/usr/bin/env bash
 cd /data/openpilot
 exec /data/openpilot/launch_openpilot.sh
 CONT
-  chmod +x $CONTINUE
+    chmod +x "$CONTINUE.tmp"
+    mv "$CONTINUE.tmp" "$CONTINUE"
+  else
+    echo "ERROR: built-in openpilot checkout is missing; refusing to create an invalid continue.sh"
+  fi
 fi
 
 while true; do
