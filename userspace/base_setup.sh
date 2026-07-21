@@ -49,7 +49,6 @@ xbps-install -y \
   gdbm \
   git \
   git-lfs \
-  glib-devel \
   hostapd \
   htop \
   i2c-tools \
