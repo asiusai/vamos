@@ -59,7 +59,7 @@ xbps-install -y \
   iputils \
   jq \
   kmod \
-  libarchive-devel \
+  libarchive \
   libcurl \
   libffi-devel \
   libgpiod \
