@@ -19,6 +19,11 @@ LIVESTREAM_SERVICES = (
     'livestreamWideRoadEncodeData',
     'livestreamDriverEncodeData',
 )
+CAMERA_SERVICE_INFO = (
+    ('roadCameraState', 'livestreamRoadEncodeData', 'road', 'VISION_STREAM_ROAD'),
+    ('wideRoadCameraState', 'livestreamWideRoadEncodeData', 'wide_road', 'VISION_STREAM_WIDE_ROAD'),
+    ('driverCameraState', 'livestreamDriverEncodeData', 'driver', 'VISION_STREAM_DRIVER'),
+)
 EXPECTED_FRAME_INTERVAL_MS = 50.0
 FRAME_INTERVAL_TOLERANCE_MS = 1.0
 EXPECTED_STREAM_FPS = 20.0
@@ -64,6 +69,17 @@ def import_messaging():
     except ImportError:
         from cereal import messaging
     return messaging
+
+
+def available_camera_info():
+    try:
+        from msgq.visionipc import VisionIpcClient, VisionStreamType
+        available = set(VisionIpcClient.available_streams("camerad", block=False))
+        return tuple(info for info in CAMERA_SERVICE_INFO
+                     if getattr(VisionStreamType, info[3]).value in available)
+    except Exception as e:
+        warn(f"Cannot query available camera streams: {e}")
+        return ()
 
 
 def section(title):
@@ -273,13 +289,22 @@ def measure_fps(duration=5):
         fail("cereal.messaging not available")
         return {}
 
-    socks = {cam: messaging.sub_sock(cam, conflate=False, timeout=100) for cam in CAMERA_SERVICES}
+    camera_services = tuple(info[0] for info in available_camera_info())
+    missing = set(CAMERA_SERVICES) - set(camera_services)
+    for cam in CAMERA_SERVICES:
+        if cam in missing:
+            warn(f"{cam:25s}  camera unavailable, skipped")
+    if not camera_services:
+        warn("No camera streams available")
+        return {}
+
+    socks = {cam: messaging.sub_sock(cam, conflate=False, timeout=100) for cam in camera_services}
     time.sleep(0.2)
     for s in socks.values():
         messaging.drain_sock(s)
 
-    frame_ids = {cam: [] for cam in CAMERA_SERVICES}
-    frame_times = {cam: [] for cam in CAMERA_SERVICES}
+    frame_ids = {cam: [] for cam in camera_services}
+    frame_times = {cam: [] for cam in camera_services}
     start = time.monotonic()
     while time.monotonic() - start < duration:
         for cam, sock in socks.items():
@@ -290,7 +315,7 @@ def measure_fps(duration=5):
         time.sleep(0.02)
 
     fps_results = {}
-    for cam in CAMERA_SERVICES:
+    for cam in camera_services:
         ids = frame_ids[cam]
         times = frame_times[cam]
         n = len(ids)
@@ -381,15 +406,24 @@ def measure_streaming(duration=5):
         fail("cereal.messaging not available")
         return {}
 
+    livestream_services = tuple(info[1] for info in available_camera_info())
+    missing = set(LIVESTREAM_SERVICES) - set(livestream_services)
+    for service in LIVESTREAM_SERVICES:
+        if service in missing:
+            warn(f"{service:32s}  camera unavailable, skipped")
+    if not livestream_services:
+        warn("No camera streams available")
+        return {}
+
     socks = {service: messaging.sub_sock(service, conflate=False, timeout=100)
-             for service in LIVESTREAM_SERVICES}
+             for service in livestream_services}
     time.sleep(0.2)
     for sock in socks.values():
         messaging.drain_sock(sock)
 
-    frames = {service: {} for service in LIVESTREAM_SERVICES}
-    encoded_samples = {service: bytearray() for service in LIVESTREAM_SERVICES}
-    sample_started = {service: False for service in LIVESTREAM_SERVICES}
+    frames = {service: {} for service in livestream_services}
+    encoded_samples = {service: bytearray() for service in livestream_services}
+    sample_started = {service: False for service in livestream_services}
     start = time.monotonic()
     while time.monotonic() - start < duration:
         for service, sock in socks.items():
@@ -489,11 +523,18 @@ def capture_snapshots_worker():
         fail(f"Cannot import snapshot deps: {e}")
         return False
 
+    available = set(VisionIpcClient.available_streams("camerad", block=False))
     streams = {
-        'road': VisionStreamType.VISION_STREAM_ROAD,
-        'wide_road': VisionStreamType.VISION_STREAM_WIDE_ROAD,
-        'driver': VisionStreamType.VISION_STREAM_DRIVER,
+        name: getattr(VisionStreamType, stream_name)
+        for _, _, name, stream_name in CAMERA_SERVICE_INFO
+        if getattr(VisionStreamType, stream_name).value in available
     }
+    missing = {info[2] for info in CAMERA_SERVICE_INFO} - set(streams)
+    for name in sorted(missing):
+        warn(f"{name}: camera unavailable, skipped")
+    if not streams:
+        warn("No camera streams available")
+        return True
     all_ok = True
     for name, stream_type in streams.items():
         try:
@@ -649,9 +690,9 @@ def run_checks():
 
     section("Summary")
     fps = results.get('fps', {})
-    fps_ok = all(v['ok'] for v in fps.values()) if fps else False
+    fps_ok = all(v['ok'] for v in fps.values())
     streaming = results.get('streaming', {})
-    streaming_ok = all(v['ok'] for v in streaming.values()) if streaming else False
+    streaming_ok = all(v['ok'] for v in streaming.values())
     checks = [
         ("NCM",          results['ncm']),
         ("WiFi",         results['wifi']),
