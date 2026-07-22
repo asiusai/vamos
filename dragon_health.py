@@ -388,6 +388,8 @@ def measure_streaming(duration=5):
         messaging.drain_sock(sock)
 
     frames = {service: {} for service in LIVESTREAM_SERVICES}
+    encoded_samples = {service: bytearray() for service in LIVESTREAM_SERVICES}
+    sample_started = {service: False for service in LIVESTREAM_SERVICES}
     start = time.monotonic()
     while time.monotonic() - start < duration:
         for service, sock in socks.items():
@@ -396,6 +398,12 @@ def measure_streaming(duration=5):
                 if len(encoded.data):
                     frames[service][encoded.idx.frameId] = (
                         msg.logMonoTime, encoded.width, encoded.height, len(encoded.data))
+                    if encoded.idx.flags & 0x8:
+                        sample_started[service] = True
+                        encoded_samples[service].clear()
+                    if sample_started[service]:
+                        encoded_samples[service].extend(encoded.header)
+                        encoded_samples[service].extend(encoded.data)
         time.sleep(0.01)
 
     results = {}
@@ -410,16 +418,54 @@ def measure_streaming(duration=5):
         fps = (len(samples) - 1) / elapsed if elapsed > 0 else 0
         dimensions = {(sample[1], sample[2]) for sample in samples}
         total_bytes = sum(sample[3] for sample in samples)
+        visual_ok = validate_encoded_stream(service, encoded_samples[service])
         stream_ok = (
             abs(fps - EXPECTED_STREAM_FPS) <= STREAM_FPS_TOLERANCE
             and dimensions == {(1344, 760)}
             and total_bytes > 0
+            and visual_ok
         )
         results[service] = {'fps': fps, 'frames': len(samples), 'ok': stream_ok}
         msg = (f"{service:32s}  {fps:.2f} fps, {len(samples)} frames, "
                f"{total_bytes / 1024:.0f} KiB, dimensions={sorted(dimensions)}")
         (ok if stream_ok else fail)(msg)
     return results
+
+
+def validate_encoded_stream(service, encoded_data):
+    try:
+        import av
+        import numpy as np
+        from PIL import Image
+
+        snapshot_dir = Path(SNAPSHOT_DIR)
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        name = service.removeprefix('livestream').removesuffix('EncodeData')
+        encoded_path = snapshot_dir / f"{name}.h264"
+        image_path = snapshot_dir / f"{name}_encoded.jpg"
+        encoded_path.write_bytes(encoded_data)
+        decoder = av.CodecContext.create("h264", "r")
+        decoded_frames = decoder.decode(av.Packet(bytes(encoded_data)))
+        if not decoded_frames:
+            fail(f"{service:32s}  hardware stream produced no decodable frames")
+            return False
+
+        image = decoded_frames[0].to_ndarray(format="rgb24")
+        Image.fromarray(image).save(image_path, "JPEG")
+        image = image.astype(np.float32)
+        luminance = image.mean(axis=2)
+        row_delta = float(np.abs(np.diff(luminance, axis=0)).mean())
+        column_delta = float(np.abs(np.diff(luminance, axis=1)).mean())
+        dynamic_range = float(np.percentile(luminance, 95) - np.percentile(luminance, 5))
+        striped = row_delta > 15.0 and row_delta > max(4.0 * column_delta, 25.0)
+        valid = image.shape[:2] == (760, 1344) and dynamic_range >= 8.0 and not striped
+        message = (f"{service:32s}  decoded image range={dynamic_range:.1f}, "
+                   f"row/column delta={row_delta:.1f}/{column_delta:.1f}, saved to {image_path}")
+        (ok if valid else fail)(message)
+        return valid
+    except Exception as e:
+        fail(f"{service:32s}  hardware stream inspection failed: {e}")
+        return False
 
 
 def image_has_color(img):
@@ -482,8 +528,8 @@ def capture_snapshots():
     section("Camera Snapshots")
     snapshot_dir = Path(SNAPSHOT_DIR)
     snapshot_dir.mkdir(parents=True, exist_ok=True)
-    for path in snapshot_dir.glob("*.jpg"):
-        path.unlink()
+    for name in ('road', 'wide_road', 'driver'):
+        (snapshot_dir / f"{name}.jpg").unlink(missing_ok=True)
 
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(OPENPILOT_PYTHON_PATHS)
