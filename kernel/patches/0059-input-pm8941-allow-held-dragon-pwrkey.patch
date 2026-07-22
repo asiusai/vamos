@@ -2,17 +2,18 @@ diff --git a/drivers/input/misc/pm8941-pwrkey.c b/drivers/input/misc/pm8941-pwrk
 index 79a440aba2e6..daf4b899bd06 100644
 --- a/drivers/input/misc/pm8941-pwrkey.c
 +++ b/drivers/input/misc/pm8941-pwrkey.c
-@@ -49,6 +49,17 @@
+@@ -49,6 +49,18 @@
  #define  PON_RESIN_PULL_UP		BIT(0)
  
  #define PON_DBC_CTL			0x71
 +#define PON_KPDPWR_S2_CNTL2		0x43
++#define PON_KPDPWR_RESIN_S2_CNTL2	0x4b
 +#define PON_S3_SRC			0x74
 +#define PON_S3_DBC_CTL			0x75
 +#define PON_SEC_ACCESS			0xd0
 +#define  PON_S2_RESET_ENABLE		BIT(7)
 +#define  PON_S3_SRC_MASK		GENMASK(1, 0)
-+#define  PON_S3_SRC_KPDPWR_AND_RESIN	2
++#define  PON_S3_SRC_RESIN		1
 +#define  PON_S3_DBC_DELAY_MASK		GENMASK(2, 0)
 +#define  PON_S3_DBC_128_SECONDS		7
 +#define  PON_SEC_UNLOCK			0xa5
@@ -20,7 +21,7 @@ index 79a440aba2e6..daf4b899bd06 100644
  #define  PON_DBC_DELAY_MASK_GEN1	0x7
  #define  PON_DBC_DELAY_MASK_GEN2	0xf
  #define  PON_DBC_SHIFT_GEN1		6
-@@ -216,6 +227,65 @@ static int pm8941_pwrkey_sw_debounce_init(struct pm8941_pwrkey *pwrkey)
+@@ -216,6 +228,74 @@ static int pm8941_pwrkey_sw_debounce_init(struct pm8941_pwrkey *pwrkey)
  	return 0;
  }
  
@@ -45,6 +46,14 @@ index 79a440aba2e6..daf4b899bd06 100644
 +		return dev_err_probe(pwrkey->dev, error,
 +				     "failed to disable KPDPWR S2 reset\n");
 +
++	error = regmap_update_bits(pwrkey->regmap,
++				   pwrkey->pon_pbs_baseaddr +
++				   PON_KPDPWR_RESIN_S2_CNTL2,
++				   PON_S2_RESET_ENABLE, 0);
++	if (error)
++		return dev_err_probe(pwrkey->dev, error,
++				     "failed to disable KPDPWR+RESIN S2 reset\n");
++
 +	/* S3 debounce is protected by the PON secure-access register. */
 +	error = regmap_write(pwrkey->regmap,
 +			     pwrkey->pon_pbs_baseaddr + PON_SEC_ACCESS,
@@ -64,7 +73,7 @@ index 79a440aba2e6..daf4b899bd06 100644
 +	error = regmap_update_bits(pwrkey->regmap,
 +				   pwrkey->pon_pbs_baseaddr + PON_S3_SRC,
 +				   PON_S3_SRC_MASK,
-+				   PON_S3_SRC_KPDPWR_AND_RESIN);
++				   PON_S3_SRC_RESIN);
 +	if (error)
 +		return dev_err_probe(pwrkey->dev, error,
 +				     "failed to configure PON S3 source\n");
@@ -74,11 +83,12 @@ index 79a440aba2e6..daf4b899bd06 100644
 +	if (error)
 +		return error;
 +
-+	if ((s3_src & PON_S3_SRC_MASK) != PON_S3_SRC_KPDPWR_AND_RESIN)
++	if ((s3_src & PON_S3_SRC_MASK) != PON_S3_SRC_RESIN)
 +		dev_warn(pwrkey->dev, "PON S3 source is write-locked at %#x\n",
 +			 s3_src & PON_S3_SRC_MASK);
 +	else
-+		dev_info(pwrkey->dev, "disabled KPDPWR long-press reset\n");
++		dev_info(pwrkey->dev,
++			 "removed KPDPWR from S2/S3 reset sources\n");
 +
 +	return 0;
 +}
@@ -86,7 +96,7 @@ index 79a440aba2e6..daf4b899bd06 100644
  static int pm8941_pwrkey_suspend(struct device *dev)
  {
  	struct pm8941_pwrkey *pwrkey = dev_get_drvdata(dev);
-@@ -302,6 +372,10 @@ static int pm8941_pwrkey_probe(struct platform_device *pdev)
+@@ -302,6 +382,10 @@ static int pm8941_pwrkey_probe(struct platform_device *pdev)
  			pwrkey->pon_pbs_baseaddr = be32_to_cpup(addr);
  	}
  
