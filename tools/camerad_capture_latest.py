@@ -120,7 +120,7 @@ def remote_env(selection: str, exposure_lines: int, target_grey: float,
   selected = camera_list(selection)
   env = [
     "ASIUS=1",
-    "ASIUS_CAMERA_ONE=1",
+    "ASIUS_CAMERA_V1=1",
     "LOGPRINT=debug",
     f"ASIUS_CAM_START_EXPOSURE_LINES={exposure_lines}",
   ]

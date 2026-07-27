@@ -2,6 +2,26 @@
 
 /usr/comma/sound/adsp-start.sh
 
+if [ -f /ASIUS ]; then
+  echo "waiting for Dragon sound card to come online"
+  while [ ! -e /dev/snd/controlC0 ]; do
+    sleep 0.01
+  done
+  echo "Dragon sound card online"
+
+  chgrp audio /dev/snd/*
+  chmod 660 /dev/snd/*
+
+  while ! /usr/comma/sound/tinymix controls | grep -q "PRI_MI2S_RX Audio Mixer MultiMedia1"; do
+    sleep 0.01
+  done
+  echo "Dragon Primary MI2S controls ready"
+
+  /usr/comma/sound/tinymix set "PRI_MI2S_RX Audio Mixer MultiMedia1" 1
+  /usr/comma/sound/tinymix set "MultiMedia1 Mixer PRI_MI2S_TX" 1
+  exit 0
+fi
+
 echo "waiting for sound card to come online"
 while [ ! -d /proc/asound/sdm845tavilsndc ] || [ "$(cat /proc/asound/card0/state 2> /dev/null)" != "ONLINE" ] ; do
   sleep 0.01
