@@ -1,0 +1,83 @@
+diff --git a/drivers/platform/arm64/Kconfig b/drivers/platform/arm64/Kconfig
+index 8e4a1556d..17504440c 100644
+--- a/drivers/platform/arm64/Kconfig
++++ b/drivers/platform/arm64/Kconfig
+@@ -90,4 +90,12 @@ config EC_LENOVO_THINKPAD_T14S
+ 
+ 	  Say M or Y here to include this support.
+ 
++config ASIUS_V1_SOM_ID
++	bool "Asius v1 SOM identity"
++	depends on ARCH_QCOM
++	default y
++	help
++	  Expose the Asius v1 SOM identity declared by device tree through
++	  the sysfs interface expected by openpilot hardware logging.
++
+ endif # ARM64_PLATFORM_DEVICES
+diff --git a/drivers/platform/arm64/Makefile b/drivers/platform/arm64/Makefile
+index 160690dbf..036f73702 100644
+--- a/drivers/platform/arm64/Makefile
++++ b/drivers/platform/arm64/Makefile
+@@ -8,3 +8,4 @@ obj-$(CONFIG_EC_ACER_ASPIRE1)	+= acer-aspire1-ec.o
+ obj-$(CONFIG_EC_HUAWEI_GAOKUN)	+= huawei-gaokun-ec.o
+ obj-$(CONFIG_EC_LENOVO_YOGA_C630) += lenovo-yoga-c630.o
+ obj-$(CONFIG_EC_LENOVO_THINKPAD_T14S) += lenovo-thinkpad-t14s.o
++obj-$(CONFIG_ASIUS_V1_SOM_ID)	+= asius-v1-som-id.o
+diff --git a/drivers/platform/arm64/asius-v1-som-id.c b/drivers/platform/arm64/asius-v1-som-id.c
+new file mode 100644
+index 000000000..5df963014
+--- /dev/null
++++ b/drivers/platform/arm64/asius-v1-som-id.c
+@@ -0,0 +1,51 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <linux/device.h>
++#include <linux/errno.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/property.h>
++#include <linux/sysfs.h>
++
++static ssize_t som_id_show(struct device *dev,
++			   struct device_attribute *attr, char *buf)
++{
++	u32 id;
++	int ret;
++
++	ret = device_property_read_u32(dev, "asius,som-id", &id);
++	if (ret)
++		return ret;
++
++	return sysfs_emit(buf, "%u\n", id);
++}
++static DEVICE_ATTR_RO(som_id);
++
++static struct attribute *asius_v1_som_id_attrs[] = {
++	&dev_attr_som_id.attr,
++	NULL,
++};
++ATTRIBUTE_GROUPS(asius_v1_som_id);
++
++static int asius_v1_som_id_probe(struct platform_device *pdev)
++{
++	return devm_device_add_group(&pdev->dev, &asius_v1_som_id_group);
++}
++
++static const struct of_device_id asius_v1_som_id_match[] = {
++	{ .compatible = "asius,v1-som-id" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, asius_v1_som_id_match);
++
++static struct platform_driver asius_v1_som_id_driver = {
++	.probe = asius_v1_som_id_probe,
++	.driver = {
++		.name = "asius-v1-som-id",
++		.of_match_table = asius_v1_som_id_match,
++	},
++};
++module_platform_driver(asius_v1_som_id_driver);
++
++MODULE_DESCRIPTION("Asius v1 SOM identity driver");
++MODULE_LICENSE("GPL");
