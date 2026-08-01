@@ -6,6 +6,9 @@ export HOME=/home/comma
 export USER=comma
 export LOGNAME=comma
 
+# Match the limits granted to comma's login sessions in limits.conf.
+prlimit --rtprio=100:100 --nice=30:30 --pid $$
+
 while [ ! -x /data/github-runner/run.sh ] || [ ! -f /data/github-runner/.runner ]; do
   echo "github-runner: waiting for /data/github-runner configuration"
   sleep 30
