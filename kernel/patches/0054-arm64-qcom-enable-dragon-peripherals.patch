@@ -11,12 +11,24 @@ index 1e793de..c6e7096 100644
  	status = "okay";
  };
  
-@@ -1571,3 +1573,359 @@
+@@ -1571,3 +1573,371 @@
  		bias-pull-up;
  	};
  };
 +
 +&{/} {
++	vendor: vendor {
++		compatible = "simple-bus";
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		gpio-som-id {
++			compatible = "asius,v1-som-id";
++			asius,som-id = <0>;
++		};
++	};
++
 +	ext_cam_clk_os04_cam2: ext-cam-clk-os04-cam2 {
 +		status = "okay";
 +		compatible = "fixed-clock";
