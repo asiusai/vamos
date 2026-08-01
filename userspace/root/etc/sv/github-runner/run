@@ -1,6 +1,11 @@
 #!/bin/sh
 exec 2>&1
 
+export PATH=/usr/local/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export HOME=/home/comma
+export USER=comma
+export LOGNAME=comma
+
 while [ ! -x /data/github-runner/run.sh ] || [ ! -f /data/github-runner/.runner ]; do
   echo "github-runner: waiting for /data/github-runner configuration"
   sleep 30
