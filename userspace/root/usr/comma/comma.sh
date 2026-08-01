@@ -2,6 +2,7 @@
 # Void Linux version - uses sv instead of systemctl
 
 source /etc/profile
+DEVICE_TYPE="$(device-type)"
 
 # Add venv to PATH for Void
 export PATH="/usr/local/venv/bin:$PATH"
@@ -39,7 +40,7 @@ if [ ! -f /tmp/booted ]; then
   elif [ "$(cat /sys/class/input/input*/device/touch_count 2>/dev/null | head -1)" -gt 4 ] 2>/dev/null; then
     echo "launching system reset, got taps"
     $RESET --tap-reset
-  elif [ ! -f /ASIUS ] && ! mountpoint -q /data; then
+  elif [ "$DEVICE_TYPE" != "v1" ] && ! mountpoint -q /data; then
     echo "userdata not mounted. loading system reset"
     $RESET --recover
   fi

@@ -1,0 +1,19 @@
+#!/bin/sh
+
+if [ -n "${DEVICE_TYPE:-}" ]; then
+  printf '%s\n' "$DEVICE_TYPE"
+  exit 0
+fi
+
+model_path=/sys/firmware/devicetree/base/model
+if [ ! -r "$model_path" ]; then
+  printf '%s\n' pc
+  exit 0
+fi
+
+model="$(tr -d '\000' < "$model_path")"
+case "$model" in
+  "comma "*|"asius "*) printf '%s\n' "${model#* }" ;;
+  "Radxa Dragon Q6A") printf '%s\n' v1 ;;
+  *) printf '%s\n' "$model" ;;
+esac
