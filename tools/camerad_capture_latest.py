@@ -189,13 +189,13 @@ def remote_script(openpilot_dir: str, selection: str, settle: float, exposure_li
       /tmp/asius-cam1-raw.jpg /tmp/asius-cam2-raw.jpg /tmp/asius-cam3-raw.jpg \\
       /tmp/asius-cam1-raw-stats.json /tmp/asius-cam2-raw-stats.json /tmp/asius-cam3-raw-stats.json \\
       {REMOTE_LOG} {REMOTE_VIPC_STATS} {REMOTE_CPU_STATS} {REMOTE_DMESG_LOG} /tmp/camerad_dual_latest.pid
-    pkill -x camerad 2>/dev/null || true
+    pkill -x camerad_v1 2>/dev/null || true
     pkill -f '/tmp/camerad-cache' 2>/dev/null || true
     if [ "$capture_dmesg" = "1" ] && command -v dmesg >/dev/null 2>&1; then
       dmesg_before_lines=$(dmesg 2>/dev/null | wc -l || echo 0)
     fi
     export {env_words}
-    ./system/camerad/camerad > {REMOTE_LOG} 2>&1 &
+    ./system/camerad/camerad_v1 > {REMOTE_LOG} 2>&1 &
     pid=$!
     echo "$pid" > /tmp/camerad_dual_latest.pid
     sleep 1
