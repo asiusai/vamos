@@ -22,8 +22,14 @@ update_openpilot_checkout() {
     fi
     echo "== Updating cached openpilot $OP_BRANCH checkout =="
     git -C "$OP_SRC" remote set-url origin "$OP_REPO"
-    git -C "$OP_SRC" checkout "$OP_BRANCH"
-    git -C "$OP_SRC" pull --ff-only origin "$OP_BRANCH"
+    git -C "$OP_SRC" config remote.origin.fetch "+refs/heads/$OP_BRANCH:refs/remotes/origin/$OP_BRANCH"
+    git -C "$OP_SRC" fetch --prune origin
+    if git -C "$OP_SRC" show-ref --verify --quiet "refs/heads/$OP_BRANCH"; then
+      git -C "$OP_SRC" checkout "$OP_BRANCH"
+      git -C "$OP_SRC" merge --ff-only "origin/$OP_BRANCH"
+    else
+      git -C "$OP_SRC" checkout --track -b "$OP_BRANCH" "origin/$OP_BRANCH"
+    fi
     git -C "$OP_SRC" submodule sync --recursive
     git -C "$OP_SRC" submodule update --init --recursive --jobs "$(nproc)"
     git -C "$OP_SRC" lfs pull
