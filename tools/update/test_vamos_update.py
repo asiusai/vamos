@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import contextlib
 import json
 import lzma
 import os
@@ -122,6 +123,48 @@ class StateFileTest(unittest.TestCase):
 
 
 class LayoutInitializationTest(unittest.TestCase):
+  def test_layout_is_marked_ready_only_after_boot_control_finishes(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      directory = Path(temporary)
+      selector = directory / "BOOTAA64.EFI"
+      ready_marker = directory / ".vamos-ab-ready"
+      selector.write_bytes(b"selector")
+      with (
+        mock.patch.object(update, "BOOT_SELECTOR_SOURCE", selector),
+        mock.patch.object(update, "LAYOUT_READY_MARKER", ready_marker),
+        mock.patch.object(update, "current_slot", return_value="a"),
+        mock.patch.object(update, "root_reference", side_effect=lambda slot: f"PARTLABEL=rootfs_{slot}"),
+        mock.patch.object(update, "_install_selector_on_slot"),
+        mock.patch.object(update, "set_boot_control", return_value=4) as set_control,
+        mock.patch.object(update.os.path, "ismount", return_value=True),
+        mock.patch.object(update.os, "sync"),
+      ):
+        update._finish_layout_initialization()
+
+      set_control.assert_called_once_with("a")
+      self.assertTrue(ready_marker.is_file())
+
+  def test_compact_image_gpt_is_relocated_to_physical_disk_end(self) -> None:
+    table = {"lastlba": 100}
+    relocated = {"lastlba": 966}
+
+    def fake_run(command, **kwargs):
+      if command[:2] == ["blockdev", "--getsz"]:
+        return subprocess.CompletedProcess(command, 0, "1000\n", "")
+      return subprocess.CompletedProcess(command, 0, "", "")
+
+    with (
+      mock.patch.object(update, "run", side_effect=fake_run) as run,
+      mock.patch.object(update, "_layout_json", return_value=relocated) as layout_json,
+    ):
+      self.assertIs(update._relocate_backup_gpt(table), relocated)
+
+    run.assert_any_call([
+      "sfdisk", "--no-reread", "--relocate", "gpt-bak-std", str(update.DISK),
+    ], capture=False)
+    run.assert_any_call(["blockdev", "--rereadpt", str(update.DISK)], check=False, capture=False)
+    layout_json.assert_called_once_with()
+
   def test_userdata_rsync_tolerates_files_vanishing(self) -> None:
     result = subprocess.CompletedProcess(["rsync"], 24)
     with mock.patch.object(update, "run", return_value=result) as run:
@@ -152,13 +195,34 @@ class LayoutInitializationTest(unittest.TestCase):
         mock.patch.object(update.os, "geteuid", return_value=0),
         mock.patch.object(update, "USERDATA_MARKER", marker),
         mock.patch.object(update, "_layout_json", return_value=table),
+        mock.patch.object(update, "_ensure_incomplete_layout_filesystems") as ensure_filesystems,
         mock.patch.object(update, "_migrate_userdata") as migrate,
         mock.patch.object(update, "_finish_layout_initialization") as finish,
       ):
         update.initialize_layout(confirm=True)
 
+    ensure_filesystems.assert_called_once_with()
     migrate.assert_called_once_with(Path(f"{update.DISK}p5"))
     finish.assert_called_once_with()
+
+  def test_incomplete_layout_only_formats_missing_filesystems(self) -> None:
+    results = {
+      str(update.DISK) + "p3": "vfat\n",
+      str(update.DISK) + "p4": "ext4\n",
+      str(update.DISK) + "p5": "",
+    }
+
+    def fake_run(command, **kwargs):
+      if command[0] == "blkid":
+        return subprocess.CompletedProcess(command, 0, results[command[-1]], "")
+      return subprocess.CompletedProcess(command, 0, "", "")
+
+    with mock.patch.object(update, "run", side_effect=fake_run) as run:
+      update._ensure_incomplete_layout_filesystems()
+
+    commands = [call.args[0] for call in run.call_args_list]
+    self.assertIn(["mkfs.ext4", "-F", "-L", "VAMOS-DATA", str(update.DISK) + "p5"], commands)
+    self.assertNotIn(["mkfs.vfat", "-F", "32", "-n", "VAMOS-B", str(update.DISK) + "p3"], commands)
 
 
 class ImageWriteTest(unittest.TestCase):
@@ -245,8 +309,10 @@ class ActivationSafetyTest(unittest.TestCase):
       mock.patch.object(update, "verify_layout"),
       mock.patch.object(update, "current_slot", return_value="a"),
       mock.patch.object(update, "partition_path", side_effect=lambda slot, name: Path(f"/{slot}/{name}")),
-      mock.patch.object(update, "rollback_boot", return_value="0001") as rollback,
+      mock.patch.object(update, "selected_boot_control", return_value={"generation": 1}),
+      mock.patch.object(update, "rollback_boot", return_value=2) as rollback,
       mock.patch.object(update, "write_image", side_effect=lambda spec, destination, progress_callback=None: writes.append(spec.name)),
+      mock.patch.object(update, "prepare_disk_selector", return_value=3) as prepare_selector,
       mock.patch.object(update, "verify_system_contents"),
       mock.patch.object(update, "verify_esp_contents"),
       mock.patch.object(update, "activate_staged", return_value={"state": "ready"}) as activate,
@@ -255,17 +321,20 @@ class ActivationSafetyTest(unittest.TestCase):
 
     self.assertEqual(writes, ["system", "esp"])
     rollback.assert_called_once_with("a", "b")
+    prepare_selector.assert_called_once_with("a", "b")
     activate.assert_called_once_with(reboot=False)
     self.assertEqual(state["state"], "ready")
 
-  def test_deferred_install_never_arms_bootnext(self) -> None:
+  def test_deferred_install_never_arms_trial(self) -> None:
     with (
       mock.patch.object(update.os, "geteuid", return_value=0),
       mock.patch.object(update, "verify_layout"),
       mock.patch.object(update, "current_slot", return_value="a"),
       mock.patch.object(update, "partition_path", side_effect=lambda slot, name: Path(f"/{slot}/{name}")),
-      mock.patch.object(update, "rollback_boot", return_value="0001"),
+      mock.patch.object(update, "selected_boot_control", return_value={"generation": 1}),
+      mock.patch.object(update, "rollback_boot", return_value=2),
       mock.patch.object(update, "write_image"),
+      mock.patch.object(update, "prepare_disk_selector", return_value=3),
       mock.patch.object(update, "verify_system_contents"),
       mock.patch.object(update, "verify_esp_contents"),
       mock.patch.object(update, "activate_staged") as activate,
@@ -275,7 +344,7 @@ class ActivationSafetyTest(unittest.TestCase):
     activate.assert_not_called()
     self.assertEqual(state["state"], "verified")
 
-  def test_activate_rechecks_images_before_bootnext(self) -> None:
+  def test_activate_rechecks_images_before_arming_trial(self) -> None:
     self.state_file.write_text(json.dumps({
       "state": "verified",
       "version": "test-2",
@@ -295,15 +364,14 @@ class ActivationSafetyTest(unittest.TestCase):
       mock.patch.object(update, "verify_installed", side_effect=lambda: calls.append("hash") or True),
       mock.patch.object(update, "verify_system_contents", side_effect=lambda *args: calls.append("system")),
       mock.patch.object(update, "verify_esp_contents", side_effect=lambda *args: calls.append("esp")),
-      mock.patch.object(update, "rollback_boot", side_effect=lambda *args: calls.append("rollback") or "0001"),
-      mock.patch.object(update, "prepare_trial_boot", side_effect=lambda *args: calls.append("bootnext") or ("0001", "0002")),
+      mock.patch.object(update, "prepare_trial_boot", side_effect=lambda *args: calls.append("arm") or 4),
     ):
       state = update.activate_staged()
 
-    self.assertEqual(calls, ["hash", "system", "esp", "rollback", "bootnext"])
+    self.assertEqual(calls, ["hash", "system", "esp", "arm"])
     self.assertEqual(state["state"], "ready")
 
-  def test_failed_image_never_arms_bootnext(self) -> None:
+  def test_failed_image_never_arms_trial(self) -> None:
     def fail_esp(spec: update.ImageSpec, destination: Path, progress_callback=None) -> None:
       if spec.name == "esp":
         raise update.UpdateError("injected image failure")
@@ -313,7 +381,8 @@ class ActivationSafetyTest(unittest.TestCase):
       mock.patch.object(update, "verify_layout"),
       mock.patch.object(update, "current_slot", return_value="a"),
       mock.patch.object(update, "partition_path", side_effect=lambda slot, name: Path(f"/{slot}/{name}")),
-      mock.patch.object(update, "rollback_boot", return_value="0001") as rollback,
+      mock.patch.object(update, "selected_boot_control", return_value={"generation": 1}),
+      mock.patch.object(update, "rollback_boot", return_value=2) as rollback,
       mock.patch.object(update, "write_image", side_effect=fail_esp),
       mock.patch.object(update, "activate_staged") as activate,
     ):
@@ -325,67 +394,75 @@ class ActivationSafetyTest(unittest.TestCase):
     self.assertEqual(json.loads(self.state_file.read_text())["state"], "failed")
 
 
-class EfiSafetyTest(unittest.TestCase):
-  def test_recovery_sync_preserves_slot_image(self) -> None:
+class BootControlSafetyTest(unittest.TestCase):
+  def control(self, **overrides) -> dict[str, str | int]:
+    values: dict[str, str | int] = {
+      "generation": 7,
+      "active": "a",
+      "pending": "b",
+      "phase": "armed",
+      "root_a": "PARTUUID=1111-aaaa",
+      "root_b": "PARTUUID=2222-bbbb",
+    }
+    values.update(overrides)
+    return values
+
+  def test_environment_round_trip_and_validation(self) -> None:
+    payload = update.encode_boot_control(self.control())
+    self.assertEqual(len(payload), 1024)
+    self.assertEqual(update.decode_boot_control(payload), self.control())
+
+    with self.assertRaises(update.UpdateError):
+      update.encode_boot_control(self.control(root_a="/dev/nvme0n1p2"))
+    with self.assertRaises(update.UpdateError):
+      update.decode_boot_control(payload[:-1])
+
+  def test_redundant_state_selection_prefers_conservative_tie(self) -> None:
+    controls = [
+      self.control(phase="armed"),
+      self.control(phase="attempted"),
+      self.control(generation=6, phase="stable", pending=""),
+    ]
+    with mock.patch.object(update, "read_boot_controls", return_value=controls):
+      selected = update.selected_boot_control()
+    self.assertEqual(selected, controls[1])
+
+  def test_set_boot_control_writes_both_esps(self) -> None:
+    with (
+      mock.patch.object(update, "selected_boot_control", return_value=self.control()),
+      mock.patch.object(update, "root_reference", side_effect=lambda slot: f"PARTLABEL=rootfs_{slot}"),
+      mock.patch.object(update, "_write_control_to_slot", return_value=True) as write,
+    ):
+      generation = update.set_boot_control("a", "b", "armed")
+    self.assertEqual(generation, 8)
+    self.assertEqual([call.args[0] for call in write.call_args_list], ["a", "b"])
+    for call in write.call_args_list:
+      control = update.decode_boot_control(call.args[1])
+      self.assertEqual(control["phase"], "armed")
+
+  def test_selector_migration_preserves_running_kernel(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
-      directory = Path(temporary)
-      source = directory / "source"
-      destination = directory / "destination"
-      (source / update.EFI_RECOVERY_LOADER.parent).mkdir(parents=True)
-      (destination / update.EFI_RECOVERY_LOADER.parent).mkdir(parents=True)
-      (source / update.EFI_RECOVERY_LOADER).write_bytes(b"new recovery")
-      (destination / update.EFI_RECOVERY_LOADER).write_bytes(b"old recovery")
-      (destination / "Image").write_bytes(b"rollback kernel")
-
-      class FixedTemporaryDirectory:
-        def __init__(self, path: Path):
-          self.path = path
-
-        def __enter__(self) -> str:
-          return str(self.path)
-
-        def __exit__(self, *_args) -> None:
-          return None
+      esp = Path(temporary)
+      kernel = bytearray(4096)
+      kernel[:2] = b"MZ"
+      kernel[0x3c:0x40] = (128).to_bytes(4, "little")
+      kernel[128:132] = b"PE\0\0"
+      kernel[132:134] = (0xaa64).to_bytes(2, "little")
+      selector = bytes(kernel) + b"selector"
+      (esp / "Image").write_bytes(kernel)
+      control = update.encode_boot_control(self.control(phase="stable", pending=""))
 
       with (
-        mock.patch.object(update, "partition_path", side_effect=[Path("/esp_a"), Path("/esp_b")]),
-        mock.patch.object(update.tempfile, "TemporaryDirectory", side_effect=[
-          FixedTemporaryDirectory(source), FixedTemporaryDirectory(destination),
-        ]),
-        mock.patch.object(update, "verify_arm64_efi"),
-        mock.patch.object(update, "run") as run,
+        mock.patch.object(update, "mounted_esp", return_value=contextlib.nullcontext(esp)),
+        mock.patch.object(update, "run"),
         mock.patch.object(update.os, "sync"),
       ):
-        update.sync_recovery_loader("a", "b")
+        update._install_selector_on_slot("a", selector, control, device=Path("/esp_a"))
 
-      self.assertEqual((destination / update.EFI_RECOVERY_LOADER).read_bytes(), b"new recovery")
-      self.assertEqual((destination / "Image").read_bytes(), b"rollback kernel")
-      self.assertEqual(run.call_count, 4)
-
-  def test_entry_creation_does_not_modify_bootorder(self) -> None:
-    with (
-      mock.patch.object(update, "efi_entries", side_effect=[[], ["000A"]]),
-      mock.patch.object(update, "run") as run,
-    ):
-      entry = update.create_efi_entry("b", trial=True)
-
-    self.assertEqual(entry, "000A")
-    command = run.call_args_list[0].args[0]
-    self.assertIn("-C", command)
-    self.assertNotIn("-c", command)
-    self.assertIn(update.EFI_LOADER, command)
-
-  def test_clear_bootnext_falls_back_to_efivarfs(self) -> None:
-    with tempfile.TemporaryDirectory() as temporary:
-      boot_next = Path(temporary) / "BootNext"
-      boot_next.write_bytes(b"stale")
-      result = subprocess.CompletedProcess(["efibootmgr", "-N"], 17, stdout="firmware rejected deletion")
-      with (
-        mock.patch.object(update, "BOOT_NEXT_VARIABLE", boot_next),
-        mock.patch.object(update, "run", return_value=result),
-      ):
-        update.clear_boot_next()
-      self.assertFalse(boot_next.exists())
+      self.assertEqual((esp / update.ESP_KERNEL).read_bytes(), bytes(kernel))
+      self.assertEqual((esp / update.ESP_PRIMARY_LOADER).read_bytes(), selector)
+      self.assertEqual((esp / update.ESP_RECOVERY_LOADER).read_bytes(), selector)
+      self.assertEqual(update.decode_boot_control((esp / update.BOOT_CONTROL).read_bytes())["phase"], "stable")
 
 
 class BootSafetyTest(unittest.TestCase):
@@ -419,81 +496,6 @@ class BootSafetyTest(unittest.TestCase):
     with mock.patch.object(boot, "commit_boot") as commit_boot:
       with self.assertRaises(update.UpdateError):
         boot.commit()
-    commit_boot.assert_not_called()
-
-  def test_fallback_boot_repairs_entries_for_committed_slot(self) -> None:
-    state = {"state": "committed", "active_slot": "b"}
-    with (
-      mock.patch.object(boot, "is_trial_boot", return_value=False),
-      mock.patch.object(boot, "load_state", return_value=state),
-      mock.patch.object(boot, "current_slot", return_value="a"),
-      mock.patch.object(boot, "efi_state", return_value="Timeout: 0 seconds\n"),
-      mock.patch.object(boot, "commit_boot", return_value=("0000", "0001")) as commit_boot,
-    ):
-      reboot_needed = boot.ensure_boot_entries()
-
-    self.assertTrue(reboot_needed)
-    commit_boot.assert_called_once_with("b", "a")
-
-  def test_fallback_boot_without_state_keeps_running_slot(self) -> None:
-    with (
-      mock.patch.object(boot, "is_trial_boot", return_value=False),
-      mock.patch.object(boot, "load_state", return_value={}),
-      mock.patch.object(boot, "current_slot", return_value="a"),
-      mock.patch.object(boot, "efi_state", return_value="No BootOrder is set\n"),
-      mock.patch.object(boot, "commit_boot", return_value=("0000", "0001")) as commit_boot,
-    ):
-      reboot_needed = boot.ensure_boot_entries()
-
-    self.assertFalse(reboot_needed)
-    commit_boot.assert_called_once_with("a", "b")
-
-  def test_stable_boot_does_not_rewrite_entries(self) -> None:
-    firmware = (
-      "BootCurrent: 000A\n"
-      "BootOrder: 000A,000B\n"
-      "Boot000A* vamOS A HD(1,GPT,...)/\\Image\n"
-      "Boot000B* vamOS B HD(3,GPT,...)/\\Image\n"
-    )
-    with (
-      mock.patch.object(boot, "is_trial_boot", return_value=False),
-      mock.patch.object(boot, "load_state", return_value={"state": "committed", "active_slot": "a"}),
-      mock.patch.object(boot, "current_slot", return_value="a"),
-      mock.patch.object(boot, "efi_state", return_value=firmware),
-      mock.patch.object(boot, "commit_boot") as commit_boot,
-    ):
-      reboot_needed = boot.ensure_boot_entries()
-
-    self.assertFalse(reboot_needed)
-    commit_boot.assert_not_called()
-
-  def test_stable_boot_migrates_recovery_loader_entry(self) -> None:
-    firmware = (
-      "BootCurrent: 000A\n"
-      "BootOrder: 000A,000B\n"
-      "Boot000A* vamOS A HD(1,GPT,...)/\\EFI\\BOOT\\BOOTAA64.EFI\n"
-      "Boot000B* vamOS B HD(3,GPT,...)/\\EFI\\BOOT\\BOOTAA64.EFI\n"
-    )
-    with (
-      mock.patch.object(boot, "is_trial_boot", return_value=False),
-      mock.patch.object(boot, "load_state", return_value={"state": "committed", "active_slot": "a"}),
-      mock.patch.object(boot, "current_slot", return_value="a"),
-      mock.patch.object(boot, "efi_state", return_value=firmware),
-      mock.patch.object(boot, "commit_boot", return_value=("000C", "000D")) as commit_boot,
-    ):
-      reboot_needed = boot.ensure_boot_entries()
-
-    self.assertFalse(reboot_needed)
-    commit_boot.assert_called_once_with("a", "b")
-
-  def test_trial_boot_does_not_repair_entries(self) -> None:
-    with (
-      mock.patch.object(boot, "is_trial_boot", return_value=True),
-      mock.patch.object(boot, "commit_boot") as commit_boot,
-    ):
-      reboot_needed = boot.ensure_boot_entries()
-
-    self.assertFalse(reboot_needed)
     commit_boot.assert_not_called()
 
   def test_watchdog_launcher_uses_absolute_python_path(self) -> None:
@@ -543,17 +545,17 @@ class BootSafetyTest(unittest.TestCase):
     self.assertEqual(attempts, 2)
     self.assertTrue(self.paths["WATCHDOG_DISARMED_MARKER"].exists())
 
-  def test_watchdog_disarms_before_boot_order_changes(self) -> None:
+  def test_watchdog_disarms_before_boot_control_commit(self) -> None:
     self.paths["WATCHDOG_READY_MARKER"].touch()
     self.paths["WATCHDOG_PID_FILE"].write_text(f"{__import__('os').getpid()}\n")
 
     def disarm(_seconds: float) -> None:
       self.paths["WATCHDOG_DISARMED_MARKER"].touch()
 
-    def check_order(active: str, previous: str) -> tuple[str, str]:
+    def check_order(active: str, previous: str) -> int:
       self.assertTrue(self.paths["HEALTHY_MARKER"].exists())
       self.assertTrue(self.paths["WATCHDOG_DISARMED_MARKER"].exists())
-      return "0002", "0001"
+      return 9
 
     state = {
       "state": "booting",
@@ -567,17 +569,16 @@ class BootSafetyTest(unittest.TestCase):
       mock.patch.object(boot, "load_state", return_value=state),
       mock.patch.object(boot.time, "sleep", side_effect=disarm),
       mock.patch.object(boot, "commit_boot", side_effect=check_order) as commit_boot,
-      mock.patch.object(boot, "sync_recovery_loader") as sync_recovery_loader,
       mock.patch.object(boot, "save_state") as save_state,
       mock.patch.object(boot.os, "sync"),
     ):
       boot.commit()
 
     commit_boot.assert_called_once_with("b", "a")
-    sync_recovery_loader.assert_called_once_with("b", "a")
     self.assertEqual(state["state"], "committed")
     self.assertEqual(state["active_slot"], "b")
     self.assertEqual(state["previous_slot"], "a")
+    self.assertEqual(state["boot_generation"], 9)
     self.assertFalse(self.paths["TRIAL_MARKER"].exists())
     save_state.assert_called_once_with(state, "committed")
 

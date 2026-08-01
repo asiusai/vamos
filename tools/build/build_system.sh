@@ -11,6 +11,7 @@ cd "$DIR"
 . "$DIR/tools/build/openpilot_checkout.sh"
 
 update_openpilot_checkout
+"$DIR/tools/build/build_bootloader.sh"
 
 DOWNLOADS_DIR="$DIR/build/downloads"
 VOID_ROOTFS_FILE="$DOWNLOADS_DIR/void-aarch64-ROOTFS-20250202.tar.xz"
