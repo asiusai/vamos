@@ -439,6 +439,7 @@ def verify_system_contents(device: Path, expected_version: str) -> None:
   with mounted_read_only(device) as root:
     required = (
       root / "VAMOS",
+      root / "TICI",
       root / "VERSION",
       root / "etc/runit/1",
       root / "usr/comma/comma.sh",
