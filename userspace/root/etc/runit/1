@@ -90,6 +90,15 @@ else
     ls -la /sbin/udev* 2>/dev/null || true
 fi
 
+# Expose the standard TICI userspace paths where Dragon hardware has an
+# equivalent interface under a different kernel name.
+if [ "$DEVICE_TYPE" = "v1" ]; then
+    [ -e /dev/i2c-1 ] || [ -L /dev/i2c-1 ] || ln -s /dev/i2c-6 /dev/i2c-1
+    mkdir -p /dev/input/by-path
+    touch_path=/dev/input/by-path/platform-894000.i2c-event
+    [ -e "$touch_path" ] || [ -L "$touch_path" ] || ln -s /dev/null "$touch_path"
+fi
+
 # Wait for a device to appear (up to timeout seconds)
 wait_for_dev() {
     dev="$1"
