@@ -162,6 +162,8 @@ e2fsck -fn "$INITIAL_ROOTFS_IMG"
 
 ESP_SIZE_MB=256
 ESP_IMG="$BUILD_DIR/esp.img"
+INITIAL_ESP_IMG="$INITIAL_DIR/esp_a.img"
+INITIAL_GRUBENV="$INITIAL_DIR/grubenv"
 
 ROOTFS_BYTES=$(stat -c%s "$INITIAL_ROOTFS_IMG")
 ROOTFS_SECTORS=$(( (ROOTFS_BYTES + 511) / 512 ))
@@ -183,6 +185,8 @@ echo "  total:  sectors 0..$TOTAL_SECTORS      ($(numfmt --to=iec-i --suffix=B "
 
 # ---- Build ESP (FAT32) ----
 "$DIR/tools/build/build_esp.sh"
+cp --reflink=auto --sparse=always "$ESP_IMG" "$INITIAL_ESP_IMG"
+mlabel -i "$INITIAL_ESP_IMG" ::VAMOS-A
 
 # ---- Assemble full disk image ----
 echo "== Assembling $DISK_IMG =="
@@ -197,8 +201,19 @@ sgdisk --clear \
        --typecode=2:8300 --change-name=2:rootfs_a \
        "$DISK_IMG" >/dev/null
 
+ROOTFS_PARTUUID="$(sgdisk --info=2 "$DISK_IMG" | sed -n 's/^Partition unique GUID: //p')"
+if [ -z "$ROOTFS_PARTUUID" ]; then
+  echo "ERROR: failed to read initial rootfs PARTUUID" >&2
+  exit 1
+fi
+grub-editenv "$INITIAL_GRUBENV" create
+grub-editenv "$INITIAL_GRUBENV" set \
+  generation=1 active=a pending= phase=stable \
+  root_a="PARTUUID=$ROOTFS_PARTUUID" root_b=PARTLABEL=rootfs_b
+mcopy -o -i "$INITIAL_ESP_IMG" "$INITIAL_GRUBENV" ::/EFI/vamos/grubenv
+
 # Copy partition contents into the disk image at the right offsets
-dd if="$ESP_IMG"    of="$DISK_IMG" bs=512 seek=$ESP_START    conv=notrunc status=none
+dd if="$INITIAL_ESP_IMG" of="$DISK_IMG" bs=512 seek=$ESP_START conv=notrunc status=none
 dd if="$INITIAL_ROOTFS_IMG" of="$DISK_IMG" bs=512 seek=$ROOTFS_START conv=notrunc,sparse status=none
 
 echo "== Done =="

@@ -79,6 +79,7 @@ COPY ./kernel/firmware/LICENSES/LICENSE.qcom ./kernel/firmware/LICENSES/NOTICE.q
 
 # Root filesystem overlay — all userspace files at their final paths
 COPY ./userspace/root/ /
+COPY ./build/BOOTAA64.EFI /usr/share/vamos/BOOTAA64.EFI
 
 # Fix ownership on home directory (overlay COPY runs as root)
 RUN chown -R comma:comma /home/comma
