@@ -104,7 +104,7 @@ done < <(git -C "$OP_DST" lfs ls-files -l)
 
 cat > "$OP_DST/build.json" <<BUILDJSON
 {
-  "channel": "v1",
+  "channel": "master",
   "openpilot": {
     "version": "$OP_VERSION",
     "release_notes": "",
