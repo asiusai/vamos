@@ -19,7 +19,7 @@ a new operating system for comma 3X and comma four
 ./vamos device-update comma@192.168.88.20
 ```
 
-The first system or disk build clones the Asius `openpilot` `v1` branch into
+The first system or disk build clones the Asius `openpilot` `master` branch into
 the gitignored `.openpilot/` checkout. Later builds fast-forward that checkout
 and its submodules. System builds use it for openpilot dependencies, and disk
 builds package it as a git-complete `/data/openpilot` checkout.

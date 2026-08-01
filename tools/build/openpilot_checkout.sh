@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 OP_REPO="https://github.com/asiusai/openpilot.git"
-OP_BRANCH="v1"
+OP_BRANCH="master"
 OP_SRC="$DIR/.openpilot"
 
 update_openpilot_checkout() {
