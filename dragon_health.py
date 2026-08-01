@@ -32,6 +32,7 @@ STREAM_FPS_TOLERANCE = 2.0
 EXPECTED_MODEL_FPS = 20.0
 MODEL_FPS_TOLERANCE = 2.0
 MODEL_AVERAGE_TIME_LIMIT_S = 0.033
+MIN_REQUIRED_CAMERAS = int(os.environ.get("DRAGON_HEALTH_MIN_CAMERAS", "0"))
 MIN_IMAGE_DYNAMIC_RANGE = 8.0
 MIN_LOW_LIGHT_DYNAMIC_RANGE = 3.0
 MIN_LOW_LIGHT_SPATIAL_STD = 1.5
@@ -141,6 +142,10 @@ def start_openpilot():
 
     if custom_manager_process is not None and custom_manager_process.poll() is None:
         return True
+
+    # A non-default checkout is used by the self-hosted CI runner. Stop the
+    # installed checkout first so only one manager owns cameras and msgq.
+    run(["sudo", "sv", "down", "openpilot"], timeout=30)
 
     launcher = Path(OPENPILOT_ROOT) / "launch_openpilot.sh"
     if not launcher.exists():
@@ -753,7 +758,15 @@ def run_checks():
     if not ready:
         print("\n  Proceeding with checks anyway...\n")
 
+    camera_count = len(available_camera_info())
+    cameras_present = camera_count >= MIN_REQUIRED_CAMERAS
+    if cameras_present:
+        ok(f"Detected {camera_count} camera stream(s); required {MIN_REQUIRED_CAMERAS}")
+    else:
+        fail(f"Detected {camera_count} camera stream(s); required {MIN_REQUIRED_CAMERAS}")
+
     results = {
+        'camera_presence': cameras_present,
         'ncm':          check_ncm(),
         'wifi':         check_wifi(),
         'bluetooth':    check_bluetooth(),
@@ -770,6 +783,7 @@ def run_checks():
     streaming = results.get('streaming', {})
     streaming_ok = all(v['ok'] for v in streaming.values())
     checks = [
+        ("Camera presence", results['camera_presence']),
         ("NCM",          results['ncm']),
         ("WiFi",         results['wifi']),
         ("Bluetooth",    results['bluetooth']),
