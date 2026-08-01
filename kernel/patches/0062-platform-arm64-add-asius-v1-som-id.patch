@@ -11,8 +11,8 @@ index 8e4a1556d..17504440c 100644
 +	depends on ARCH_QCOM
 +	default y
 +	help
-+	  Expose the Asius v1 SOM identity declared by device tree through
-+	  the sysfs interface expected by openpilot hardware logging.
++	  Expose the Asius v1 model and the sysfs interface expected by
++	  openpilot hardware logging.
 +
  endif # ARM64_PLATFORM_DEVICES
 diff --git a/drivers/platform/arm64/Makefile b/drivers/platform/arm64/Makefile
@@ -29,55 +29,75 @@ new file mode 100644
 index 000000000..5df963014
 --- /dev/null
 +++ b/drivers/platform/arm64/asius-v1-som-id.c
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,71 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +#include <linux/device.h>
-+#include <linux/errno.h>
++#include <linux/err.h>
++#include <linux/init.h>
 +#include <linux/module.h>
 +#include <linux/of.h>
 +#include <linux/platform_device.h>
-+#include <linux/property.h>
 +#include <linux/sysfs.h>
++
++static char asius_v1_model[] = "asius v1";
++static struct property asius_v1_model_property = {
++	.name = "model",
++	.length = sizeof(asius_v1_model),
++	.value = asius_v1_model,
++};
 +
 +static ssize_t som_id_show(struct device *dev,
 +			   struct device_attribute *attr, char *buf)
 +{
-+	u32 id;
-+	int ret;
-+
-+	ret = device_property_read_u32(dev, "asius,som-id", &id);
-+	if (ret)
-+		return ret;
-+
-+	return sysfs_emit(buf, "%u\n", id);
++	return sysfs_emit(buf, "0\n");
 +}
 +static DEVICE_ATTR_RO(som_id);
 +
-+static struct attribute *asius_v1_som_id_attrs[] = {
-+	&dev_attr_som_id.attr,
-+	NULL,
-+};
-+ATTRIBUTE_GROUPS(asius_v1_som_id);
-+
-+static int asius_v1_som_id_probe(struct platform_device *pdev)
++static int __init asius_v1_som_id_init(void)
 +{
-+	return devm_device_add_group(&pdev->dev, &asius_v1_som_id_group);
++	struct platform_device *som_id;
++	struct platform_device *vendor;
++	int ret;
++
++	if (!of_machine_is_compatible("radxa,dragon-q6a"))
++		return 0;
++
++	ret = of_update_property(of_root, &asius_v1_model_property);
++	if (ret)
++		return ret;
++
++	vendor = platform_device_register_simple("vendor", PLATFORM_DEVID_NONE,
++						 NULL, 0);
++	if (IS_ERR(vendor))
++		return PTR_ERR(vendor);
++
++	som_id = platform_device_alloc("vendor:gpio-som-id",
++				       PLATFORM_DEVID_NONE);
++	if (!som_id) {
++		ret = -ENOMEM;
++		goto unregister_vendor;
++	}
++	som_id->dev.parent = &vendor->dev;
++
++	ret = platform_device_add(som_id);
++	if (ret) {
++		platform_device_put(som_id);
++		goto unregister_vendor;
++	}
++
++	ret = device_create_file(&som_id->dev, &dev_attr_som_id);
++	if (ret) {
++		platform_device_unregister(som_id);
++		goto unregister_vendor;
++	}
++
++	return 0;
++
++unregister_vendor:
++	platform_device_unregister(vendor);
++	return ret;
 +}
++device_initcall(asius_v1_som_id_init);
 +
-+static const struct of_device_id asius_v1_som_id_match[] = {
-+	{ .compatible = "asius,v1-som-id" },
-+	{ }
-+};
-+MODULE_DEVICE_TABLE(of, asius_v1_som_id_match);
-+
-+static struct platform_driver asius_v1_som_id_driver = {
-+	.probe = asius_v1_som_id_probe,
-+	.driver = {
-+		.name = "asius-v1-som-id",
-+		.of_match_table = asius_v1_som_id_match,
-+	},
-+};
-+module_platform_driver(asius_v1_som_id_driver);
-+
-+MODULE_DESCRIPTION("Asius v1 SOM identity driver");
++MODULE_DESCRIPTION("Asius v1 hardware identity");
 +MODULE_LICENSE("GPL");
