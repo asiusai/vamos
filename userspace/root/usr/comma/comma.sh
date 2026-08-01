@@ -2,7 +2,6 @@
 # Void Linux version - uses sv instead of systemctl
 
 source /etc/profile
-DEVICE_TYPE="$(device-type)"
 
 # Add venv to PATH for Void
 export PATH="/usr/local/venv/bin:$PATH"
@@ -40,7 +39,7 @@ if [ ! -f /tmp/booted ]; then
   elif [ "$(cat /sys/class/input/input*/device/touch_count 2>/dev/null | head -1)" -gt 4 ] 2>/dev/null; then
     echo "launching system reset, got taps"
     $RESET --tap-reset
-  elif [ "$DEVICE_TYPE" != "v1" ] && ! mountpoint -q /data; then
+  elif [ ! -f /V1 ] && ! mountpoint -q /data; then
     echo "userdata not mounted. loading system reset"
     $RESET --recover
   fi
@@ -78,7 +77,7 @@ while true; do
   handle_setup_keys
 
   if [ -f $CONTINUE ]; then
-    if [[ "$DEVICE_TYPE" == "v1" ]]; then
+    if [[ -f /V1 ]]; then
       mkdir -p /data/params/d
       rm -f /data/params/d/AthenadPairingUntil
       for key in AlphaLongitudinalEnabled ExperimentalMode ExperimentalModeConfirmed; do

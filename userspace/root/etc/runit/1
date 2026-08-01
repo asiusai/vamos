@@ -2,7 +2,6 @@
 # Custom runit stage 1 for vamOS
 
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
-DEVICE_TYPE="$(device-type)"
 
 echo "=> vamOS runit stage 1 starting"
 
@@ -52,7 +51,7 @@ fi
 # Mount /firmware early (before udev) so firmware is available when drivers load
 # The symlink /lib/firmware/updates -> /firmware/image requires /firmware to be mounted
 echo "=> Mounting /firmware early for driver firmware..."
-if [ "$DEVICE_TYPE" != "v1" ]; then
+if [ ! -f /V1 ]; then
     n=0
     while [ ! -b /dev/sde4 ] && [ $n -lt 50 ]; do
         sleep 0.1
@@ -61,7 +60,7 @@ if [ "$DEVICE_TYPE" != "v1" ]; then
 fi
 if [ -b /dev/sde4 ]; then
     mount -t vfat -o ro /dev/sde4 /firmware && echo "=> /firmware mounted" || echo "WARN: /firmware mount failed"
-elif [ "$DEVICE_TYPE" = "v1" ]; then
+elif [ -f /V1 ]; then
     echo "=> No Dragon firmware partition; using built-in and rootfs firmware"
 else
     echo "WARN: /dev/sde4 not ready after 5s, will mount later"
@@ -77,7 +76,7 @@ if [ -x /usr/bin/udevd ]; then
     echo "=> udevd started, triggering events..."
     udevadm trigger --action=add --type=subsystems
     udevadm trigger --action=add --type=devices
-    if [ "$DEVICE_TYPE" = "v1" ]; then
+    if [ -f /V1 ]; then
         echo "=> Continuing while Dragon udev probes finish asynchronously"
     else
         echo "=> Waiting for udev to settle (timeout 30s)..."
@@ -90,9 +89,9 @@ else
     ls -la /sbin/udev* 2>/dev/null || true
 fi
 
-# Expose the standard TICI userspace paths where Dragon hardware has an
-# equivalent interface under a different kernel name.
-if [ "$DEVICE_TYPE" = "v1" ]; then
+# Expose the standard TICI userspace paths where V1 hardware has an equivalent
+# interface under a different kernel name.
+if [ -f /V1 ]; then
     [ -e /dev/i2c-1 ] || [ -L /dev/i2c-1 ] || ln -s /dev/i2c-6 /dev/i2c-1
     mkdir -p /dev/input/by-path
     touch_path=/dev/input/by-path/platform-894000.i2c-event
