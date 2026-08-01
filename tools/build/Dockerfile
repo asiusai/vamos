@@ -94,6 +94,7 @@ RUN for svc in \
   tailscaled \
   keygen \
   bluetoothd \
+  github-runner \
   openpilot init-qcom \
   agetty-ttyMSM0 agetty-ttyAMA0; do \
     ln -sf /etc/sv/$svc /etc/runit/runsvdir/default/; \

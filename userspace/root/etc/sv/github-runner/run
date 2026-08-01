@@ -1,0 +1,10 @@
+#!/bin/sh
+exec 2>&1
+
+while [ ! -x /data/github-runner/run.sh ] || [ ! -f /data/github-runner/.runner ]; do
+  echo "github-runner: waiting for /data/github-runner configuration"
+  sleep 30
+done
+
+cd /data/github-runner
+exec chpst -u comma:comma ./run.sh
