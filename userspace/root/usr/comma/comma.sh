@@ -78,6 +78,14 @@ while true; do
   handle_setup_keys
 
   if [ -f $CONTINUE ]; then
+    if [[ "$DEVICE_TYPE" == "v1" ]]; then
+      mkdir -p /data/params/d
+      rm -f /data/params/d/AthenadPairingUntil
+      for key in AlphaLongitudinalEnabled ExperimentalMode ExperimentalModeConfirmed; do
+        [[ -e "/data/params/d/$key" ]] || echo -n 1 > "/data/params/d/$key"
+      done
+    fi
+
     if [ -f /run/vamos-trial-boot ]; then
       echo "committing healthy vamOS trial boot"
       if ! sudo /usr/bin/vamos-boot commit; then
