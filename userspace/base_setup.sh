@@ -4,9 +4,6 @@ set -e
 USERNAME=comma
 PASSWD=comma
 
-# Create identification files
-touch /ASIUS
-
 mkdir -p /etc/xbps.d
 cp /usr/share/xbps.d/*-repository-*.conf /etc/xbps.d/
 

@@ -2,6 +2,7 @@
 # Custom runit stage 1 for vamOS
 
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
+DEVICE_TYPE="$(device-type)"
 
 echo "=> vamOS runit stage 1 starting"
 
@@ -51,7 +52,7 @@ fi
 # Mount /firmware early (before udev) so firmware is available when drivers load
 # The symlink /lib/firmware/updates -> /firmware/image requires /firmware to be mounted
 echo "=> Mounting /firmware early for driver firmware..."
-if [ ! -f /ASIUS ]; then
+if [ "$DEVICE_TYPE" != "v1" ]; then
     n=0
     while [ ! -b /dev/sde4 ] && [ $n -lt 50 ]; do
         sleep 0.1
@@ -60,7 +61,7 @@ if [ ! -f /ASIUS ]; then
 fi
 if [ -b /dev/sde4 ]; then
     mount -t vfat -o ro /dev/sde4 /firmware && echo "=> /firmware mounted" || echo "WARN: /firmware mount failed"
-elif [ -f /ASIUS ]; then
+elif [ "$DEVICE_TYPE" = "v1" ]; then
     echo "=> No Dragon firmware partition; using built-in and rootfs firmware"
 else
     echo "WARN: /dev/sde4 not ready after 5s, will mount later"
@@ -76,7 +77,7 @@ if [ -x /usr/bin/udevd ]; then
     echo "=> udevd started, triggering events..."
     udevadm trigger --action=add --type=subsystems
     udevadm trigger --action=add --type=devices
-    if [ -f /ASIUS ]; then
+    if [ "$DEVICE_TYPE" = "v1" ]; then
         echo "=> Continuing while Dragon udev probes finish asynchronously"
     else
         echo "=> Waiting for udev to settle (timeout 30s)..."

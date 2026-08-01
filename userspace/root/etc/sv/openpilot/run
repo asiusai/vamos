@@ -2,9 +2,10 @@
 # openpilot - main openpilot launcher (runs as comma user in tmux)
 exec 2>&1
 
-# ASIUS has no physical display, but the mainline DRM/GPU stack still behaves
+# v1 has no physical display, but the mainline DRM/GPU stack still behaves
 # better when the backlight class exists before openpilot starts.
-if [ -f /ASIUS ]; then
+DEVICE_TYPE="$(device-type)"
+if [ "$DEVICE_TYPE" = "v1" ]; then
   for i in $(seq 1 60); do
     [ -e /dev/dri/card0 ] && break
     sleep 0.5
@@ -21,8 +22,8 @@ if [ -f /ASIUS ]; then
   fi
 fi
 
-# Wait for filesystem to be ready (skipped on ASIUS — no fs_setup service).
-if [ ! -f /ASIUS ]; then
+# Wait for filesystem to be ready (skipped on v1, which has no fs_setup service).
+if [ "$DEVICE_TYPE" != "v1" ]; then
   sv check fs_setup > /dev/null || exit 1
 
   # Wait for fs_setup to finish mounting /home overlay
