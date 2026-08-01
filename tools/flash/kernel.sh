@@ -36,9 +36,27 @@ echo "== Building ESP image =="
 "$DIR/tools/build/build_esp.sh"
 
 echo "== Flashing ESP (kernel + dtb) to Dragon =="
-sudo edl-ng --memory=nvme write-part esp "$ESP_IMG" --loader="$LOADER"
+EDL=(sudo edl-ng --memory=nvme --loader="$LOADER")
+GPT_OUTPUT="$("${EDL[@]}" printgpt 2>&1)"
+printf '%s\n' "$GPT_OUTPUT"
+
+if grep -Eq 'Name:[[:space:]]+esp_a$' <<<"$GPT_OUTPUT" && grep -Eq 'Name:[[:space:]]+esp_b$' <<<"$GPT_OUTPUT"; then
+  # This is the recovery/development path. Keep both ESPs bootable regardless
+  # of the current EFI slot; use device-update for rollback-safe trials.
+  ESP_PARTITIONS=(esp_a esp_b)
+elif grep -Eq 'Name:[[:space:]]+esp$' <<<"$GPT_OUTPUT"; then
+  ESP_PARTITIONS=(esp)
+else
+  echo "ERROR: no supported ESP partition layout found"
+  exit 1
+fi
+
+for partition in "${ESP_PARTITIONS[@]}"; do
+  echo "== Writing $partition =="
+  "${EDL[@]}" write-part "$partition" "$ESP_IMG"
+done
 
 if [ "${VAMOS_NO_RESET:-}" != "1" ]; then
   echo "== Resetting device =="
-  sudo edl-ng reset --loader="$LOADER"
+  "${EDL[@]}" reset
 fi
