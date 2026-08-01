@@ -25,8 +25,11 @@ update_openpilot_checkout() {
     git -C "$OP_SRC" config remote.origin.fetch "+refs/heads/$OP_BRANCH:refs/remotes/origin/$OP_BRANCH"
     git -C "$OP_SRC" fetch --prune origin
     if git -C "$OP_SRC" show-ref --verify --quiet "refs/heads/$OP_BRANCH"; then
+      # This is a clean, managed build cache, so align it after intentional
+      # history rewrites such as rebasing the integration branch.
+      git -C "$OP_SRC" checkout --detach "origin/$OP_BRANCH"
+      git -C "$OP_SRC" branch --force "$OP_BRANCH" "origin/$OP_BRANCH"
       git -C "$OP_SRC" checkout "$OP_BRANCH"
-      git -C "$OP_SRC" merge --ff-only "origin/$OP_BRANCH"
     else
       git -C "$OP_SRC" checkout --track -b "$OP_BRANCH" "origin/$OP_BRANCH"
     fi
