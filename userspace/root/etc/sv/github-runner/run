@@ -12,4 +12,4 @@ while [ ! -x /data/github-runner/run.sh ] || [ ! -f /data/github-runner/.runner 
 done
 
 cd /data/github-runner
-exec chpst -u comma:comma ./run.sh
+exec setpriv --reuid=comma --regid=comma --init-groups ./run.sh
