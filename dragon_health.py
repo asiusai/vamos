@@ -33,6 +33,7 @@ EXPECTED_MODEL_FPS = 20.0
 MODEL_FPS_TOLERANCE = 2.0
 MODEL_AVERAGE_TIME_LIMIT_S = 0.033
 MIN_REQUIRED_CAMERAS = int(os.environ.get("DRAGON_HEALTH_MIN_CAMERAS", "0"))
+CAMERA_STREAM_WAIT_SECONDS = 30
 MIN_IMAGE_DYNAMIC_RANGE = 8.0
 MIN_LOW_LIGHT_DYNAMIC_RANGE = 3.0
 MIN_LOW_LIGHT_SPATIAL_STD = 1.5
@@ -86,6 +87,20 @@ def available_camera_info():
     except Exception as e:
         warn(f"Cannot query available camera streams: {e}")
         return ()
+
+
+def wait_for_camera_info(min_count, timeout=CAMERA_STREAM_WAIT_SECONDS):
+    info = available_camera_info()
+    if len(info) >= min_count:
+        return info
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(0.1)
+        info = available_camera_info()
+        if len(info) >= min_count:
+            return info
+    return info
 
 
 def section(title):
@@ -758,7 +773,7 @@ def run_checks():
     if not ready:
         print("\n  Proceeding with checks anyway...\n")
 
-    camera_count = len(available_camera_info())
+    camera_count = len(wait_for_camera_info(MIN_REQUIRED_CAMERAS))
     cameras_present = camera_count >= MIN_REQUIRED_CAMERAS
     if cameras_present:
         ok(f"Detected {camera_count} camera stream(s); required {MIN_REQUIRED_CAMERAS}")
