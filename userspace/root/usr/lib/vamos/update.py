@@ -440,6 +440,7 @@ def verify_system_contents(device: Path, expected_version: str) -> None:
     required = (
       root / "VAMOS",
       root / "TICI",
+      root / "V1",
       root / "VERSION",
       root / "etc/runit/1",
       root / "usr/comma/comma.sh",
