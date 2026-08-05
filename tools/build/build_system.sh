@@ -128,7 +128,7 @@ exec_as_root sh -c "
   cd '$ROOTFS_DIR'
 
   # Add hostname and hosts
-  HOST=asius-one
+  HOST=asius-v1
   ln -sf /proc/sys/kernel/hostname etc/hostname
   echo '127.0.0.1    localhost.localdomain localhost' > etc/hosts
   echo \"127.0.0.1    \$HOST\" >> etc/hosts
