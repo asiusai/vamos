@@ -79,6 +79,7 @@ COPY ./kernel/firmware/LICENSES/LICENSE.qcom ./kernel/firmware/LICENSES/NOTICE.q
 
 # Root filesystem overlay — all userspace files at their final paths
 COPY ./userspace/root/ /
+COPY ./build/BOOTAA64.EFI /usr/share/vamos/BOOTAA64.EFI
 
 # Fix ownership on home directory (overlay COPY runs as root)
 RUN chown -R comma:comma /home/comma
@@ -93,6 +94,7 @@ RUN for svc in \
   tailscaled \
   keygen \
   bluetoothd \
+  github-runner \
   openpilot init-qcom \
   agetty-ttyMSM0 agetty-ttyAMA0; do \
     ln -sf /etc/sv/$svc /etc/runit/runsvdir/default/; \

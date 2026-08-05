@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 OP_REPO="https://github.com/asiusai/openpilot.git"
-OP_BRANCH="v1"
+OP_BRANCH="master"
 OP_SRC="$DIR/.openpilot"
 
 update_openpilot_checkout() {
@@ -22,8 +22,17 @@ update_openpilot_checkout() {
     fi
     echo "== Updating cached openpilot $OP_BRANCH checkout =="
     git -C "$OP_SRC" remote set-url origin "$OP_REPO"
-    git -C "$OP_SRC" checkout "$OP_BRANCH"
-    git -C "$OP_SRC" pull --ff-only origin "$OP_BRANCH"
+    git -C "$OP_SRC" config remote.origin.fetch "+refs/heads/$OP_BRANCH:refs/remotes/origin/$OP_BRANCH"
+    git -C "$OP_SRC" fetch --prune origin
+    if git -C "$OP_SRC" show-ref --verify --quiet "refs/heads/$OP_BRANCH"; then
+      # This is a clean, managed build cache, so align it after intentional
+      # history rewrites such as rebasing the integration branch.
+      git -C "$OP_SRC" checkout --detach "origin/$OP_BRANCH"
+      git -C "$OP_SRC" branch --force "$OP_BRANCH" "origin/$OP_BRANCH"
+      git -C "$OP_SRC" checkout "$OP_BRANCH"
+    else
+      git -C "$OP_SRC" checkout --track -b "$OP_BRANCH" "origin/$OP_BRANCH"
+    fi
     git -C "$OP_SRC" submodule sync --recursive
     git -C "$OP_SRC" submodule update --init --recursive --jobs "$(nproc)"
     git -C "$OP_SRC" lfs pull

@@ -36,9 +36,39 @@ echo "== Building ESP image =="
 "$DIR/tools/build/build_esp.sh"
 
 echo "== Flashing ESP (kernel + dtb) to Dragon =="
-sudo edl-ng --memory=nvme write-part esp "$ESP_IMG" --loader="$LOADER"
+EDL=(sudo edl-ng --memory=nvme --loader="$LOADER")
+GPT_OUTPUT="$("${EDL[@]}" printgpt 2>&1)"
+printf '%s\n' "$GPT_OUTPUT"
+
+if grep -Eq 'Name:[[:space:]]+esp_a$' <<<"$GPT_OUTPUT" && grep -Eq 'Name:[[:space:]]+esp_b$' <<<"$GPT_OUTPUT"; then
+  # This is the recovery/development path. Keep both ESPs bootable and restore
+  # slot A as the stable choice; use device-update for rollback-safe trials.
+  ESP_PARTITIONS=(esp_a esp_b)
+elif grep -Eq 'Name:[[:space:]]+esp$' <<<"$GPT_OUTPUT"; then
+  ESP_PARTITIONS=(esp)
+else
+  echo "ERROR: no supported ESP partition layout found"
+  exit 1
+fi
+
+for partition in "${ESP_PARTITIONS[@]}"; do
+  slot=a
+  [ "$partition" = "esp_b" ] && slot=b
+  slot_upper="${slot^^}"
+  FLASH_ESP="$DIR/build/esp_${slot}.flash.img"
+  FLASH_ENV="$DIR/build/grubenv_${slot}.flash"
+  cp --reflink=auto --sparse=always "$ESP_IMG" "$FLASH_ESP"
+  mlabel -i "$FLASH_ESP" "::VAMOS-$slot_upper"
+  grub-editenv "$FLASH_ENV" create
+  grub-editenv "$FLASH_ENV" set \
+    generation=1 active=a pending= phase=stable \
+    root_a=PARTLABEL=rootfs_a root_b=PARTLABEL=rootfs_b
+  mcopy -o -i "$FLASH_ESP" "$FLASH_ENV" ::/EFI/vamos/grubenv
+  echo "== Writing $partition =="
+  "${EDL[@]}" write-part "$partition" "$FLASH_ESP"
+done
 
 if [ "${VAMOS_NO_RESET:-}" != "1" ]; then
   echo "== Resetting device =="
-  sudo edl-ng reset --loader="$LOADER"
+  "${EDL[@]}" reset
 fi

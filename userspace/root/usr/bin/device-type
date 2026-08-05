@@ -1,0 +1,13 @@
+#!/bin/sh
+
+model_path=/sys/firmware/devicetree/base/model
+if [ ! -r "$model_path" ]; then
+  printf '%s\n' pc
+  exit 0
+fi
+
+model="$(tr -d '\000' < "$model_path")"
+case "$model" in
+  "comma "*|"asius "*) printf '%s\n' "${model#* }" ;;
+  *) printf '%s\n' "$model" ;;
+esac

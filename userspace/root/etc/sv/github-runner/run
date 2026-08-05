@@ -1,0 +1,18 @@
+#!/bin/sh
+exec 2>&1
+
+export PATH=/usr/local/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export HOME=/home/comma
+export USER=comma
+export LOGNAME=comma
+
+# Match the limits granted to comma's login sessions in limits.conf.
+prlimit --rtprio=100:100 --nice=30:30 --pid $$
+
+while [ ! -x /data/github-runner/run.sh ] || [ ! -f /data/github-runner/.runner ]; do
+  echo "github-runner: waiting for /data/github-runner configuration"
+  sleep 30
+done
+
+cd /data/github-runner
+exec setpriv --reuid=comma --regid=comma --init-groups ./run.sh

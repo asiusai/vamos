@@ -19,9 +19,10 @@ a new operating system for comma 3X and comma four
 ./vamos device-update comma@192.168.88.20
 ```
 
-The first system or disk build clones the Asius `openpilot` `v1` branch into
+The first system or disk build clones the Asius `openpilot` `master` branch into
 the gitignored `.openpilot/` checkout. Later builds fast-forward that checkout
-and its submodules. System builds use it for openpilot dependencies, and disk
+or safely realign it after an intentional branch rewrite, then update its
+submodules. System builds use it for openpilot dependencies, and disk
 builds package it as a git-complete `/data/openpilot` checkout.
 The device therefore boots without downloading openpilot and can use normal
 Git commands afterward. OTA packages use `system.img`, which intentionally
@@ -42,10 +43,9 @@ NV12 DMA buffers directly to Venus without a CPU copy.
 
 Venus also requires `Hypervisor Settings -> Hypervisor Override` to be Enabled
 in Dragon UEFI so Linux boots at EL2. Without EL2, starting an encoder session
-can reboot the board. This setting is not changed automatically: on the tested
-firmware it also makes EFI variables unavailable to Linux, while the current
-A/B updater still requires EFI `BootNext`. Keep it manual until vamOS uses a
-filesystem-backed boot selector that works at EL2.
+can reboot the board. This setting is not changed automatically. The tested
+firmware also makes EFI variables unavailable to Linux, so Dragon updates use
+the disk-resident selector described below and never require `BootNext`.
 
 Build the images separately, then deploy them. The device reboots into a
 one-shot trial of the new slot:
@@ -71,10 +71,16 @@ partition:
 
 `vamos-update` always writes the inactive slot. It verifies raw SHA-256 hashes,
 filesystems, OS version, rollback tooling, ARM64 EFI headers, and the device
-tree before creating a one-shot EFI trial boot. The persistent EFI boot order
-continues to point at the known-good slot until userspace reaches the launcher
-and disarms the hardware watchdog. A failed or interrupted trial therefore
-returns to the previous slot.
+tree before creating a one-shot trial boot. A fixed ARM64 selector exists at
+both `\\Image` and `\\EFI\\BOOT\\BOOTAA64.EFI`; the slot kernel is stored at
+`\\EFI\\vamos\\Image`. Redundant 1 KiB state blocks on both ESPs record the
+stable slot, pending slot, generation, and immutable rootfs PARTUUIDs.
+
+The selector marks a trial attempted before starting its kernel. Userspace
+commits it only after runit reaches the launcher and disarms the hardware
+watchdog. A failed or interrupted trial rolls back on the next boot. Because
+all selection state is on the NVMe, EL2 mode, missing EFI variables, firmware
+resets, and moving the drive to another Dragon do not affect the selected slot.
 
 Install a signed HTTP manifest:
 
@@ -104,8 +110,10 @@ Remote manifests require an adjacent 64-byte Ed25519 signature at
 exists; unsigned manifests are accepted only from local storage for physical
 recovery.
 
-Legacy two-partition Dragon installations can be migrated in place after
-backing up persistent data:
+Newly flashed compact images automatically create the inactive slot and
+persistent userdata on first boot. The migration is restartable after a power
+loss. Legacy two-partition Dragon installations can also be migrated manually
+after backing up persistent data:
 
 ```bash
 sudo vamos-update initialize --yes

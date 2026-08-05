@@ -39,7 +39,7 @@ if [ ! -f /tmp/booted ]; then
   elif [ "$(cat /sys/class/input/input*/device/touch_count 2>/dev/null | head -1)" -gt 4 ] 2>/dev/null; then
     echo "launching system reset, got taps"
     $RESET --tap-reset
-  elif [ ! -f /ASIUS ] && ! mountpoint -q /data; then
+  elif [ ! -f /V1 ] && ! mountpoint -q /data; then
     echo "userdata not mounted. loading system reset"
     $RESET --recover
   fi
@@ -77,6 +77,14 @@ while true; do
   handle_setup_keys
 
   if [ -f $CONTINUE ]; then
+    if [[ -f /V1 ]]; then
+      mkdir -p /data/params/d
+      rm -f /data/params/d/AthenadPairingUntil
+      for key in AlphaLongitudinalEnabled ExperimentalMode ExperimentalModeConfirmed; do
+        [[ -e "/data/params/d/$key" ]] || echo -n 1 > "/data/params/d/$key"
+      done
+    fi
+
     if [ -f /run/vamos-trial-boot ]; then
       echo "committing healthy vamOS trial boot"
       if ! sudo /usr/bin/vamos-boot commit; then

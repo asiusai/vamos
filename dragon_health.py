@@ -6,6 +6,7 @@ livestream, and live model health, and captures sample images.
 
 Invoked from the host via:  dragon.py health
 """
+import asyncio
 import os
 import signal
 import subprocess
@@ -31,6 +32,12 @@ STREAM_FPS_TOLERANCE = 2.0
 EXPECTED_MODEL_FPS = 20.0
 MODEL_FPS_TOLERANCE = 2.0
 MODEL_AVERAGE_TIME_LIMIT_S = 0.033
+MIN_REQUIRED_CAMERAS = int(os.environ.get("DRAGON_HEALTH_MIN_CAMERAS", "0"))
+CAMERA_STREAM_WAIT_SECONDS = 30
+MIN_IMAGE_DYNAMIC_RANGE = 8.0
+MIN_LOW_LIGHT_DYNAMIC_RANGE = 3.0
+MIN_LOW_LIGHT_SPATIAL_STD = 1.5
+MAX_LOW_LIGHT_MEAN = 24.0
 SNAPSHOT_DIR = "/tmp/dragon_health"
 OPENPILOT_ROOT = os.environ.get("OPENPILOT_ROOT", "/data/openpilot")
 DEFAULT_OPENPILOT_ROOT = "/data/openpilot"
@@ -80,6 +87,20 @@ def available_camera_info():
     except Exception as e:
         warn(f"Cannot query available camera streams: {e}")
         return ()
+
+
+def wait_for_camera_info(min_count, timeout=CAMERA_STREAM_WAIT_SECONDS):
+    info = available_camera_info()
+    if len(info) >= min_count:
+        return info
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(0.1)
+        info = available_camera_info()
+        if len(info) >= min_count:
+            return info
+    return info
 
 
 def section(title):
@@ -136,6 +157,10 @@ def start_openpilot():
 
     if custom_manager_process is not None and custom_manager_process.poll() is None:
         return True
+
+    # A non-default checkout is used by the self-hosted CI runner. Stop the
+    # installed checkout first so only one manager owns cameras and msgq.
+    run(["sudo", "sv", "down", "openpilot"], timeout=30)
 
     launcher = Path(OPENPILOT_ROOT) / "launch_openpilot.sh"
     if not launcher.exists():
@@ -238,8 +263,35 @@ def check_bluetooth():
         (ok if up else warn)("hci0 " + ("UP RUNNING" if up else "down"))
         return up
 
-    warn("No bluetooth tools available")
+    try:
+        present, powered = asyncio.run(bluez_adapter_state())
+        if present:
+            (ok if powered else warn)("Bluetooth " + ("powered on" if powered else "not powered"))
+            return powered
+    except Exception as e:
+        warn(f"Cannot query BlueZ: {e}")
+        return False
+
+    warn("No Bluetooth controller found")
     return False
+
+
+async def bluez_adapter_state():
+    from dbus_fast.aio import MessageBus
+    from dbus_fast.constants import BusType
+
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    try:
+        introspection = await bus.introspect("org.bluez", "/")
+        proxy = bus.get_proxy_object("org.bluez", "/", introspection)
+        managed_objects = await proxy.get_interface("org.freedesktop.DBus.ObjectManager").call_get_managed_objects()
+        for interfaces in managed_objects.values():
+            adapter = interfaces.get("org.bluez.Adapter1")
+            if adapter is not None:
+                return True, bool(adapter["Powered"].value)
+        return False, False
+    finally:
+        bus.disconnect()
 
 
 def check_processes():
@@ -469,7 +521,6 @@ def measure_streaming(duration=5):
 def validate_encoded_stream(service, encoded_data):
     try:
         import av
-        import numpy as np
         from PIL import Image
 
         snapshot_dir = Path(SNAPSHOT_DIR)
@@ -486,20 +537,57 @@ def validate_encoded_stream(service, encoded_data):
 
         image = decoded_frames[0].to_ndarray(format="rgb24")
         Image.fromarray(image).save(image_path, "JPEG")
-        image = image.astype(np.float32)
-        luminance = image.mean(axis=2)
-        row_delta = float(np.abs(np.diff(luminance, axis=0)).mean())
-        column_delta = float(np.abs(np.diff(luminance, axis=1)).mean())
-        dynamic_range = float(np.percentile(luminance, 95) - np.percentile(luminance, 5))
-        striped = row_delta > 15.0 and row_delta > max(4.0 * column_delta, 25.0)
-        valid = image.shape[:2] == (760, 1344) and dynamic_range >= 8.0 and not striped
-        message = (f"{service:32s}  decoded image range={dynamic_range:.1f}, "
-                   f"row/column delta={row_delta:.1f}/{column_delta:.1f}, saved to {image_path}")
+        valid, metrics = decoded_image_health(image)
+        mode = "low-light" if metrics["dynamic_range"] < MIN_IMAGE_DYNAMIC_RANGE and metrics["low_light"] else "normal"
+        message = (f"{service:32s}  decoded image range={metrics['dynamic_range']:.1f}, "
+                   f"mean/std={metrics['mean']:.1f}/{metrics['spatial_std']:.1f}, "
+                   f"row/column delta={metrics['row_delta']:.1f}/{metrics['column_delta']:.1f}, "
+                   f"mode={mode}, saved to {image_path}")
         (ok if valid else fail)(message)
         return valid
     except Exception as e:
         fail(f"{service:32s}  hardware stream inspection failed: {e}")
         return False
+
+
+def decoded_image_health(image):
+    import numpy as np
+
+    if len(image.shape) != 3 or image.shape[2] < 3:
+        return False, {
+            "dynamic_range": 0.0,
+            "mean": 0.0,
+            "spatial_std": 0.0,
+            "row_delta": 0.0,
+            "column_delta": 0.0,
+            "low_light": False,
+        }
+
+    luminance = image.astype(np.float32).mean(axis=2)
+    row_delta = float(np.abs(np.diff(luminance, axis=0)).mean())
+    column_delta = float(np.abs(np.diff(luminance, axis=1)).mean())
+    dynamic_range = float(np.percentile(luminance, 95) - np.percentile(luminance, 5))
+    mean = float(luminance.mean())
+    spatial_std = float(luminance.std())
+    striped = row_delta > 15.0 and row_delta > max(4.0 * column_delta, 25.0)
+    low_light = (
+        mean <= MAX_LOW_LIGHT_MEAN
+        and dynamic_range >= MIN_LOW_LIGHT_DYNAMIC_RANGE
+        and spatial_std >= MIN_LOW_LIGHT_SPATIAL_STD
+    )
+    valid = (
+        image.shape[:2] == (760, 1344)
+        and (dynamic_range >= MIN_IMAGE_DYNAMIC_RANGE or low_light)
+        and not striped
+    )
+    return valid, {
+        "dynamic_range": dynamic_range,
+        "mean": mean,
+        "spatial_std": spatial_std,
+        "row_delta": row_delta,
+        "column_delta": column_delta,
+        "low_light": low_light,
+    }
 
 
 def image_has_color(img):
@@ -655,8 +743,9 @@ def wait_for_openpilot(timeout=300):
                 return False
             camera_start = time.monotonic()
             while time.monotonic() - camera_start < 60:
-                if run(["pgrep", "-x", "camerad"], timeout=2)[0] == 0:
-                    ok(f"openpilot and camerad are up ({elapsed:.0f}s)")
+                camera_process = active_camerad_process()
+                if camera_process is not None:
+                    ok(f"openpilot and {camera_process} are up ({elapsed:.0f}s)")
                     return True
                 time.sleep(0.5)
             fail("camerad did not start within 60s")
@@ -671,13 +760,28 @@ def wait_for_openpilot(timeout=300):
     return False
 
 
+def active_camerad_process():
+    for process in ("camerad_v1", "camerad"):
+        if run(["pgrep", "-x", process], timeout=2)[0] == 0:
+            return process
+    return None
+
+
 def run_checks():
     system_info()
     ready = wait_for_openpilot()
     if not ready:
         print("\n  Proceeding with checks anyway...\n")
 
+    camera_count = len(wait_for_camera_info(MIN_REQUIRED_CAMERAS))
+    cameras_present = camera_count >= MIN_REQUIRED_CAMERAS
+    if cameras_present:
+        ok(f"Detected {camera_count} camera stream(s); required {MIN_REQUIRED_CAMERAS}")
+    else:
+        fail(f"Detected {camera_count} camera stream(s); required {MIN_REQUIRED_CAMERAS}")
+
     results = {
+        'camera_presence': cameras_present,
         'ncm':          check_ncm(),
         'wifi':         check_wifi(),
         'bluetooth':    check_bluetooth(),
@@ -694,6 +798,7 @@ def run_checks():
     streaming = results.get('streaming', {})
     streaming_ok = all(v['ok'] for v in streaming.values())
     checks = [
+        ("Camera presence", results['camera_presence']),
         ("NCM",          results['ncm']),
         ("WiFi",         results['wifi']),
         ("Bluetooth",    results['bluetooth']),

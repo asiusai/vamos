@@ -3,26 +3,6 @@
 
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 
-configure_asius_efi_timeout() {
-    timeout_var="/sys/firmware/efi/efivars/BootAskTimeoutSecs-5f4065c9-d7bf-4555-b55d-820b3defd23a"
-
-    if ! efibootmgr 2>/dev/null | grep -q '^Timeout: 0 seconds$'; then
-        efibootmgr -t 0 >/dev/null 2>&1 || echo "WARN: failed to set EFI boot timeout"
-    fi
-
-    # Qualcomm treats zero as the five-second default. One is the minimum
-    # that preserves the F2/F5/F12 recovery window.
-    if [ -f "$timeout_var" ]; then
-        timeout="$(od -An -j 4 -N 4 -t u4 "$timeout_var" 2>/dev/null | tr -d ' ')"
-        if [ "$timeout" != "1" ]; then
-            chattr -i "$timeout_var" 2>/dev/null || true
-            printf '\007\000\000\000\001\000\000\000' > "$timeout_var" ||
-                echo "WARN: failed to set Qualcomm EFI boot prompt to one second"
-            chattr +i "$timeout_var" 2>/dev/null || true
-        fi
-    fi
-}
-
 echo "=> vamOS runit stage 1 starting"
 
 echo "=> Mounting pseudo-filesystems..."
@@ -36,23 +16,6 @@ touch /run/motd && chmod 666 /run/motd
 
 mountpoint -q /dev/pts || mount -t devpts devpts /dev/pts -o mode=0620,gid=5,nosuid,noexec
 mountpoint -q /dev/shm || mount -t tmpfs shm /dev/shm -o mode=1777,nosuid,nodev
-
-if [ -d /sys/firmware/efi ]; then
-    mkdir -p /sys/firmware/efi/efivars
-    if mountpoint -q /sys/firmware/efi/efivars || mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null; then
-        if command -v efibootmgr >/dev/null 2>&1; then
-            if [ -f /ASIUS ]; then
-                configure_asius_efi_timeout
-            else
-                efibootmgr -t 0 >/dev/null 2>&1 || echo "WARN: failed to set EFI boot timeout"
-            fi
-        else
-            echo "WARN: efibootmgr not installed"
-        fi
-    else
-        echo "WARN: efivarfs not available"
-    fi
-fi
 
 # Mount /var, /tmp, /rwtmp as tmpfs early (from fstab, but we need it before services start)
 mountpoint -q /var || mount -t tmpfs tmpfs /var -o rw,nosuid,nodev,size=128M,mode=755
@@ -88,7 +51,7 @@ fi
 # Mount /firmware early (before udev) so firmware is available when drivers load
 # The symlink /lib/firmware/updates -> /firmware/image requires /firmware to be mounted
 echo "=> Mounting /firmware early for driver firmware..."
-if [ ! -f /ASIUS ]; then
+if [ ! -f /V1 ]; then
     n=0
     while [ ! -b /dev/sde4 ] && [ $n -lt 50 ]; do
         sleep 0.1
@@ -97,7 +60,7 @@ if [ ! -f /ASIUS ]; then
 fi
 if [ -b /dev/sde4 ]; then
     mount -t vfat -o ro /dev/sde4 /firmware && echo "=> /firmware mounted" || echo "WARN: /firmware mount failed"
-elif [ -f /ASIUS ]; then
+elif [ -f /V1 ]; then
     echo "=> No Dragon firmware partition; using built-in and rootfs firmware"
 else
     echo "WARN: /dev/sde4 not ready after 5s, will mount later"
@@ -113,7 +76,7 @@ if [ -x /usr/bin/udevd ]; then
     echo "=> udevd started, triggering events..."
     udevadm trigger --action=add --type=subsystems
     udevadm trigger --action=add --type=devices
-    if [ -f /ASIUS ]; then
+    if [ -f /V1 ]; then
         echo "=> Continuing while Dragon udev probes finish asynchronously"
     else
         echo "=> Waiting for udev to settle (timeout 30s)..."
@@ -124,6 +87,15 @@ else
     echo "WARN: udevd not found at /usr/bin/udevd"
     ls -la /usr/bin/udev* 2>/dev/null || true
     ls -la /sbin/udev* 2>/dev/null || true
+fi
+
+# Expose the standard TICI userspace paths where V1 hardware has an equivalent
+# interface under a different kernel name.
+if [ -f /V1 ]; then
+    [ -e /dev/i2c-1 ] || [ -L /dev/i2c-1 ] || ln -s /dev/i2c-6 /dev/i2c-1
+    mkdir -p /dev/input/by-path
+    touch_path=/dev/input/by-path/platform-894000.i2c-event
+    [ -e "$touch_path" ] || [ -L "$touch_path" ] || ln -s /dev/null "$touch_path"
 fi
 
 # Wait for a device to appear (up to timeout seconds)
@@ -158,10 +130,23 @@ mount_part() {
     fi
 }
 
-# New vamOS installations keep identity, params, routes, and openpilot outside
-# both replaceable OS slots. Legacy two-partition installations continue using
-# the rootfs /data directory until `vamos-update initialize` migrates them.
-if [ -b /dev/nvme0n1p5 ] || [ -e /dev/disk/by-partlabel/userdata ]; then
+# New images are compact two-partition disks. Expand them into A/B plus
+# persistent userdata on first boot; an interrupted migration is resumed on
+# the next boot while the original rootfs /data remains available.
+ab_init_failed=0
+if [ -f /VAMOS ] && [ -x /usr/bin/vamos-update ]; then
+    userdata_type="$(blkid -s TYPE -o value /dev/nvme0n1p5 2>/dev/null || true)"
+    if { [ ! -b /dev/nvme0n1p5 ] && [ ! -e /dev/disk/by-partlabel/userdata ]; } ||
+       { [ -b /dev/nvme0n1p5 ] && [ -z "$userdata_type" ]; }; then
+        echo "=> Initializing rollback-safe A/B storage"
+        /usr/bin/vamos-update initialize --yes || ab_init_failed=1
+        udevadm trigger --action=add /sys/class/block/nvme0n1 2>/dev/null || true
+        udevadm settle --timeout=5 || echo "WARN: A/B partitions did not settle"
+    fi
+fi
+
+if [ "$ab_init_failed" -eq 0 ] &&
+   { [ -b /dev/nvme0n1p5 ] || [ -e /dev/disk/by-partlabel/userdata ]; }; then
     # The Dragon continues general udev probing asynchronously for fast boot.
     # Settle this one partition so the updater can rely on its persistent link.
     if [ -b /dev/nvme0n1p5 ] && [ ! -e /dev/disk/by-partlabel/userdata ]; then
@@ -176,24 +161,16 @@ if [ -b /dev/nvme0n1p5 ] || [ -e /dev/disk/by-partlabel/userdata ]; then
         echo "WARN: /data mount failed"
     if ! mountpoint -q /data; then
         echo "ERROR: persistent userdata exists but could not be mounted"
-    elif [ ! -f /data/.vamos-userdata ]; then
-        echo "WARN: userdata lacks the vamOS migration marker"
+    elif [ ! -f /data/.vamos-userdata ] || [ ! -f /data/.vamos-ab-ready ]; then
+        echo "=> Resuming interrupted A/B initialization"
+        if ! /usr/bin/vamos-update initialize --yes; then
+            echo "ERROR: userdata migration failed; retaining legacy rootfs data"
+            umount /data || true
+            ab_init_failed=1
+        fi
     fi
 elif [ -f /VAMOS ]; then
-    echo "WARN: legacy vamOS layout; /data is still part of the active rootfs"
-fi
-
-if [ -f /ASIUS ] && [ -f /VAMOS ] && [ -x /usr/bin/vamos-boot ] && mountpoint -q /data; then
-    /usr/bin/vamos-boot ensure
-    ensure_status=$?
-    if [ "$ensure_status" -eq 10 ]; then
-        echo "=> Rebooting into the committed vamOS slot after EFI repair"
-        sync
-        reboot -f
-        while true; do sleep 60; done
-    elif [ "$ensure_status" -ne 0 ]; then
-        echo "WARN: failed to ensure vamOS EFI boot entries"
-    fi
+    echo "WARN: A/B initialization incomplete; /data remains on the active rootfs"
 fi
 
 if [ -f /VAMOS ] && [ -x /usr/bin/vamos-boot ]; then

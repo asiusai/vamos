@@ -13,8 +13,6 @@ from pathlib import Path
 from typing import Sequence
 
 from vamos.update import (
-  EFI_LABEL,
-  EFI_LOADER,
   HEALTHY_MARKER,
   STAGE1_MARKER,
   STATE_FILE,
@@ -28,11 +26,9 @@ from vamos.update import (
   cmdline,
   commit_boot,
   current_slot,
-  efi_state,
   load_state,
   rollback_boot,
   save_state,
-  sync_recovery_loader,
 )
 
 
@@ -45,76 +41,10 @@ WATCHDOG_START_DEADLINE = 30
 WATCHDOG_STOP_DEADLINE = 5
 VERSION_FILE = Path("/VERSION")
 PYTHON = "/usr/bin/python3"
-EFI_REPAIR_REBOOT_EXIT = 10
 
 
 def is_trial_boot() -> bool:
   return "vamos.trial=1" in cmdline().split()
-
-
-def _efi_current(state: str) -> str | None:
-  for line in state.splitlines():
-    if line.startswith("BootCurrent:"):
-      value = line.partition(":")[2].strip().upper()
-      return value if len(value) == 4 else None
-  return None
-
-
-def _efi_order(state: str) -> list[str]:
-  for line in state.splitlines():
-    if line.startswith("BootOrder:"):
-      return [entry.strip().upper() for entry in line.partition(":")[2].split(",") if entry.strip()]
-  return []
-
-
-def _efi_entries(state: str, label: str) -> list[str]:
-  prefix = f"{label} "
-  entries = []
-  for line in state.splitlines():
-    if not line.startswith("Boot") or len(line) < 9:
-      continue
-    entry = line[4:8].upper()
-    description = line[9:].lstrip("* ")
-    if description == label or description.startswith(prefix):
-      entries.append(entry)
-  return entries
-
-
-def _efi_entry_uses_loader(state: str, entry: str) -> bool:
-  marker = f"/{EFI_LOADER}".casefold()
-  return any(line[:8].casefold() == f"boot{entry}".casefold() and marker in line.casefold()
-             for line in state.splitlines())
-
-
-def ensure_boot_entries() -> bool:
-  """Repair board-local EFI entries after moving an A/B NVMe to a new Dragon."""
-  if is_trial_boot():
-    return False
-
-  state = load_state()
-  # The trial controller owns EFI state until it either commits or rolls back.
-  if state.get("state") in ("ready", "booting"):
-    return False
-
-  running = current_slot()
-  firmware = efi_state()
-  boot_current = _efi_current(firmware)
-  boot_order = _efi_order(firmware)
-  running_entries = _efi_entries(firmware, EFI_LABEL[running])
-  managed_entries = running_entries + _efi_entries(firmware, EFI_LABEL["b" if running == "a" else "a"])
-
-  # A stable entry successfully booted this slot. Avoid rewriting EFI variables
-  # on every boot, even when rollback intentionally left only one boot entry.
-  if (boot_current in running_entries and boot_order[:1] == [boot_current] and
-      all(_efi_entry_uses_loader(firmware, entry) for entry in managed_entries)):
-    return False
-
-  committed = state.get("active_slot") if state.get("state") == "committed" else None
-  preferred = committed if committed in ("a", "b") else running
-  fallback = "b" if preferred == "a" else "a"
-  commit_boot(preferred, fallback)
-  print(f"vamos-boot: repaired EFI boot entries ({preferred}, {fallback})", flush=True)
-  return preferred != running
 
 
 def start_watchdog() -> None:
@@ -260,8 +190,7 @@ def commit() -> None:
     raise UpdateError("trial watchdog did not disarm")
 
   try:
-    current_entry, previous_entry = commit_boot(active, previous)
-    sync_recovery_loader(active, previous)
+    boot_generation = commit_boot(active, previous)
   except Exception:
     rollback_boot(previous, active)
     subprocess.run(["reboot", "-f"], check=False)
@@ -273,8 +202,7 @@ def commit() -> None:
     "committed_at": int(time.time()),
     "previous_slot": previous,
     "active_slot": active,
-    "active_entry": current_entry,
-    "fallback_entry": previous_entry,
+    "boot_generation": boot_generation,
   })
   save_state(state, "committed")
   TRIAL_MARKER.unlink(missing_ok=True)
@@ -283,12 +211,10 @@ def commit() -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
   parser = argparse.ArgumentParser(description="vamOS trial-boot controller")
-  parser.add_argument("command", choices=("ensure", "early", "watchdog", "reconcile", "commit"))
+  parser.add_argument("command", choices=("early", "watchdog", "reconcile", "commit"))
   args = parser.parse_args(argv)
   try:
-    if args.command == "ensure":
-      return EFI_REPAIR_REBOOT_EXIT if ensure_boot_entries() else 0
-    elif args.command == "early":
+    if args.command == "early":
       start_watchdog()
     elif args.command == "watchdog":
       watchdog()
