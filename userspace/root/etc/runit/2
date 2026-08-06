@@ -11,6 +11,11 @@ for svc in /etc/runit/runsvdir/default/*; do
     cp -a "$target" "/run/runit/service/$name"
 done
 
+# Tailscale is opt-in. Authenticated devices create this persistent marker.
+if [ -e /data/tailscale/enabled ]; then
+    rm -f /run/runit/service/tailscaled/down /run/runit/service/tailscaled/log/down
+fi
+
 # Create /var/service pointing to our writable copy
 ln -sf /run/runit/service /var/service
 
