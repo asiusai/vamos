@@ -15,7 +15,7 @@ RESET_TRIGGER="/data/__system_reset__"
 sudo chown comma: /data
 sudo chown comma: /data/media
 
-handle_setup_keys () {
+handle_setup_access () {
   # Keep SSH available during setup, but do not install static setup keys.
   if [[ ! -e /data/continue.sh ]]; then
     if [ ! -e /data/params/d ]; then
@@ -74,7 +74,7 @@ fi
 
 while true; do
   pkill -f "$SETUP"
-  handle_setup_keys
+  handle_setup_access
 
   if [ -f $CONTINUE ]; then
     if [[ -f /V1 ]]; then
