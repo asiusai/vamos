@@ -211,11 +211,6 @@ for d in /data/scons_cache /data/media/0/realdata /data/log /data/params/d /data
 done
 chown -R comma:comma /data/scons_cache /data/media /data/log /data/params /data/stats /data/safe_staging 2>/dev/null || true
 chmod 700 /data/etc/NetworkManager/system-connections 2>/dev/null || true
-if [ ! -s /data/params/d/GithubSshKeys ] && [ -s /usr/comma/setup_keys ]; then
-  cp /usr/comma/setup_keys /data/params/d/GithubSshKeys
-  chown comma:comma /data/params/d/GithubSshKeys
-fi
-
 echo "=> Setting hostname..."
 /usr/comma/set-hostname.sh
 
