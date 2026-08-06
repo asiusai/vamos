@@ -4,7 +4,11 @@ exec 2>&1
 # Wait for dbus before starting bluetoothd.
 sv check dbus >/dev/null || exit 1
 
-mkdir -p /var/lib/bluetooth
+mkdir -p /data/bluetooth /var/lib/bluetooth
+chmod 700 /data/bluetooth
+if ! mountpoint -q /var/lib/bluetooth; then
+  mount --bind /data/bluetooth /var/lib/bluetooth
+fi
 rfkill unblock bluetooth >/dev/null 2>&1 || true
 
 if command -v bluetoothd >/dev/null 2>&1; then
