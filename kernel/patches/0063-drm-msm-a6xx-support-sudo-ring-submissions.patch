@@ -1,0 +1,34 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] drm/msm/a6xx: support sudo ring submissions
+
+MSM_SUBMIT_SUDO marks a command stream as privileged, but only the A5xx backend
+currently honors submit->in_rb. On A6xx, disable protected mode around the
+indirect buffer from the privileged ring. This retains the normal A6xx
+page-table, statistics, and fence path without copying large command streams
+through the kernel on every submission.
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+@@ -347,11 +347,21 @@ static void a6xx_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit)
+ 				break;
+ 			fallthrough;
+ 		case MSM_SUBMIT_CMD_BUF:
++			if (IS_ENABLED(CONFIG_DRM_MSM_GPU_SUDO) && submit->in_rb) {
++				OUT_PKT7(ring, CP_SET_PROTECTED_MODE, 1);
++				OUT_RING(ring, 0);
++			}
++
+ 			OUT_PKT7(ring, CP_INDIRECT_BUFFER, 3);
+ 			OUT_RING(ring, lower_32_bits(submit->cmd[i].iova));
+ 			OUT_RING(ring, upper_32_bits(submit->cmd[i].iova));
+ 			OUT_RING(ring, A5XX_CP_INDIRECT_BUFFER_2_IB_SIZE(submit->cmd[i].size));
+ 			ibs++;
++
++			if (IS_ENABLED(CONFIG_DRM_MSM_GPU_SUDO) && submit->in_rb) {
++				OUT_PKT7(ring, CP_SET_PROTECTED_MODE, 1);
++				OUT_RING(ring, 1);
++			}
+ 			break;
+ 		}
+ 
