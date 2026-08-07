@@ -51,8 +51,14 @@ cleanup() {
 trap cleanup TERM INT HUP
 
 # Run as comma user with proper groups and PAM limits
-# sudo -u properly inherits groups and applies /etc/security/limits.conf
-PANE_CMD="sudo -n /bin/sh -c 'mkdir -p /sys/fs/cgroup/openpilot; echo \$\$ > /sys/fs/cgroup/openpilot/cgroup.procs; exec sudo -u comma /usr/bin/bash -l -c /usr/comma/comma.sh'; exec /usr/bin/bash -l"
+# V1's MSM GPU runtime needs CAP_SYS_RAWIO for trusted command submission.
+if [ -f /V1 ]; then
+  RUN_AS_COMMA="/usr/sbin/setpriv --reuid=comma --regid=comma --init-groups --inh-caps=+sys_rawio --ambient-caps=+sys_rawio"
+else
+  # sudo -u properly inherits groups and applies /etc/security/limits.conf
+  RUN_AS_COMMA="sudo -u comma"
+fi
+PANE_CMD="sudo -n /bin/sh -c 'mkdir -p /sys/fs/cgroup/openpilot; echo \$\$ > /sys/fs/cgroup/openpilot/cgroup.procs; exec $RUN_AS_COMMA /usr/bin/bash -l -c /usr/comma/comma.sh'; exec /usr/bin/bash -l"
 
 if sudo -u comma /usr/bin/tmux has-session -t openpilot 2>/dev/null; then
   sudo -u comma /usr/bin/tmux respawn-pane -k -t openpilot:0.0 "$PANE_CMD"
