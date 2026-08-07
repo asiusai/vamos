@@ -24,7 +24,7 @@ from typing import BinaryIO, Callable, Iterator, Sequence
 
 UPDATER_VERSION = 1
 MANIFEST_VERSION = 1
-PRODUCT = "radxa-dragon-q6a"
+PRODUCT = "asius-v1"
 DISK = Path("/dev/nvme0n1")
 PARTLABEL_DIR = Path("/dev/disk/by-partlabel")
 STATE_DIR = Path("/data/vamos-update")
