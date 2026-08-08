@@ -176,7 +176,7 @@ def preflight_remote(target: str, options: list[str], remote_dir: str) -> None:
   if not remote_dir.startswith("/data/"):
     raise DeviceUpdateError("--remote-dir must be below /data")
   probe = (
-    "test -f /VAMOS && "
+    "test -f /ASIUS && "
     "sudo -n true && "
     "test -b /dev/disk/by-partlabel/rootfs_a && "
     "test -b /dev/disk/by-partlabel/rootfs_b && "
