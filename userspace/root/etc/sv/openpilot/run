@@ -2,9 +2,9 @@
 # openpilot - main openpilot launcher (runs as comma user in tmux)
 exec 2>&1
 
-# v1 has no physical display, but the mainline DRM/GPU stack still behaves
+# Asius has no physical display, but the mainline DRM/GPU stack still behaves
 # better when the backlight class exists before openpilot starts.
-if [ -f /V1 ]; then
+if [ -f /ASIUS ]; then
   for i in $(seq 1 60); do
     [ -e /dev/dri/card0 ] && break
     sleep 0.5
@@ -21,8 +21,8 @@ if [ -f /V1 ]; then
   fi
 fi
 
-# Wait for filesystem to be ready (skipped on v1, which has no fs_setup service).
-if [ ! -f /V1 ]; then
+# Wait for filesystem to be ready (skipped on Asius, which has no fs_setup service).
+if [ ! -f /ASIUS ]; then
   sv check fs_setup > /dev/null || exit 1
 
   # Wait for fs_setup to finish mounting /home overlay
@@ -51,8 +51,8 @@ cleanup() {
 trap cleanup TERM INT HUP
 
 # Run as comma user with proper groups and PAM limits
-# V1's MSM GPU runtime needs CAP_SYS_RAWIO for trusted command submission.
-if [ -f /V1 ]; then
+# The Asius MSM GPU runtime needs CAP_SYS_RAWIO for trusted command submission.
+if [ -f /ASIUS ]; then
   RUN_AS_COMMA="/usr/sbin/setpriv --reuid=comma --regid=comma --init-groups --inh-caps=+sys_rawio --ambient-caps=+sys_rawio"
 else
   # sudo -u properly inherits groups and applies /etc/security/limits.conf

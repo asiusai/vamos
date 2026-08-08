@@ -51,7 +51,7 @@ fi
 # Mount /firmware early (before udev) so firmware is available when drivers load
 # The symlink /lib/firmware/updates -> /firmware/image requires /firmware to be mounted
 echo "=> Mounting /firmware early for driver firmware..."
-if [ ! -f /V1 ]; then
+if [ ! -f /ASIUS ]; then
     n=0
     while [ ! -b /dev/sde4 ] && [ $n -lt 50 ]; do
         sleep 0.1
@@ -60,7 +60,7 @@ if [ ! -f /V1 ]; then
 fi
 if [ -b /dev/sde4 ]; then
     mount -t vfat -o ro /dev/sde4 /firmware && echo "=> /firmware mounted" || echo "WARN: /firmware mount failed"
-elif [ -f /V1 ]; then
+elif [ -f /ASIUS ]; then
     echo "=> No Dragon firmware partition; using built-in and rootfs firmware"
 else
     echo "WARN: /dev/sde4 not ready after 5s, will mount later"
@@ -76,7 +76,7 @@ if [ -x /usr/bin/udevd ]; then
     echo "=> udevd started, triggering events..."
     udevadm trigger --action=add --type=subsystems
     udevadm trigger --action=add --type=devices
-    if [ -f /V1 ]; then
+    if [ -f /ASIUS ]; then
         echo "=> Continuing while Dragon udev probes finish asynchronously"
     else
         echo "=> Waiting for udev to settle (timeout 30s)..."
@@ -89,9 +89,9 @@ else
     ls -la /sbin/udev* 2>/dev/null || true
 fi
 
-# Expose the standard TICI userspace paths where V1 hardware has an equivalent
+# Expose standard embedded userspace paths where Asius hardware has an equivalent
 # interface under a different kernel name.
-if [ -f /V1 ]; then
+if [ -f /ASIUS ]; then
     [ -e /dev/i2c-1 ] || [ -L /dev/i2c-1 ] || ln -s /dev/i2c-6 /dev/i2c-1
     mkdir -p /dev/input/by-path
     touch_path=/dev/input/by-path/platform-894000.i2c-event
@@ -134,7 +134,7 @@ mount_part() {
 # persistent userdata on first boot; an interrupted migration is resumed on
 # the next boot while the original rootfs /data remains available.
 ab_init_failed=0
-if [ -f /VAMOS ] && [ -x /usr/bin/vamos-update ]; then
+if [ -f /ASIUS ] && [ -x /usr/bin/vamos-update ]; then
     userdata_type="$(blkid -s TYPE -o value /dev/nvme0n1p5 2>/dev/null || true)"
     if { [ ! -b /dev/nvme0n1p5 ] && [ ! -e /dev/disk/by-partlabel/userdata ]; } ||
        { [ -b /dev/nvme0n1p5 ] && [ -z "$userdata_type" ]; }; then
@@ -169,11 +169,11 @@ if [ "$ab_init_failed" -eq 0 ] &&
             ab_init_failed=1
         fi
     fi
-elif [ -f /VAMOS ]; then
+elif [ -f /ASIUS ]; then
     echo "WARN: A/B initialization incomplete; /data remains on the active rootfs"
 fi
 
-if [ -f /VAMOS ] && [ -x /usr/bin/vamos-boot ]; then
+if [ -f /ASIUS ] && [ -x /usr/bin/vamos-boot ]; then
     if ! /usr/bin/vamos-boot early 2>/run/vamos-boot-early.err; then
         echo "ERROR: failed to start vamOS trial watchdog; returning to the fallback slot"
         if mountpoint -q /data; then

@@ -2,7 +2,7 @@
 
 /usr/comma/sound/adsp-start.sh
 
-if [ -f /V1 ]; then
+if [ -f /ASIUS ]; then
   echo "waiting for Dragon sound card to come online"
   while [ ! -e /dev/snd/controlC0 ]; do
     sleep 0.01

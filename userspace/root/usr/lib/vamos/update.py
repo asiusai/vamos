@@ -438,9 +438,7 @@ def verify_system_contents(device: Path, expected_version: str) -> None:
     raise UpdateError(f"system image filesystem check failed:\n{check.stdout.strip()}")
   with mounted_read_only(device) as root:
     required = (
-      root / "VAMOS",
-      root / "TICI",
-      root / "V1",
+      root / "ASIUS",
       root / "VERSION",
       root / "etc/runit/1",
       root / "usr/comma/comma.sh",
