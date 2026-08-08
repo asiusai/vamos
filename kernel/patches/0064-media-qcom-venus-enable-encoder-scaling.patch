@@ -1,0 +1,133 @@
+From 4fdc8f0f69b64ed9ea23994057f48913a21b985d Mon Sep 17 00:00:00 2001
+From: Asius <dev@asius.ai>
+Date: Sat, 8 Aug 2026 11:00:00 +0000
+Subject: [PATCH] media: qcom: venus: enable encoder scaling
+
+The Venus firmware accepts independent HFI input and output frame sizes and
+advertises encoder scale factors down to 1/8. The V4L2 driver currently sends
+the capture size for both properties, so a smaller capture format is treated
+as an input crop instead of a scaled output.
+
+Keep the visible input crop separate from the aligned input buffer geometry,
+and send the capture format as the firmware output size. This matches the
+programming model used by Qualcomm's downstream msm_vidc driver.
+
+---
+ drivers/media/platform/qcom/venus/venc.c | 56 ++++++++++++++++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 48 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/venus/venc.c b/drivers/media/platform/qcom/venus/venc.c
+index e4b5be0dd594..db97a92de257 100644
+--- a/drivers/media/platform/qcom/venus/venc.c
++++ b/drivers/media/platform/qcom/venus/venc.c
+@@ -197,8 +197,10 @@ venc_try_fmt_common(struct venus_inst *inst, struct v4l2_format *f)
+ 	pixmp->height = clamp(pixmp->height, frame_height_min(inst),
+ 			      frame_height_max(inst));
+ 
+-	pixmp->width = ALIGN(pixmp->width, 128);
+-	pixmp->height = ALIGN(pixmp->height, 32);
++	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
++		pixmp->width = ALIGN(pixmp->width, 128);
++		pixmp->height = ALIGN(pixmp->height, 32);
++	}
+ 
+ 	pixmp->width = ALIGN(pixmp->width, 2);
+ 	pixmp->height = ALIGN(pixmp->height, 2);
+@@ -272,6 +274,14 @@ static int venc_s_fmt(struct file *file, void *fh, struct v4l2_format *f)
+ 	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+ 		inst->out_width = format.fmt.pix_mp.width;
+ 		inst->out_height = format.fmt.pix_mp.height;
++		inst->crop.left = 0;
++		inst->crop.top = 0;
++		inst->crop.width = clamp(ALIGN(orig_pixmp.width, 2),
++					 frame_width_min(inst),
++					 frame_width_max(inst));
++		inst->crop.height = clamp(ALIGN(orig_pixmp.height, 2),
++					  frame_height_min(inst),
++					  frame_height_max(inst));
+ 		inst->colorspace = pixmp->colorspace;
+ 		inst->ycbcr_enc = pixmp->ycbcr_enc;
+ 		inst->quantization = pixmp->quantization;
+@@ -346,8 +356,8 @@ venc_g_selection(struct file *file, void *fh, struct v4l2_selection *s)
+ 		s->r.height = inst->out_height;
+ 		break;
+ 	case V4L2_SEL_TGT_CROP:
+-		s->r.width = inst->width;
+-		s->r.height = inst->height;
++		s->r.width = inst->crop.width;
++		s->r.height = inst->crop.height;
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -378,8 +388,8 @@ venc_s_selection(struct file *file, void *fh, struct v4l2_selection *s)
+ 	case V4L2_SEL_TGT_CROP:
+ 		s->r.top = 0;
+ 		s->r.left = 0;
+-		inst->width = s->r.width;
+-		inst->height = s->r.height;
++		inst->crop.width = s->r.width;
++		inst->crop.height = s->r.height;
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -1023,10 +1033,36 @@ static int venc_set_properties(struct venus_inst *inst)
+ 	return 0;
+ }
+ 
++static int venc_check_scaling(struct venus_inst *inst)
++{
++	u32 min_x = cap_min(inst, HFI_CAPABILITY_SCALE_X);
++	u32 max_x = cap_max(inst, HFI_CAPABILITY_SCALE_X);
++	u32 min_y = cap_min(inst, HFI_CAPABILITY_SCALE_Y);
++	u32 max_y = cap_max(inst, HFI_CAPABILITY_SCALE_Y);
++	u64 scaled_width = (u64)inst->width << 16;
++	u64 scaled_height = (u64)inst->height << 16;
++
++	if (!min_x || !max_x || !min_y || !max_y)
++		return (inst->crop.width == inst->width &&
++			inst->crop.height == inst->height) ? 0 : -EINVAL;
++
++	if (scaled_width < (u64)inst->crop.width * min_x ||
++	    scaled_width > (u64)inst->crop.width * max_x ||
++	    scaled_height < (u64)inst->crop.height * min_y ||
++	    scaled_height > (u64)inst->crop.height * max_y)
++		return -EINVAL;
++
++	return 0;
++}
++
+ static int venc_init_session(struct venus_inst *inst)
+ {
+ 	int ret;
+ 
++	ret = venc_check_scaling(inst);
++	if (ret)
++		return ret;
++
+ 	ret = venus_helper_session_init(inst);
+ 	if (ret == -EALREADY)
+ 		return 0;
+@@ -1038,8 +1074,8 @@ static int venc_init_session(struct venus_inst *inst)
+ 	if (ret)
+ 		goto deinit;
+ 
+-	ret = venus_helper_set_input_resolution(inst, inst->width,
+-						inst->height);
++	ret = venus_helper_set_input_resolution(inst, inst->crop.width,
++						inst->crop.height);
+ 	if (ret)
+ 		goto deinit;
+ 
+@@ -1452,6 +1488,10 @@ static void venc_inst_init(struct venus_inst *inst)
+ 	inst->height = ALIGN(720, 32);
+ 	inst->out_width = 1280;
+ 	inst->out_height = 720;
++	inst->crop.left = 0;
++	inst->crop.top = 0;
++	inst->crop.width = 1280;
++	inst->crop.height = 720;
+ 	inst->fps = 15;
+ 	inst->timeperframe.numerator = 1;
+ 	inst->timeperframe.denominator = 15;
+-- 
+2.50.1
