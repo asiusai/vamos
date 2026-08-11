@@ -80,10 +80,6 @@ xbps-install -y \
   tmux \
   traceroute \
   iw \
-  qrtr-ns \
-  rmtfs \
-  tqftpserv \
-  pd-mapper \
   wireless-regdb \
   wireless_tools \
   wpa_supplicant \

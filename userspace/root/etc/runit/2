@@ -7,6 +7,15 @@ for svc in /etc/runit/runsvdir/default/*; do
     [ -L "$svc" ] || continue
     name=$(basename "$svc")
     target=$(readlink "$svc")
+
+    # The image is also booted under QEMU. Do not supervise a serial getty for
+    # a UART that is absent on the current machine; agetty otherwise restarts
+    # every five seconds forever.
+    case "$name" in
+        agetty-ttyAMA0) [ -c /dev/ttyAMA0 ] || continue ;;
+        agetty-ttyMSM0) [ -c /dev/ttyMSM0 ] || continue ;;
+    esac
+
     # Copy the actual service directory (not symlink) to /run
     cp -a "$target" "/run/runit/service/$name"
 done
@@ -14,6 +23,12 @@ done
 # Tailscale is opt-in. Authenticated devices create this persistent marker.
 if [ -e /data/tailscale/enabled ]; then
     rm -f /run/runit/service/tailscaled/down /run/runit/service/tailscaled/log/down
+fi
+
+# A registered runner is an explicit opt-in. New production devices should not
+# wake a shell every 30 seconds waiting for CI configuration.
+if [ -f /data/github-runner/.runner ]; then
+    rm -f /run/runit/service/github-runner/down
 fi
 
 # Create /var/service pointing to our writable copy

@@ -1,0 +1,70 @@
+#!/bin/sh
+# Small systemctl compatibility layer for operator workflows and openpilot
+# scripts. Service supervision remains native runit; unsupported systemd-only
+# operations fail explicitly instead of pretending to work.
+
+quiet=0
+action=""
+units=""
+
+for argument in "$@"; do
+  case "$argument" in
+    -q|--quiet) quiet=1 ;;
+    --no-block) ;;
+    start|stop|restart|try-restart|is-active|is-enabled|enable|disable|mask|unmask|daemon-reload)
+      [ -z "$action" ] && action="$argument" || units="$units $argument"
+      ;;
+    *) units="$units $argument" ;;
+  esac
+done
+
+map_unit() {
+  case "${1%.service}" in
+    comma) echo openpilot ;;
+    ssh) echo sshd ;;
+    systemd-timesyncd) echo busybox-ntpd ;;
+    ssh-param-watcher.path|ssh-param-watcher) echo ssh-param-watcher ;;
+    adb-param-watcher.path|adb-param-watcher) echo ncm-param-watcher ;;
+    *) echo "${1%.service}" ;;
+  esac
+}
+
+case "$action" in
+  daemon-reload) exit 0 ;;
+  start|restart|try-restart|unmask) sv_action=up ;;
+  stop|disable|mask) sv_action=down ;;
+  enable) sv_action=up ;;
+  is-active|is-enabled) sv_action=status ;;
+  *)
+    echo "systemctl compatibility: unsupported arguments: $*" >&2
+    exit 2
+    ;;
+esac
+
+status=0
+for unit in $units; do
+  service=$(map_unit "$unit")
+  service_path="/var/service/$service"
+
+  if [ "$action" = is-enabled ]; then
+    if [ -e "/etc/runit/runsvdir/default/$service" ]; then
+      [ "$quiet" -eq 1 ] || echo enabled
+    else
+      [ "$quiet" -eq 1 ] || echo disabled
+      status=1
+    fi
+  elif [ "$action" = is-active ]; then
+    if [ -e "$service_path/supervise/ok" ] && sv status "$service_path" 2>/dev/null | grep -q '^run:'; then
+      [ "$quiet" -eq 1 ] || echo active
+    else
+      [ "$quiet" -eq 1 ] || echo inactive
+      status=3
+    fi
+  elif [ ! -e "$service_path" ]; then
+    echo "systemctl compatibility: unit $unit is not available" >&2
+    status=5
+  else
+    sv "$sv_action" "$service_path" || status=$?
+  fi
+done
+exit "$status"

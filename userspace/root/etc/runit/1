@@ -21,8 +21,12 @@ mountpoint -q /dev/shm || mount -t tmpfs shm /dev/shm -o mode=1777,nosuid,nodev
 mountpoint -q /var || mount -t tmpfs tmpfs /var -o rw,nosuid,nodev,size=128M,mode=755
 mountpoint -q /tmp || mount -t tmpfs tmpfs /tmp -o rw,nosuid,nodev,size=150M,mode=1777
 mountpoint -q /rwtmp || mount -t tmpfs tmpfs /rwtmp -o rw,nosuid,nodev,size=100M,mode=1777
-mkdir -p /var/run /var/run/pppd/lock /var/log /var/tmp /var/lib /var/cache /var/chroot/ssh /var/db
+mkdir -p /var/run /var/run/pppd/lock /var/log /var/tmp /var/lib /var/cache /var/chroot/ssh /var/db \
+         /var/spool/cron /var/lib/logrotate
 chmod 1777 /var/tmp
+touch /var/log/lastlog /var/log/wtmp /var/log/btmp
+chmod 664 /var/log/lastlog /var/log/wtmp
+chmod 600 /var/log/btmp
 ln -sf /usr/lib/xbps-db /var/db/xbps
 # D-Bus socket symlink (D-Bus runs in /run/dbus, some apps expect /var/run/dbus)
 ln -sf /run/dbus /var/run/dbus
@@ -161,6 +165,11 @@ if [ "$ab_init_failed" -eq 0 ] &&
         echo "WARN: /data mount failed"
     if ! mountpoint -q /data; then
         echo "ERROR: persistent userdata exists but could not be mounted"
+    elif [ -e /data/__system_reset__ ]; then
+        echo "=> Performing requested headless factory reset"
+        if ! /usr/comma/reset --early; then
+            echo "ERROR: factory reset failed; preserving reset marker for diagnosis"
+        fi
     elif [ ! -f /data/.vamos-userdata ] || [ ! -f /data/.vamos-ab-ready ]; then
         echo "=> Resuming interrupted A/B initialization"
         if ! /usr/bin/vamos-update initialize --yes; then
@@ -193,14 +202,16 @@ if [ -f /ASIUS ] && [ -x /usr/bin/vamos-boot ]; then
     /usr/bin/vamos-boot reconcile || echo "WARN: failed to reconcile vamOS boot state"
 fi
 
-# readonly_setup moved /home to /usr/default/home at build time. comma's
-# fs_setup service overlay-mounts it back at runtime. Dragon restores a plain
-# home directory while the rest of persistent state remains under /data.
-if [ -d /usr/default/home/comma ] && [ ! -e /home/comma/.bashrc ]; then
-  echo "=> Restoring /home/comma from /usr/default/home/comma"
-  mkdir -p /home
-  cp -a /usr/default/home/comma /home/comma
-  chown -R comma:comma /home/comma
+# Keep the operator home consistent with AGNOS: defaults come from the current
+# immutable image and per-boot changes live only in RAM. Persistent work belongs
+# under /data.
+if [ -f /ASIUS ] && [ -d /usr/default/home/comma ] && ! mountpoint -q /home; then
+  echo "=> Mounting ephemeral /home overlay"
+  mkdir -p /rwtmp/home_work /rwtmp/home_upper /home
+  chmod 755 /rwtmp/home_work /rwtmp/home_upper
+  mount -t overlay overlay \
+    -o lowerdir=/usr/default/home,upperdir=/rwtmp/home_upper,workdir=/rwtmp/home_work \
+    /home || echo "ERROR: failed to mount /home overlay"
 fi
 
 # /data writable scaffolding. This is persistent after A/B initialization and

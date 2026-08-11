@@ -1,4 +1,5 @@
 #!/bin/sh
-# One-shot service - run once then sleep forever
+# One-shot service. Mark the writable runit copy down before exiting so runsv
+# retains the completed state without a resident `sleep infinity` process.
 /usr/comma/init.qcom.sh
-exec sleep infinity
+touch /run/runit/service/init-qcom/down

@@ -15,7 +15,9 @@ if [ -f /ASIUS ]; then
     mkdir -p /sys/class/backlight/panel0-backlight
     echo 0 > /sys/class/backlight/panel0-backlight/bl_power
     echo 255 > /sys/class/backlight/panel0-backlight/max_brightness
-    echo 128 > /sys/class/backlight/panel0-backlight/brightness
+    # A screenless device must report zero brightness so hardwared can enter
+    # offroad power save instead of pinning every CPU/GPU clock at maximum.
+    echo 0 > /sys/class/backlight/panel0-backlight/brightness
     chmod 666 /sys/class/backlight/panel0-backlight/bl_power
     chmod 666 /sys/class/backlight/panel0-backlight/brightness
   fi

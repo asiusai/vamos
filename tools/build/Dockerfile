@@ -31,11 +31,11 @@ FROM void-base
 
 ARG USERNAME=comma
 
-# Build 64-bit irsc_util (replaces 32-bit blob that requires armhf libs)
-COPY ./userspace/irsc_util/ /tmp/vamos/irsc_util/
-RUN cd /tmp/vamos/irsc_util && \
-    gcc -Wall -O2 -o /usr/bin/irsc_util irsc_util.c && \
-    rm -rf /tmp/vamos/irsc_util
+# Native low-overhead /var/log safety monitor. This replaces AGNOS's resident
+# Python poller while preserving the same last-line-of-defense behavior.
+COPY ./userspace/varwatch/varwatch.c /tmp/vamos/varwatch.c
+RUN gcc -Wall -Wextra -Werror -O2 -o /usr/bin/vamos-varwatch /tmp/vamos/varwatch.c && \
+    rm /tmp/vamos/varwatch.c
 
 # Mesa DRI drivers (freedreno for Qualcomm Adreno GPU)
 # Required for EGL/GBM to work with the display
@@ -69,6 +69,56 @@ COPY ./kernel/firmware/LICENSES/LICENSE.qcom ./kernel/firmware/LICENSES/NOTICE.q
 # Root filesystem overlay — all userspace files at their final paths
 COPY ./userspace/root/ /
 
+# Screenless setup/reset implementations. The source overlay retains the AGNOS
+# zipapps for reference, but they cannot be operated on v1 and waste 47 MiB.
+COPY ./userspace/headless/setup /usr/comma/setup
+COPY ./userspace/headless/reset /usr/comma/reset
+RUN chmod 755 /usr/comma/setup /usr/comma/reset && \
+    rm -f /usr/comma/installer /usr/comma/varwatch.py
+
+# Remove SDM845 display/modem/Android compatibility payloads that no v1 runtime
+# loads. QCS6490 TinyMesa (MSM) and the pinned FastRPC/QNN libraries remain.
+RUN rm -rf \
+      /etc/init.d /etc/initscripts \
+      /etc/sv/adsp /etc/sv/cdsp /etc/sv/fs_setup /etc/sv/gpio \
+      /etc/sv/ipa_fws /etc/sv/irsc_util /etc/sv/leprop /etc/sv/lte \
+      /etc/sv/modemmanager /etc/sv/rmtfs /etc/sv/sound \
+      /usr/comma/lte /usr/comma/sound /usr/comma/wlan /usr/local/qr-linux \
+      /usr/lib/firmware/ipa /usr/lib/firmware/wlan/qca_cld \
+      /usr/lib/NetworkManager/system-connections/lte.nmconnection \
+      /system/rfs && \
+    rm -f \
+      /usr/bin/abctl /usr/bin/crasher64 /usr/bin/debuggerd64 \
+      /usr/bin/getprop /usr/bin/leprop-service /usr/bin/logd /usr/bin/pdapitest \
+      /usr/bin/qseecom_sample_client /usr/bin/qseecomd /usr/bin/setprop \
+      /usr/lib/firmware/CAMERA_ICP.elf /usr/lib/firmware/ipa_fws.* \
+      /usr/lib/libC2D2.so /usr/lib/libQTapGLES.so \
+      /usr/lib/libc2d30-a5xx.so /usr/lib/libc2d30_bltlib.so \
+      /usr/lib/libeglSubDriverWayland.so /usr/lib/libllvm-glnext.so \
+      /usr/lib/libq3dtools_esx.so /usr/lib/libqmapboxgl.so \
+      /usr/lib/libQseeComApi.so* \
+      /usr/lib/libabctl.so* /usr/lib/libadbd.so* /usr/lib/libadsprpc.so \
+      /usr/lib/libadsp_default_listener.so /usr/lib/libbacktrace.so* \
+      /usr/lib/libbase.so* /usr/lib/libbinder.so* /usr/lib/libbtnv.so* \
+      /usr/lib/libconfigdb.so* /usr/lib/libcutils.so* /usr/lib/libdiag.so* \
+      /usr/lib/libdrmfs.so* /usr/lib/libdrmtime.so* /usr/lib/libdsutils.so* \
+      /usr/lib/libext4_utils.so* /usr/lib/libfs_mgr.so* /usr/lib/libgpt.so* \
+      /usr/lib/libhardware.so* /usr/lib/libhdcp1prov.so* /usr/lib/libhdcp2p2prov.so* \
+      /usr/lib/liblmclient.so /usr/lib/liblog.so* /usr/lib/liblogwrap.so* \
+      /usr/lib/libmdsprpc.so /usr/lib/libmincrypt.so* \
+      /usr/lib/libpcre.so.1 /usr/lib/libpcre.so.1.2.6 \
+      /usr/lib/libpdmapper.so* /usr/lib/libpdnotifier.so* /usr/lib/libplatformconfig.so* \
+      /usr/lib/libqdMetaData.so /usr/lib/libqmi.so* /usr/lib/libqmi_cci.so* \
+      /usr/lib/libqmi_client_qmux.so* /usr/lib/libqmi_common_so.so* \
+      /usr/lib/libqmi_csi.so* /usr/lib/libqmi_encdec.so* /usr/lib/libqmi_sap.so* \
+      /usr/lib/libqmiidl.so* /usr/lib/libqmiservices.so* /usr/lib/librpmb.so* \
+      /usr/lib/libsdsprpc.so /usr/lib/libsdsp_default_listener.so \
+      /usr/lib/libselinux.so.0 /usr/lib/libselinux.so.0.0.0 \
+      /usr/lib/libsparse.so* /usr/lib/libssd.so* \
+      /usr/lib/libsync.so* /usr/lib/libsysutils.so* /usr/lib/libtime_genoff.so* \
+      /usr/lib/libunwind.so.0 /usr/lib/libunwind.so.0.0.0 \
+      /usr/lib/libutils.so* /usr/lib/libxml.so*
+
 # The overlay still carries legacy FastRPC development blobs. Keep the names
 # for compatibility, but point them at the matched Radxa 1.0.6 runtime.
 RUN ln -sfn libcdsprpc.so.1 /usr/lib/libcdsprpc.so && \
@@ -84,9 +134,10 @@ RUN printf '\nif [ -f ~/.bash_aliases ]; then\n    . ~/.bash_aliases\nfi\n' >> /
 RUN mkdir -p /root/.config
 
 # Enable the minimal Dragon services. Comma hardware services for its screen,
-# modem, DSPs, GPIO, and power monitoring remain disabled.
+# modem, audio, and SDM845 remote processors remain disabled.
 RUN for svc in \
   sshd rsyslogd busybox-ntpd iptables \
+  avahi-ssh-publish ssh-param-watcher varwatch power_monitor \
   tailscaled \
   keygen \
   bluetoothd \
@@ -103,7 +154,7 @@ RUN rm -f /etc/runit/runsvdir/default/udevd
 RUN sed -i 's/FileCreateMode 0640/FileCreateMode 0644/' /etc/rsyslog.conf
 
 # Set executable permissions
-RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/comma/fs_setup.sh /usr/bin/journalctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/local/bin/qnn-smoke /etc/sv/keygen/run /etc/sv/bluetoothd/run /etc/sv/tailscaled/run
+RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/bin/journalctl /usr/bin/systemctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/local/bin/qnn-smoke /etc/sv/keygen/run /etc/sv/bluetoothd/run /etc/sv/tailscaled/run
 RUN chmod +x /etc/runit/1 /etc/runit/2 /etc/runit/3
 
 # Shutdown wrappers - send wall broadcast like systemd does on Ubuntu
@@ -112,8 +163,10 @@ RUN chmod +x /etc/runit/1 /etc/runit/2 /etc/runit/3
 RUN chmod +x /usr/local/sbin/poweroff && \
     ln -sf poweroff /usr/local/sbin/reboot
 
-# NetworkManager connection permissions
-RUN chmod 600 /usr/lib/NetworkManager/system-connections/*.nmconnection
+# NetworkManager connection permissions. V1 has no baked-in connection after
+# removing comma's LTE profile; persistent Wi-Fi profiles live under /data.
+RUN find /usr/lib/NetworkManager/system-connections -maxdepth 1 \
+      -type f -name '*.nmconnection' -exec chmod 600 {} +
 
 # Void's iptables service expects iptables.rules
 RUN ln -s /etc/iptables/rules.v4 /etc/iptables/iptables.rules
@@ -122,7 +175,8 @@ RUN ln -s /etc/iptables/rules.v4 /etc/iptables/iptables.rules
 RUN sed -i 's|motd=/etc/motd|motd=/run/motd|' /etc/pam.d/system-login
 
 # Hourly logrotate cron job
-RUN chmod 755 /etc/cron.hourly/logrotate
+RUN chmod 644 /etc/logrotate.conf /etc/logrotate.d/rsyslog && \
+    chmod 755 /etc/cron.hourly/logrotate
 
 # Mount point directories used by runtime partition mounts
 RUN mkdir -p /dsp /firmware && \
@@ -138,13 +192,6 @@ RUN mkdir -p /system/persist/hlos_rfs/shared \
 
 # Prefer ipv4 over ipv6
 RUN echo "precedence ::ffff:0:0/96 100" >> /etc/gai.conf
-
-# Compatibility symlinks
-# pdmappersvc needs libjson-c.so.2 but Void has libjson-c.so.5
-RUN ln -sf /usr/lib/libjson-c.so.5 /usr/lib/libjson-c.so.2
-# TODO: remove once no more openpilot libraries build against the _adreno names
-RUN ln -sf /usr/lib/libGLESv2.so.2 /usr/lib/libGLESv2_adreno.so && \
-    ln -sf /usr/lib/libEGL.so.1 /usr/lib/libEGL_adreno.so
 
 # ldconfig
 RUN ldconfig
@@ -162,6 +209,14 @@ RUN /tmp/vamos/readonly_setup.sh
 
 # Drop non-English locales, man/doc/info pages, and xbps cache
 RUN find /usr/share/locale -maxdepth 1 -mindepth 1 ! -name en_US ! -name en -exec rm -rf {} + && \
+    rm -f /usr/lib/gcc/*/*/gnat1 /usr/lib/gcc/*/*/ada_target_properties \
+          /usr/lib/llvm/*/bin/c-index-test \
+          /usr/lib/llvm/*/lib/clang/*/include/opencl-c-base.h \
+          /usr/lib/llvm/*/lib/clang/*/include/opencl-c.h \
+          /usr/local/venv/lib/python*/site-packages/ffmpeg/install/include/libavutil/hwcontext_opencl.h \
+          /usr/share/cmake-*/Help/module/FindOpenCL.rst \
+          /usr/share/cmake-*/Modules/FindOpenCL.cmake \
+          /usr/bin/run /usr/bin/lto-dump && \
     rm -rf /usr/share/man /usr/share/doc /usr/share/info && \
     rm -rf /var/cache/xbps
 

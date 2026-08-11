@@ -212,6 +212,13 @@ if [ -d "$OP_SRC" ]; then
   exec_as_root rm -rf "$ROOTFS_DIR/data/openpilot"
   [ "$UV_STATUS" -eq 0 ] || exit "$UV_STATUS"
 
+  # openpilot's packaged FFmpeg development tree includes an OpenCL-only
+  # header. V1 has no OpenCL runtime or backend, so do not reintroduce that
+  # otherwise inert file after the Docker-stage cleanup.
+  exec_as_root find "$ROOTFS_DIR/usr/local/venv" -type f \
+    -path '*/site-packages/ffmpeg/install/include/libavutil/hwcontext_opencl.h' \
+    -delete
+
   echo "Deduplicating immutable Python environment files"
   exec_as_root hardlink -X -s 4096 "$ROOTFS_DIR/usr/local/venv"
 else

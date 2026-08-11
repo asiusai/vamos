@@ -1,5 +1,10 @@
-# vamOS
-a new operating system for comma 3X and comma four
+# VamOS
+
+The device OS for Asius v1, built around the Radxa Dragon Q6A and designed to
+provide an AGNOS-compatible operational environment for openpilot without a
+screen or Android userspace. See the [AGNOS parity matrix](docs/agnos-parity.md)
+for equivalent capabilities, intentional hardware-specific differences, and
+the release checklist.
 
 [![fast](docs/fast.png)](https://discord.com/channels/469524606043160576/1262118077017882715/1482214461740683385)
 
