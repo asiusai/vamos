@@ -11,6 +11,7 @@ import re
 import json
 import sys
 import time
+from collections import deque
 
 LOG_FILE = '/var/log/messages'
 # rsyslog format: "2026-02-02T21:37:49.681865+00:00 hostname tag[pid]: message"
@@ -58,6 +59,7 @@ def main():
   follow = '-f' in args
   output_format = 'short'
   unit_filter = None
+  line_count = None
 
   i = 0
   while i < len(args):
@@ -67,6 +69,20 @@ def main():
     elif args[i] == '-u' and i + 1 < len(args):
       unit_filter = args[i + 1]
       i += 2
+    elif args[i] in ('-n', '--lines') and i + 1 < len(args):
+      try:
+        line_count = int(args[i + 1])
+      except ValueError:
+        print(f"journalctl shim: invalid line count '{args[i + 1]}'", file=sys.stderr)
+        sys.exit(1)
+      i += 2
+    elif args[i].startswith('--lines='):
+      try:
+        line_count = int(args[i].split('=', 1)[1])
+      except ValueError:
+        print(f"journalctl shim: invalid line count '{args[i]}'", file=sys.stderr)
+        sys.exit(1)
+      i += 1
     else:
       i += 1
 
@@ -81,20 +97,33 @@ def main():
     print(f"journalctl shim: unsupported format '{output_format}'", file=sys.stderr)
     sys.exit(1)
 
+  if line_count is not None and line_count < 0:
+    print('journalctl shim: line count must be non-negative', file=sys.stderr)
+    sys.exit(1)
+
   if follow:
-    proc = subprocess.Popen(['tail', '-F', LOG_FILE], stdout=subprocess.PIPE, text=True)
+    tail_lines = str(line_count if line_count is not None else 10)
+    proc = subprocess.Popen(['tail', '-n', tail_lines, '-F', LOG_FILE], stdout=subprocess.PIPE, text=True)
     source = proc.stdout
   else:
     source = open(LOG_FILE, 'r')
 
   try:
+    entries = deque(maxlen=line_count) if not follow and line_count is not None else None
     for line in source:
       parsed = parse_line(line)
       if not parsed:
         continue
       if unit_filter and parsed['tag'] != unit_filter:
         continue
-      print(formatter(parsed), flush=True)
+      rendered = formatter(parsed)
+      if entries is None:
+        print(rendered, flush=True)
+      else:
+        entries.append(rendered)
+    if entries is not None:
+      for rendered in entries:
+        print(rendered)
   except KeyboardInterrupt:
     pass
   finally:

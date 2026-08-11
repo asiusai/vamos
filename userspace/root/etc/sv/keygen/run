@@ -12,4 +12,4 @@ if [ ! -s /persist/comma/id_ed25519 ]; then
   chown comma:comma /persist/comma/id_ed25519 /persist/comma/id_ed25519.pub
 fi
 
-exec sleep infinity
+touch /run/runit/service/keygen/down
