@@ -65,14 +65,11 @@ xbps-install -y \
   libuv \
   logrotate \
   lz4 \
-  mesa-opencl \
   nano \
   ncurses-devel \
   net-tools \
   NetworkManager \
   nload \
-  ocl-icd \
-  opencl-headers \
   portaudio \
   pv \
   rsync \

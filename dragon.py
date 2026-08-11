@@ -377,7 +377,7 @@ def cmd_health(args):
     print(f"[health] testing openpilot root {openpilot_root}", flush=True)
     ssh_cmd = ["ssh", *ssh_opts, target,
                f"cd {root} && PYTHONPATH={root}:{root}/tinygrad_repo "
-               f"OPENPILOT_ROOT={root} LD_LIBRARY_PATH=/opt/qcom-adreno/lib "
+               f"OPENPILOT_ROOT={root} "
                f"python3 -u {REMOTE_HEALTH_SCRIPT}"]
     ret = subprocess.run(ssh_cmd).returncode
     local_dir = "/tmp/dragon_health_local"
