@@ -19,6 +19,27 @@ a new operating system for comma 3X and comma four
 ./vamos device-update comma@192.168.88.20
 ```
 
+## Dragon NPU
+
+The Dragon image includes the pinned QCS6490 cDSP firmware userspace, FastRPC
+libraries, QAIRT v68 HTP runtime, and the QNN-enabled ONNX Runtime wheel. The
+firmware-side unsigned shell must remain in `/usr/lib/dsp`; FastRPC checks that
+canonical path before `ADSP_LIBRARY_PATH`.
+
+After a cold boot, verify both the raw cDSP transport and a quantized HTP tensor
+operation (with CPU fallback disabled) using:
+
+```bash
+qnn-smoke
+```
+
+On Asius hardware, modeld uses the Qualcomm MSM GPU for the camera warp and runs
+the quantized vision network and recurrent temporal policy through QNN/HTP.
+ONNX Runtime retains only four fixed-shape `Reshape` nodes as CPU bookkeeping;
+all learned model arithmetic runs on HTP. The openpilot model build selects this
+configuration with `MODELD_DEV=QNN` (the Asius default), or the full tinygrad MSM
+backend with `MODELD_DEV=QCOM`.
+
 The first system or disk build clones the Asius `openpilot` `master` branch into
 the gitignored `.openpilot/` checkout. Later builds fast-forward that checkout
 or safely realign it after an intentional branch rewrite, then update its

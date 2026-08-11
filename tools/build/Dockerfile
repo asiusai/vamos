@@ -19,6 +19,11 @@ ARG USERNAME=comma
 COPY ./userspace/base_setup.sh /tmp/vamos/
 RUN /tmp/vamos/base_setup.sh
 
+# Qualcomm QCS6490 FastRPC and QAIRT v68 runtime. The installer fetches pinned,
+# checksum-verified Radxa packages and installs only the cDSP runtime pieces.
+COPY ./userspace/install_qnn_runtime.sh /tmp/vamos/
+RUN /tmp/vamos/install_qnn_runtime.sh && rm /tmp/vamos/install_qnn_runtime.sh
+
 # ################### #
 # ###### vamOS ###### #
 # ################### #
@@ -79,6 +84,13 @@ COPY ./kernel/firmware/LICENSES/LICENSE.qcom ./kernel/firmware/LICENSES/NOTICE.q
 
 # Root filesystem overlay — all userspace files at their final paths
 COPY ./userspace/root/ /
+
+# The overlay still carries legacy FastRPC development blobs. Keep the names
+# for compatibility, but point them at the matched Radxa 1.0.6 runtime.
+RUN ln -sfn libcdsprpc.so.1 /usr/lib/libcdsprpc.so && \
+    ln -sfn libcdsp_default_listener.so.1 /usr/lib/libcdsp_default_listener.so && \
+    ldconfig
+
 COPY ./build/BOOTAA64.EFI /usr/share/vamos/BOOTAA64.EFI
 
 # Fix ownership on home directory (overlay COPY runs as root)
@@ -107,7 +119,7 @@ RUN rm -f /etc/runit/runsvdir/default/udevd
 RUN sed -i 's/FileCreateMode 0640/FileCreateMode 0644/' /etc/rsyslog.conf
 
 # Set executable permissions
-RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/comma/fs_setup.sh /usr/bin/journalctl /usr/bin/vamos-update /usr/bin/vamos-boot /etc/sv/keygen/run /etc/sv/bluetoothd/run /etc/sv/tailscaled/run
+RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/comma/fs_setup.sh /usr/bin/journalctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/local/bin/qnn-smoke /etc/sv/keygen/run /etc/sv/bluetoothd/run /etc/sv/tailscaled/run
 RUN chmod +x /etc/runit/1 /etc/runit/2 /etc/runit/3
 
 # Shutdown wrappers - send wall broadcast like systemd does on Ubuntu
