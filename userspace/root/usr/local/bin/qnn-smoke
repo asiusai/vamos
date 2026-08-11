@@ -1,0 +1,65 @@
+#!/usr/local/venv/bin/python3
+"""Cold-boot smoke test for the Dragon Q6A cDSP and HTP runtime."""
+
+import os
+from pathlib import Path
+import subprocess
+import time
+
+import numpy as np
+from tinygrad import Tensor, dtypes
+
+
+DSP_PATH = os.getenv("QNN_DSP_PATH", "/usr/lib/dsp")
+MODEL_PATH = Path(os.getenv("QNN_SMOKE_MODEL", "/usr/share/vamos/qnn_add_u8.onnx"))
+BACKEND_PATH = os.getenv("QNN_BACKEND_PATH", "/usr/lib/libQnnHtp.so")
+FASTRPC_TEST = os.getenv("FASTRPC_TEST", "/usr/bin/fastrpc_test")
+FASTRPC_LIBRARY_PATH = os.getenv("FASTRPC_LIBRARY_PATH", "/usr/lib/fastrpc_test:/usr/lib")
+
+
+def test_fastrpc() -> None:
+  env = os.environ.copy()
+  env["ADSP_LIBRARY_PATH"] = DSP_PATH
+  env["LD_LIBRARY_PATH"] = FASTRPC_LIBRARY_PATH
+  subprocess.run([FASTRPC_TEST, "-d", "3", "-U", "1", "-a", "v68"], env=env, check=True)
+  print("FastRPC cDSP calculator: PASS")
+
+
+def test_qnn() -> None:
+  os.environ["ADSP_LIBRARY_PATH"] = DSP_PATH
+  import onnxruntime as ort
+
+  if "QNNExecutionProvider" not in ort.get_available_providers():
+    raise RuntimeError("onnxruntime was built without QNNExecutionProvider")
+
+  options = ort.SessionOptions()
+  options.log_severity_level = 3
+  options.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
+  providers = [("QNNExecutionProvider", {
+    "backend_path": BACKEND_PATH,
+    "soc_model": "35",
+    "htp_arch": "68",
+    "device_id": "0",
+    "offload_graph_io_quantization": "0",
+    "htp_performance_mode": "burst",
+  })]
+  session = ort.InferenceSession(MODEL_PATH, sess_options=options, providers=providers)
+  if session.get_providers()[0] != "QNNExecutionProvider":
+    raise RuntimeError(f"QNN execution provider failed to load: {session.get_providers()}")
+
+  x = Tensor([[-1.0, 0.0, 0.5, 2.0]], dtype=dtypes.float32, device="CPU")
+  y = Tensor([[0.5, -0.25, 1.0, 1.0]], dtype=dtypes.float32, device="CPU")
+  inputs = {"x": x.numpy(), "y": y.numpy()}
+  expected = (x + y).numpy()
+  elapsed = []
+  for _ in range(5):
+    start = time.perf_counter()
+    output = session.run(None, inputs)[0]
+    elapsed.append((time.perf_counter() - start) * 1e3)
+  np.testing.assert_array_equal(output, expected)
+  print(f"tinygrad -> QNN HTP quantized Add: PASS ({min(elapsed):.3f} ms)")
+
+
+if __name__ == "__main__":
+  test_fastrpc()
+  test_qnn()

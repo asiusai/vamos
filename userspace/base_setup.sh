@@ -55,10 +55,12 @@ xbps-install -y \
   jq \
   kmod \
   libarchive \
+  libbsd \
   libcurl \
   libgpiod \
   libomp-devel \
   libtool \
+  libyaml \
   libusb-devel \
   libuv \
   logrotate \
