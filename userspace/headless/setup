@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OPENPILOT=/data/openpilot
+CONTINUE=/data/continue.sh
+REPOSITORY=https://github.com/asiusai/openpilot.git
+BRANCH=master
+
+write_continue() {
+  cat > "$CONTINUE.tmp" <<'CONTINUE_SCRIPT'
+#!/usr/bin/env bash
+cd /data/openpilot
+exec /data/openpilot/launch_openpilot.sh
+CONTINUE_SCRIPT
+  chmod 755 "$CONTINUE.tmp"
+  mv "$CONTINUE.tmp" "$CONTINUE"
+}
+
+if git -C "$OPENPILOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  write_continue
+  exit 0
+fi
+
+if ! ip route show default | grep -q .; then
+  echo "setup: waiting for a network route before recovering openpilot" >&2
+  exit 1
+fi
+
+staging="/data/.openpilot-setup.$$"
+trap 'rm -rf -- "$staging"' EXIT
+rm -rf -- "$staging"
+git clone --branch "$BRANCH" --single-branch --recurse-submodules "$REPOSITORY" "$staging"
+git -C "$staging" lfs pull
+
+if [[ -e "$OPENPILOT" ]]; then
+  recovery="/data/openpilot.failed.$(date -u +%Y%m%dT%H%M%SZ)"
+  mv "$OPENPILOT" "$recovery"
+  echo "setup: preserved invalid checkout at $recovery"
+fi
+mv "$staging" "$OPENPILOT"
+trap - EXIT
+write_continue
+echo "setup: recovered openpilot $BRANCH from $REPOSITORY"

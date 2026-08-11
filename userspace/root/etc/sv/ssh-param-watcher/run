@@ -20,8 +20,11 @@ while [ ! -d "$WATCH_DIR" ]; do
   sleep 2
 done
 
-# Watch for modifications and run script only on value changes
-exec inotifywait -m -e modify,create,delete "$WATCH_FILE" 2>/dev/null | while read -r; do
+# Watch the directory, not the file: Params writes can replace or delete the
+# inode atomically, which would otherwise terminate the watcher.
+WATCH_FILENAME=$(basename "$WATCH_FILE")
+exec inotifywait -m -e modify,create,delete,move "$WATCH_DIR" 2>/dev/null | while read -r dir event file; do
+  [ "$file" = "$WATCH_FILENAME" ] || continue
   NEW_VALUE=$(get_value)
   LAST_VALUE=$(cat "$STATE_FILE" 2>/dev/null || echo "")
   if [ "$NEW_VALUE" != "$LAST_VALUE" ]; then

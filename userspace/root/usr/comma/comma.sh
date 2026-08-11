@@ -34,7 +34,6 @@ if [ ! -f /tmp/booted ]; then
   touch /tmp/booted
   if [ -f "$RESET_TRIGGER" ]; then
     echo "launching system reset, reset trigger present"
-    rm -f $RESET_TRIGGER
     $RESET
   elif [ "$(cat /sys/class/input/input*/device/touch_count 2>/dev/null | head -1)" -gt 4 ] 2>/dev/null; then
     echo "launching system reset, got taps"
@@ -95,7 +94,17 @@ while true; do
     exec "$CONTINUE"
   fi
 
-  sudo abctl --set_success
+  if [[ ! -f /ASIUS ]]; then
+    sudo abctl --set_success
+  fi
+
+  if [[ -f /ASIUS ]]; then
+    if ! "$SETUP"; then
+      echo "headless setup is waiting for recovery conditions"
+      sleep 30
+    fi
+    continue
+  fi
 
   # cleanup installers from previous runs
   rm -f $INSTALLER

@@ -65,14 +65,11 @@ xbps-install -y \
   libuv \
   logrotate \
   lz4 \
-  mesa-opencl \
   nano \
   ncurses-devel \
   net-tools \
   NetworkManager \
   nload \
-  ocl-icd \
-  opencl-headers \
   portaudio \
   pv \
   rsync \
@@ -83,10 +80,6 @@ xbps-install -y \
   tmux \
   traceroute \
   iw \
-  qrtr-ns \
-  rmtfs \
-  tqftpserv \
-  pd-mapper \
   wireless-regdb \
   wireless_tools \
   wpa_supplicant \

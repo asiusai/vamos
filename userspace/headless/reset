@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RESET_MARKER=/data/__system_reset__
+CONTINUE=/data/continue.sh
+OPENPILOT=/data/openpilot
+
+if [[ ! -f /ASIUS ]]; then
+  echo "reset: this headless reset helper is only for Asius hardware" >&2
+  exit 1
+fi
+
+if [[ "${1:-}" != "--early" ]]; then
+  touch "$RESET_MARKER"
+  sync
+  sudo reboot
+  exit 0
+fi
+
+if [[ $EUID -ne 0 ]]; then
+  echo "reset: --early must run as root" >&2
+  exit 1
+fi
+if [[ ! -e "$RESET_MARKER" ]] || ! mountpoint -q /data; then
+  echo "reset: refusing erase without a reset marker on mounted userdata" >&2
+  exit 1
+fi
+
+data_source=$(readlink -f "$(findmnt -n -o SOURCE /data)")
+if [[ "$data_source" != /dev/nvme0n1p5 ]]; then
+  echo "reset: refusing unexpected userdata source: $data_source" >&2
+  exit 1
+fi
+
+# A headless device cannot use AGNOS's display installer after formatting the
+# whole userdata partition. Preserve the installed software, return it to its
+# checked-out commit, and erase all user state around it.
+if ! git -C "$OPENPILOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "reset: installed openpilot checkout is not recoverable" >&2
+  exit 1
+fi
+
+git -C "$OPENPILOT" reset --hard HEAD
+git -C "$OPENPILOT" clean -dffx
+git -C "$OPENPILOT" submodule foreach --recursive git reset --hard
+git -C "$OPENPILOT" submodule foreach --recursive git clean -dffx
+
+find /data -mindepth 1 -maxdepth 1 \
+  ! -name openpilot \
+  ! -name .vamos-userdata \
+  ! -name .vamos-ab-ready \
+  -exec rm -rf -- {} +
+
+cat > "$CONTINUE.tmp" <<'CONTINUE_SCRIPT'
+#!/usr/bin/env bash
+cd /data/openpilot
+exec /data/openpilot/launch_openpilot.sh
+CONTINUE_SCRIPT
+chmod 755 "$CONTINUE.tmp"
+mv "$CONTINUE.tmp" "$CONTINUE"
+chown -R comma:comma "$OPENPILOT" "$CONTINUE"
+sync
+echo "reset: user state erased; installed openpilot restored"
