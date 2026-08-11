@@ -5,8 +5,8 @@ authors = [{name = "Vehicle Researcher", email = "user@comma.ai"}]
 requires-python = ">=3.12.3, <3.13"
 description = ""
 dependencies = [
+  # Shipping runtime only; development and test tools belong in their jobs.
   "openpilot",
-  "openpilot[testing]",
   "onnxruntime-qnn @ https://github.com/ZIFENG278/onnxruntime/releases/download/v1.23.2/onnxruntime_qnn-1.23.2-cp312-cp312-linux_aarch64.whl",
 
   # bled.py
@@ -19,14 +19,6 @@ dependencies = [
   "paramiko",
   # WebRTC device streaming
   "libdatachannel-py>=2026.1.0.dev2",
-
-  # extra nice-to-haves
-  "matplotlib",
-  "evdev",
-  "ipython",
-  "py-spy",
-  "spidev2",
-  "flaky",
 ]
 
 [tool.uv]

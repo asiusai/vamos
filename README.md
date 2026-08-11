@@ -194,7 +194,6 @@ comma threex:
   - [ ] openpilot
 - [x] graphics
   - [x] gpu
-- [ ] opencl - via rusticl / msm_drm
 - [ ] Venus? (video encode/decode)
 
 comma four:
@@ -214,14 +213,13 @@ comma four:
   - [ ] openpilot
 - [x] graphics
   - [x] gpu
-- [ ] opencl - via rusticl / msm_drm
 - [ ] Venus (video encode/decode)
 
 openpilot support:
 - [ ]
 
 tinygrad support:
-- [ ] msm_drm
+- [x] direct msm_drm compute (no OpenCL runtime)
 
 validation:
 - [ ] dmesg is clean (background in https://github.com/commaai/agnos-builder/issues/325)

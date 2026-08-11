@@ -41,24 +41,8 @@ RUN cd /tmp/vamos/irsc_util && \
 # Required for EGL/GBM to work with the display
 RUN yes | xbps-install -Sy mesa-dri
 
-# Extra packages (nice-to-haves for development)
-RUN xbps-install -y \
-  bash-completion \
-  btop \
-  efibootmgr \
-  hyperfine \
-  iperf \
-  iperf3 \
-  ripgrep \
-  ncdu \
-  nfs-utils \
-  socat \
-  stress-ng \
-  tailscale \
-  tree \
-  wavemon \
-  avahi-utils \
-  usbutils
+# Asius Connect uses Tailscale for remote access.
+RUN xbps-install -y tailscale
 
 # Python packages via uv
 ARG XDG_DATA_HOME="/usr/local"
