@@ -46,9 +46,10 @@ configuration with `MODELD_DEV=QNN` (the Asius default), or the full tinygrad MS
 backend with `MODELD_DEV=QCOM`.
 
 The first system or disk build clones the Asius `openpilot` `master` branch into
-the gitignored `.openpilot/` checkout. Later builds fast-forward that checkout
-or safely realign it after an intentional branch rewrite, then update its
-submodules. System builds use it for openpilot dependencies, and disk
+the gitignored `.openpilot/` checkout. Later builds fetch that ref and safely
+realign the managed checkout, then update its submodules. Release builds set
+`VAMOS_OPENPILOT_REF` to the resolved openpilot commit so the image is
+reproducible even if `master` moves. System builds use it for openpilot dependencies, and disk
 builds package it as a git-complete `/data/openpilot` checkout.
 The device therefore boots without downloading openpilot and can use normal
 Git commands afterward. OTA packages use `system.img`, which intentionally
@@ -148,16 +149,24 @@ sudo reboot
 
 ## OTA Publishing
 
-The `release vamOS to R2` GitHub workflow runs manually or for `vamos-v*`
-tags. It builds the kernel, system image, and ESP on ARM64, creates
-content-addressed XZ objects, signs `vamos.json`, and publishes to Cloudflare
-R2. Configure these repository secrets:
+The separate `build and publish vamOS images` workflow runs manually or for an
+exact `vamos-v<VERSION>` tag. It builds the kernel, system image, and ESP on
+ARM64, creates content-addressed XZ objects, signs `vamos.json`, and publishes
+the device-facing objects to Cloudflare R2. It also publishes a `v<VERSION>`
+tag to `asiusai/vamos-images`; compressed images larger than 50 MiB are split
+into 50 MiB Git blobs so the release can be browsed and reconstructed like
+comma's image repository. Finally, it commits the signed `vamos.json` and signature to the
+Asius openpilot fork.
+
+Configure these repository secrets:
 
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 - `R2_ACCOUNT_ID`
 - `R2_BUCKET`
 - `VAMOS_UPDATE_SIGNING_KEY`
+- `VAMOS_IMAGES_DEPLOY_KEY` (write deploy key for `asiusai/vamos-images`)
+- `OPENPILOT_DEPLOY_KEY` (write deploy key for `asiusai/openpilot`)
 
 Set `VAMOS_PUBLIC_URL` to the public R2 custom-domain origin, currently
 `https://updates.asius.ai`.
