@@ -54,6 +54,23 @@ class ManifestTest(unittest.TestCase):
       with self.assertRaises(update.UpdateError):
         update.load_manifest(str(path))
 
+  def test_accepts_legacy_dragon_product(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      path = Path(temporary) / "legacy.json"
+      path.write_text(json.dumps({
+        "manifest_version": 1,
+        "minimum_updater_version": 1,
+        "product": "radxa-dragon-q6a",
+        "version": "legacy-test",
+        "partitions": [
+          {"name": "esp", "url": "esp.img.xz", "size": 32, "sha256": "a" * 64, "compression": "xz"},
+          {"name": "system", "url": "system.img.xz", "size": 64, "sha256": "b" * 64, "compression": "xz"},
+        ],
+      }))
+      with mock.patch.object(update, "ESP_SIZE", 32), mock.patch.object(update, "SYSTEM_SIZE", 64):
+        manifest = update.load_manifest(str(path))
+      self.assertEqual(manifest.version, "legacy-test")
+
   def test_local_directory_with_raw_and_xz_images(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
       directory = Path(temporary)
