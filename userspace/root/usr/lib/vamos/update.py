@@ -25,6 +25,7 @@ from typing import BinaryIO, Callable, Iterator, Sequence
 UPDATER_VERSION = 1
 MANIFEST_VERSION = 1
 PRODUCT = "asius-v1"
+LEGACY_PRODUCTS = {"radxa-dragon-q6a"}
 DISK = Path("/dev/nvme0n1")
 PARTLABEL_DIR = Path("/dev/disk/by-partlabel")
 STATE_DIR = Path("/data/vamos-update")
@@ -277,7 +278,7 @@ def load_manifest(source: str) -> Manifest:
 
   if manifest_version != MANIFEST_VERSION:
     raise UpdateError(f"unsupported manifest version {manifest_version!r}")
-  if product != PRODUCT:
+  if product != PRODUCT and product not in LEGACY_PRODUCTS:
     raise UpdateError(f"manifest is for {product!r}, expected {PRODUCT!r}")
   if not isinstance(partitions, list):
     raise UpdateError("manifest has no partitions list")

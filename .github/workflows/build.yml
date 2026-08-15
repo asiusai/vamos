@@ -10,14 +10,32 @@ on:
   pull_request:
 
 jobs:
+  test-tools:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: run host-side tests
+        env:
+          PYTHONPATH: .:tools
+        run: |
+          python3 -m unittest \
+            tools.camerad_env_quote_test \
+            tools.device_update_test \
+            tools.validate_camerad_vfe_test \
+            tools.update.test_vamos_update \
+            tools.build.test_archive_ota
+
   build-kernel:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: get kernel submodule ref
         id: kernel-submodule
-        run: echo "ref=$(git ls-tree HEAD | awk '$4 == "kernel"' | awk '{print $3}')" | tee -a $GITHUB_OUTPUT
+        run: echo "ref=$(git ls-tree HEAD kernel/linux | awk '{print $3}')" | tee -a "$GITHUB_OUTPUT"
 
       - name: restore ccache
         uses: actions/cache@v4
@@ -31,12 +49,22 @@ jobs:
       - name: build kernel
         run: ./vamos build kernel
 
-      - name: upload boot.img
+      - name: validate kernel outputs
+        run: |
+          test -s build/Image
+          test -s build/Image.gz
+          test -s build/qcs6490-radxa-dragon-q6a.dtb
+          file build/Image build/Image.gz build/qcs6490-radxa-dragon-q6a.dtb
+
+      - name: upload kernel outputs
         uses: actions/upload-artifact@v4
         with:
-          name: boot.img
-          path: build/boot.img
+          name: kernel-images
+          path: |
+            build/Image.gz
+            build/qcs6490-radxa-dragon-q6a.dtb
           if-no-files-found: error
+          retention-days: 1
 
   build-system:
     runs-on: ubuntu-24.04-arm
@@ -48,12 +76,11 @@ jobs:
       - name: build system image
         run: ./vamos build system
 
-      - name: upload system.erofs.img
-        uses: actions/upload-artifact@v4
-        with:
-          name: system.erofs.img
-          path: build/system.erofs.img
-          if-no-files-found: error
+      - name: validate system outputs
+        run: |
+          test "$(stat -c %s build/system.img)" -eq $((10 * 1024 * 1024 * 1024))
+          test -s build/system.erofs.img
+          sudo e2fsck -fn build/system.img
 
       - name: upload rootfs profile
         uses: actions/upload-artifact@v4
@@ -63,45 +90,4 @@ jobs:
             build/rootfs-profile.json
             build/rootfs-profile.md
           if-no-files-found: error
-
-      - name: download master baseline
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir -p baseline
-          RUN_ID=$(gh run list --workflow=build.yml --branch=master \
-            --status=success --limit=1 --json databaseId --jq '.[0].databaseId')
-          if [ -n "$RUN_ID" ]; then
-            gh run download "$RUN_ID" --name rootfs-profile --dir baseline/ || true
-          fi
-
-      - name: post PR comment
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Generate diff (gracefully handles missing baseline)
-          DIFF_MD=$(./vamos profile diff baseline/rootfs-profile.json build/rootfs-profile.json 2>/dev/null || echo "No baseline available")
-          PROFILE_MD=$(cat build/rootfs-profile.md)
-
-          # Assemble comment with hidden marker for find-and-update
-          printf -v COMMENT_BODY '%s\n%s\n\n%s\n%s\n\n---\n\n%s' \
-            '<!-- rootfs-profile-bot -->' \
-            '## vamOS System Profile' \
-            '### Changes vs master' \
-            "$DIFF_MD" \
-            "$PROFILE_MD"
-
-          # Find existing comment by marker
-          COMMENT_ID=$(gh api \
-            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            --jq '.[] | select(.body | contains("<!-- rootfs-profile-bot -->")) | .id' \
-            | head -1)
-
-          if [ -n "$COMMENT_ID" ]; then
-            gh api "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" \
-              -X PATCH -f body="$COMMENT_BODY"
-          else
-            gh pr comment "${{ github.event.pull_request.number }}" --body "$COMMENT_BODY"
-          fi
+          retention-days: 1

@@ -9,7 +9,7 @@ env:
 
 jobs:
   pr-comment:
-    if: github.repository == 'commaai/vamOS'
+    if: github.repository == 'asiusai/vamos'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
