@@ -11,6 +11,11 @@ cd "$DIR"
 . "$DIR/tools/build/openpilot_checkout.sh"
 
 update_openpilot_checkout
+OPENPILOT_PYTHON_VERSION="$(tr -d '[:space:]' < "$OP_SRC/.python-version")"
+if ! [[ "$OPENPILOT_PYTHON_VERSION" =~ ^3[.]12[.][0-9]+$ ]]; then
+  echo "ERROR: unsupported openpilot Python version: $OPENPILOT_PYTHON_VERSION" >&2
+  exit 1
+fi
 "$DIR/tools/build/build_bootloader.sh"
 
 DOWNLOADS_DIR="$DIR/build/downloads"
@@ -57,7 +62,9 @@ fi
 
 # Check Dockerfile
 export DOCKER_BUILDKIT=1
-docker buildx build -f tools/build/Dockerfile --check "$DIR"
+docker buildx build -f tools/build/Dockerfile --check \
+  --build-arg OPENPILOT_PYTHON_VERSION="$OPENPILOT_PYTHON_VERSION" \
+  "$DIR"
 
 # Setup mount container for macOS and CI support
 echo "Building vamos-builder docker image"
@@ -112,6 +119,7 @@ docker buildx build -f tools/build/Dockerfile --platform=linux/arm64 \
   --output "type=tar,dest=-" \
   --provenance=false \
   --build-arg VOID_ROOTFS="${VOID_ROOTFS_FILE#"$DIR/"}" \
+  --build-arg OPENPILOT_PYTHON_VERSION="$OPENPILOT_PYTHON_VERSION" \
   --build-arg KVER="${KVER}" \
   "$DIR" | docker exec -i "$MOUNT_CONTAINER_ID" tar -xf - -C "$ROOTFS_DIR"
 echo "Build and extraction complete"
@@ -201,6 +209,7 @@ if [ -d "$OP_SRC" ]; then
     UV_CACHE_DIR=/data/uv-cache \
     UV_PROJECT_ENVIRONMENT=/usr/local/venv \
       uv sync --frozen --inexact --no-install-project
+    python -c "import dbus_fast, libdatachannel, paramiko, smbus2, usb"
     rm -rf /data/tmp /data/uv-cache
     chmod -R a+rX /usr/local/venv /usr/local/uv
   '
