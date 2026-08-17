@@ -82,7 +82,6 @@ jobs:
           openpilot_commit=$(git ls-remote https://github.com/asiusai/openpilot.git refs/heads/master | awk '{print $1}')
           test -n "$openpilot_commit"
           echo "VAMOS_VERSION=$version" >> "$GITHUB_ENV"
-          echo "VAMOS_IMAGE_TAG=v${version}" >> "$GITHUB_ENV"
           echo "VAMOS_OPENPILOT_REF=$openpilot_commit" >> "$GITHUB_ENV"
 
       - name: free runner disk space
@@ -117,7 +116,6 @@ jobs:
 
       - name: validate release configuration
         env:
-          VAMOS_IMAGES_DEPLOY_KEY: ${{ secrets.VAMOS_IMAGES_DEPLOY_KEY }}
           OPENPILOT_DEPLOY_KEY: ${{ secrets.OPENPILOT_DEPLOY_KEY }}
           VAMOS_UPDATE_SIGNING_KEY: ${{ secrets.VAMOS_UPDATE_SIGNING_KEY }}
         run: |
@@ -125,7 +123,6 @@ jobs:
           test -n "$R2_ACCOUNT_ID"
           test -n "$R2_BUCKET"
           test -n "$VAMOS_PUBLIC_URL"
-          test -n "$VAMOS_IMAGES_DEPLOY_KEY"
           test -n "$OPENPILOT_DEPLOY_KEY"
           test -n "$VAMOS_UPDATE_SIGNING_KEY"
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
@@ -171,11 +168,15 @@ jobs:
           openssl pkeyutl -verify -pubin -inkey "$public" -rawin \
             -in build/ota/vamos.json -sigfile build/ota/vamos.json.sig
 
-      - name: create 50 MiB Git archive chunks
-        run: |
-          python3 tools/build/archive_ota.py \
-            --source-commit "$GITHUB_SHA"
-          find build/vamos-images -type f -size +50M -print -quit | (! grep .)
+      - name: upload signed manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vamos-manifest-${{ env.VAMOS_VERSION }}
+          path: |
+            build/ota/vamos.json
+            build/ota/vamos.json.sig
+          if-no-files-found: error
+          retention-days: 90
 
       - name: upload immutable R2 images
         run: |
@@ -200,39 +201,6 @@ jobs:
             --endpoint-url "$endpoint" \
             --cache-control "public,max-age=300" \
             --content-type application/json
-
-      - name: check out image archive
-        uses: actions/checkout@v4
-        with:
-          repository: asiusai/vamos-images
-          ssh-key: ${{ secrets.VAMOS_IMAGES_DEPLOY_KEY }}
-          path: vamos-images
-          fetch-depth: 0
-
-      - name: publish immutable image tag
-        run: |
-          set -euo pipefail
-          cd vamos-images
-          if git ls-remote --exit-code origin "refs/tags/$VAMOS_IMAGE_TAG" >/dev/null 2>&1; then
-            git fetch origin "refs/tags/$VAMOS_IMAGE_TAG:refs/tags/$VAMOS_IMAGE_TAG"
-            existing=$(git show "$VAMOS_IMAGE_TAG:vamos.json" | sha256sum | awk '{print $1}')
-            expected=$(sha256sum ../build/vamos-images/vamos.json | awk '{print $1}')
-            if [ "$existing" != "$expected" ]; then
-              echo "$VAMOS_IMAGE_TAG already exists with a different manifest" >&2
-              exit 1
-            fi
-            echo "$VAMOS_IMAGE_TAG already contains this release"
-            exit 0
-          fi
-          git checkout --orphan image-release
-          git rm -rf .
-          cp -a ../build/vamos-images/. .
-          git add .
-          git -c user.name="github-actions[bot]" \
-            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -m "vamOS $VAMOS_IMAGE_TAG"
-          git tag "$VAMOS_IMAGE_TAG"
-          git push origin "refs/tags/$VAMOS_IMAGE_TAG"
 
       - name: check out openpilot fork
         uses: actions/checkout@v4
@@ -285,5 +253,10 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "vamOS ${VAMOS_VERSION}" \
-              --notes "Images: https://github.com/asiusai/vamos-images/tree/${VAMOS_IMAGE_TAG}"
+              --notes "Signed manifests are attached to this release. Device images are published to Cloudflare R2 at ${VAMOS_PUBLIC_URL%/}/vamos/."
           fi
+          gh release upload "$source_tag" \
+            build/ota/vamos.json \
+            build/ota/vamos.json.sig \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
