@@ -1,10 +1,15 @@
 # vamOS Void Linux Build
 # check=error=true
 
+ARG OPENPILOT_PYTHON_VERSION=3.12.13
+
 # ################## #
 # ###### Base ###### #
 # ################## #
 FROM scratch AS void-base
+
+ARG OPENPILOT_PYTHON_VERSION
+ENV OPENPILOT_PYTHON_VERSION=${OPENPILOT_PYTHON_VERSION}
 
 # Add Void Linux aarch64 rootfs
 ARG VOID_ROOTFS
