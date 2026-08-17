@@ -23,8 +23,7 @@ jobs:
             tools.camerad_env_quote_test \
             tools.device_update_test \
             tools.validate_camerad_vfe_test \
-            tools.update.test_vamos_update \
-            tools.build.test_archive_ota
+            tools.update.test_vamos_update
 
   build-kernel:
     runs-on: ubuntu-24.04-arm

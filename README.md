@@ -152,11 +152,10 @@ sudo reboot
 The separate `build and publish vamOS images` workflow runs manually or for an
 exact `vamos-v<VERSION>` tag. It builds the kernel, system image, and ESP on
 ARM64, creates content-addressed XZ objects, signs `vamos.json`, and publishes
-the device-facing objects to Cloudflare R2. It also publishes a `v<VERSION>`
-tag to `asiusai/vamos-images`; compressed images larger than 50 MiB are split
-into 50 MiB Git blobs so the release can be browsed and reconstructed like
-comma's image repository. Finally, it commits the signed `vamos.json` and signature to the
-Asius openpilot fork.
+the device-facing objects to Cloudflare R2. The signed `vamos.json` and
+`vamos.json.sig` are retained both as a 90-day workflow artifact and as durable
+assets on the matching GitHub source release. Finally, the workflow commits
+those same files to the Asius openpilot fork.
 
 Configure these repository secrets:
 
@@ -165,7 +164,6 @@ Configure these repository secrets:
 - `R2_ACCOUNT_ID`
 - `R2_BUCKET`
 - `VAMOS_UPDATE_SIGNING_KEY`
-- `VAMOS_IMAGES_DEPLOY_KEY` (write deploy key for `asiusai/vamos-images`)
 - `OPENPILOT_DEPLOY_KEY` (write deploy key for `asiusai/openpilot`)
 
 Set `VAMOS_PUBLIC_URL` to the public R2 custom-domain origin, currently
