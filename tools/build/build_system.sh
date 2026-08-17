@@ -209,7 +209,7 @@ if [ -d "$OP_SRC" ]; then
     UV_CACHE_DIR=/data/uv-cache \
     UV_PROJECT_ENVIRONMENT=/usr/local/venv \
       uv sync --frozen --inexact --no-install-project
-    python -c "import av, dbus_fast, libdatachannel, paramiko, PIL, smbus2, usb"
+    /usr/local/venv/bin/python -c "import av, dbus_fast, libdatachannel, paramiko, PIL, smbus2, usb"
     rm -rf /data/tmp /data/uv-cache
     chmod -R a+rX /usr/local/venv /usr/local/uv
   '
