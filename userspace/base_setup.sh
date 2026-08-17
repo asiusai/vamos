@@ -156,10 +156,13 @@ export XDG_DATA_HOME="/usr/local"
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
-# Install Python 3.12 via uv (Void has 3.14 which is too new)
-uv python install 3.12
+# Install the exact Python used by the packaged openpilot checkout. If these
+# differ, openpilot's later uv sync recreates the venv and drops vamOS runtime
+# dependencies such as dbus-fast, smbus2, PyUSB, and Paramiko.
+OPENPILOT_PYTHON_VERSION="${OPENPILOT_PYTHON_VERSION:-3.12.13}"
+uv python install "$OPENPILOT_PYTHON_VERSION"
 
-# Create venv with Python 3.12
-uv venv $XDG_DATA_HOME/venv --seed --python 3.12
+# Create the shared venv with that interpreter.
+uv venv $XDG_DATA_HOME/venv --seed --python "$OPENPILOT_PYTHON_VERSION"
 
 echo "base_setup.sh complete"

@@ -19,6 +19,10 @@ dependencies = [
   "paramiko",
   # WebRTC device streaming
   "libdatachannel-py>=2026.1.0.dev2",
+
+  # On-device camera/encoder health diagnostics
+  "av",
+  "Pillow",
 ]
 
 [tool.uv]
