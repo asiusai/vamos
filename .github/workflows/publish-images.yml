@@ -128,17 +128,20 @@ jobs:
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3api head-bucket --bucket "$R2_BUCKET" --endpoint-url "$endpoint"
 
-      - name: build kernel, root filesystem, and ESP
+      - name: build kernel, root filesystem, ESP, and factory disk
         run: |
           ./vamos build kernel
           VAMOS_SKIP_EROFS=1 ./vamos build system
           ./vamos build esp
+          ./vamos build disk
 
       - name: validate release images
         run: |
           set -euo pipefail
           test "$(stat -c %s build/esp.img)" -eq $((256 * 1024 * 1024))
           test "$(stat -c %s build/system.img)" -eq $((10 * 1024 * 1024 * 1024))
+          test "$(stat -c %s build/dragon.img)" -gt $((10 * 1024 * 1024 * 1024))
+          test "$(( $(stat -c %s build/dragon.img) % 512 ))" -eq 0
           fsck.vfat -n build/esp.img
           e2fsck -fn build/system.img
 
@@ -149,6 +152,13 @@ jobs:
             --base-url "${VAMOS_PUBLIC_URL%/}/vamos/objects"
           PYTHONPATH=userspace/root/usr/lib python3 -c \
             'from vamos.update import load_manifest; load_manifest("build/ota/vamos.json")'
+
+      - name: package content-addressed browser flash image
+        run: |
+          python3 -m unittest discover -s tools/build -p 'test_package_flash.py'
+          python3 tools/build/package_flash.py \
+            --version "$VAMOS_VERSION" \
+            --base-url "${VAMOS_PUBLIC_URL%/}/vamos/flash/objects"
 
       - name: sign update manifest
         env:
@@ -164,9 +174,14 @@ jobs:
           cmp "$public" userspace/root/usr/share/vamos/update-public.pem
           openssl pkeyutl -sign -inkey "$key" -rawin \
             -in build/ota/vamos.json -out build/ota/vamos.json.sig
+          openssl pkeyutl -sign -inkey "$key" -rawin \
+            -in build/flash/flash.json -out build/flash/flash.json.sig
           test "$(stat -c %s build/ota/vamos.json.sig)" -eq 64
+          test "$(stat -c %s build/flash/flash.json.sig)" -eq 64
           openssl pkeyutl -verify -pubin -inkey "$public" -rawin \
             -in build/ota/vamos.json -sigfile build/ota/vamos.json.sig
+          openssl pkeyutl -verify -pubin -inkey "$public" -rawin \
+            -in build/flash/flash.json -sigfile build/flash/flash.json.sig
 
       - name: upload signed manifest artifact
         uses: actions/upload-artifact@v4
@@ -175,8 +190,18 @@ jobs:
           path: |
             build/ota/vamos.json
             build/ota/vamos.json.sig
+            build/flash/flash.json
+            build/flash/flash.json.sig
           if-no-files-found: error
           retention-days: 90
+
+      - name: configure browser download CORS
+        run: |
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3api put-bucket-cors \
+            --bucket "$R2_BUCKET" \
+            --endpoint-url "$endpoint" \
+            --cors-configuration '{"CORSRules":[{"AllowedHeaders":["*"],"AllowedMethods":["GET","HEAD"],"AllowedOrigins":["https://flash.asius.ai","http://localhost:4173","http://localhost:5173"],"ExposeHeaders":["Content-Length","ETag"],"MaxAgeSeconds":3600}]}'
 
       - name: upload immutable R2 images
         run: |
@@ -186,6 +211,12 @@ jobs:
               --endpoint-url "$endpoint" \
               --cache-control "public,max-age=31536000,immutable" \
               --content-type application/x-xz
+          done
+          for object in build/flash/*.img.xz build/flash/*.bin; do
+            aws s3 cp "$object" "s3://${R2_BUCKET}/vamos/flash/objects/$(basename "$object")" \
+              --endpoint-url "$endpoint" \
+              --cache-control "public,max-age=31536000,immutable" \
+              --content-type application/octet-stream
           done
 
       - name: upload versioned R2 manifest
@@ -198,6 +229,16 @@ jobs:
             --content-type application/octet-stream
           aws s3 cp build/ota/vamos.json \
             "s3://${R2_BUCKET}/vamos/releases/${VAMOS_VERSION}/vamos.json" \
+            --endpoint-url "$endpoint" \
+            --cache-control "public,max-age=300" \
+            --content-type application/json
+          aws s3 cp build/flash/flash.json.sig \
+            "s3://${R2_BUCKET}/vamos/releases/${VAMOS_VERSION}/flash.json.sig" \
+            --endpoint-url "$endpoint" \
+            --cache-control "public,max-age=300" \
+            --content-type application/octet-stream
+          aws s3 cp build/flash/flash.json \
+            "s3://${R2_BUCKET}/vamos/releases/${VAMOS_VERSION}/flash.json" \
             --endpoint-url "$endpoint" \
             --cache-control "public,max-age=300" \
             --content-type application/json
@@ -239,6 +280,14 @@ jobs:
             --endpoint-url "$endpoint" \
             --cache-control "no-cache" \
             --content-type application/json
+          aws s3 cp build/flash/flash.json.sig "s3://${R2_BUCKET}/vamos/flash.json.sig" \
+            --endpoint-url "$endpoint" \
+            --cache-control "no-cache" \
+            --content-type application/octet-stream
+          aws s3 cp build/flash/flash.json "s3://${R2_BUCKET}/vamos/flash.json" \
+            --endpoint-url "$endpoint" \
+            --cache-control "no-cache" \
+            --content-type application/json
 
       - name: create source release
         env:
@@ -258,5 +307,7 @@ jobs:
           gh release upload "$source_tag" \
             build/ota/vamos.json \
             build/ota/vamos.json.sig \
+            build/flash/flash.json \
+            build/flash/flash.json.sig \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
