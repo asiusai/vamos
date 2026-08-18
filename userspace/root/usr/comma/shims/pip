@@ -13,6 +13,5 @@ sudo resize2fs $(findmnt -n -o SOURCE /) &>/dev/null || sudo resize2fs $(findmnt
 sudo TMPDIR=$TMPDIR PIP_NO_CACHE_DIR=1 $PIP_PATH "$@"
 
 # cleanup
-sudo mount -o ro,remount /
 sudo rm -rf $TMPDIR
 sudo mount -o remount /tmp
