@@ -30,6 +30,7 @@ xbps-install -y \
   wget \
   alsa-utils \
   avahi \
+  avahi-utils \
   base-devel \
   bc \
   busybox \
@@ -154,6 +155,10 @@ ln -sf /etc/sv/agetty-ttyAMA0 /etc/runit/runsvdir/default/ 2>/dev/null
 # Install uv (Python package manager)
 export XDG_DATA_HOME="/usr/local"
 curl -LsSf https://astral.sh/uv/install.sh | sh
+# XDG_DATA_HOME=/usr/local makes uv's suggested shell path resolve to
+# /usr/local/../bin/env, which is the env ELF binary rather than a shell file.
+# uv is already on the system PATH, so do not source that generated line.
+sed -i '\|/usr/local/../bin/env|d' /root/.profile
 export PATH="$HOME/.local/bin:$PATH"
 
 # Install the exact Python used by the packaged openpilot checkout. If these

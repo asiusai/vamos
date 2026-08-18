@@ -16,9 +16,10 @@ the release checklist.
 ./vamos build system       # build the 10 GiB system.img
 ./vamos build esp          # build the 256 MiB boot ESP
 ./vamos build ota          # build ESP and package a full OTA release
-./vamos build disk         # build an initial Dragon NVMe image
+./vamos build disk         # build the common factory disk + optional userdata
 ./vamos flash kernel       # replace the ESP through EDL
-./vamos flash system       # replace the complete NVMe image through EDL
+./vamos flash system       # factory flash with openpilot (default)
+./vamos flash system --without-openpilot  # factory flash vamOS only
 ./vamos flash all          # flash system and kernel
 ./vamos profile diff A B   # diff two rootfs profiles
 ./vamos device-update comma@192.168.88.20
@@ -49,12 +50,21 @@ The first system or disk build clones the Asius `openpilot` `master` branch into
 the gitignored `.openpilot/` checkout. Later builds fetch that ref and safely
 realign the managed checkout, then update its submodules. Release builds set
 `VAMOS_OPENPILOT_REF` to the resolved openpilot commit so the image is
-reproducible even if `master` moves. System builds use it for openpilot dependencies, and disk
-builds package it as a git-complete `/data/openpilot` checkout.
-The device therefore boots without downloading openpilot and can use normal
-Git commands afterward. OTA packages use `system.img`, which intentionally
-contains no `/data/openpilot` payload and cannot replace the device's existing
-openpilot checkout.
+reproducible even if `master` moves. System builds use it for openpilot
+dependencies. Disk builds produce one common `dragon.img` with blank userdata
+and a separate `userdata-openpilot.img` payload containing a Git-complete
+`/data/openpilot` checkout. The manual flasher and flash.asius.ai can apply
+that payload for a driving device or omit it for a general-purpose vamOS
+device. No profile or role is recorded: executable `/data/continue.sh` is the
+sole opt-in to the openpilot workload.
+
+A driving device therefore boots without downloading openpilot and performs
+only the normal local openpilot build. A vamOS-only device gets the same
+writable OS, A/B layout, and persistent `/data` and `/home`, with no
+`/data/openpilot`. Interactive shells start in `/data/openpilot` when it exists
+and otherwise remain in the persistent home directory. OTA packages use
+`system.img`, which intentionally contains no userdata payload and cannot add,
+replace, or remove openpilot or other persistent userspace files.
 
 `device-update` packages the locally built `build/system.img` and
 `build/esp.img`, rsyncs them directly to the device, and installs them into the
@@ -137,10 +147,10 @@ Remote manifests require an adjacent 64-byte Ed25519 signature at
 exists; unsigned manifests are accepted only from local storage for physical
 recovery.
 
-Newly flashed compact images automatically create the inactive slot and
-persistent userdata on first boot. The migration is restartable after a power
-loss. Legacy two-partition Dragon installations can also be migrated manually
-after backing up persistent data:
+New factory flashes already contain this final five-partition layout. Existing
+compact or legacy two-partition Dragon installations still migrate it
+restartably on first boot. They can also be migrated manually after backing up
+persistent data:
 
 ```bash
 sudo vamos-update initialize --yes

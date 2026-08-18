@@ -1,0 +1,27 @@
+#!/bin/sh
+# Commit an A/B trial after the common OS is healthy. A preloaded driving image
+# additionally requires its explicit launcher and checkout; vamOS-only images
+# have neither and are valid without openpilot.
+exec 2>&1
+
+service_dir="$(dirname "$0")"
+
+if [ ! -f /run/vamos-trial-boot ]; then
+  touch "$service_dir/down"
+  exit 0
+fi
+
+if [ -e /data/continue.sh ]; then
+  if [ ! -x /data/continue.sh ] || ! runuser -u comma -- git -C /data/openpilot rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "vamos-boot-commit: configured openpilot workload is incomplete"
+    while true; do sleep 60; done
+  fi
+fi
+
+if /usr/bin/vamos-boot commit; then
+  touch "$service_dir/down"
+  exit 0
+fi
+
+echo "vamos-boot-commit: trial commit failed; waiting for watchdog rollback"
+while true; do sleep 60; done

@@ -20,6 +20,13 @@ for svc in /etc/runit/runsvdir/default/*; do
     cp -a "$target" "/run/runit/service/$name"
 done
 
+# /data/continue.sh is the complete opt-in to the driving workload. A bare
+# vamOS installation never starts openpilot, its recovery clone, or the
+# driving-specific idle power policy.
+if [ ! -x /data/continue.sh ]; then
+    rm -rf /run/runit/service/openpilot /run/runit/service/power_monitor
+fi
+
 # Tailscale is opt-in. Authenticated devices create this persistent marker.
 if [ -e /data/tailscale/enabled ]; then
     rm -f /run/runit/service/tailscaled/down /run/runit/service/tailscaled/log/down

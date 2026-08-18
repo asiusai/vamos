@@ -202,16 +202,23 @@ if [ -f /ASIUS ] && [ -x /usr/bin/vamos-boot ]; then
     /usr/bin/vamos-boot reconcile || echo "WARN: failed to reconcile vamOS boot state"
 fi
 
-# Keep the operator home consistent with AGNOS: defaults come from the current
-# immutable image and per-boot changes live only in RAM. Persistent work belongs
-# under /data.
+# Keep the operator home on persistent userdata. Image defaults are added on
+# every boot without replacing files the operator has changed.
 if [ -f /ASIUS ] && [ -d /usr/default/home/comma ] && ! mountpoint -q /home; then
-  echo "=> Mounting ephemeral /home overlay"
-  mkdir -p /rwtmp/home_work /rwtmp/home_upper /home
-  chmod 755 /rwtmp/home_work /rwtmp/home_upper
-  mount -t overlay overlay \
-    -o lowerdir=/usr/default/home,upperdir=/rwtmp/home_upper,workdir=/rwtmp/home_work \
-    /home || echo "ERROR: failed to mount /home overlay"
+  if mountpoint -q /data; then
+    echo "=> Mounting persistent /home"
+    mkdir -p /data/home/comma /home
+    rsync -a --ignore-existing /usr/default/home/comma/ /data/home/comma/
+    chown -R comma:comma /data/home/comma
+    mount --bind /data/home /home || echo "ERROR: failed to bind persistent /home"
+  else
+    echo "=> Persistent userdata unavailable; mounting ephemeral /home overlay"
+    mkdir -p /rwtmp/home_work /rwtmp/home_upper /home
+    chmod 755 /rwtmp/home_work /rwtmp/home_upper
+    mount -t overlay overlay \
+      -o lowerdir=/usr/default/home,upperdir=/rwtmp/home_upper,workdir=/rwtmp/home_work \
+      /home || echo "ERROR: failed to mount /home overlay"
+  fi
 fi
 
 # /data writable scaffolding. This is persistent after A/B initialization and

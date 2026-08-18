@@ -92,7 +92,7 @@ jobs:
       - name: install image tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y dosfstools e2fsprogs grub2-common mtools unzip
+          sudo apt-get install -y dosfstools e2fsprogs gdisk grub2-common jq mtools unzip
 
       - name: install AWS CLI
         run: |
@@ -140,10 +140,22 @@ jobs:
           set -euo pipefail
           test "$(stat -c %s build/esp.img)" -eq $((256 * 1024 * 1024))
           test "$(stat -c %s build/system.img)" -eq $((10 * 1024 * 1024 * 1024))
-          test "$(stat -c %s build/dragon.img)" -gt $((10 * 1024 * 1024 * 1024))
-          test "$(( $(stat -c %s build/dragon.img) % 512 ))" -eq 0
+          test "$(stat -c %s build/dragon.img)" -eq $((250069680 * 512))
+          test "$(jq -r .storage_sectors build/factory-layout.json)" -eq 250069680
+          userdata_bytes=$(( $(jq -r .partitions.userdata.sectors build/factory-layout.json) * 512 ))
+          test "$(stat -c %s build/userdata.img)" -eq "$userdata_bytes"
+          test "$(stat -c %s build/userdata-openpilot.img)" -eq "$userdata_bytes"
+          sgdisk --verify build/dragon.img
           fsck.vfat -n build/esp.img
           e2fsck -fn build/system.img
+          e2fsck -fn build/userdata.img
+          e2fsck -fn build/userdata-openpilot.img
+          if debugfs -R 'stat /openpilot' build/userdata.img 2>&1 | grep -q 'Inode:'; then
+            echo 'blank userdata unexpectedly contains openpilot' >&2
+            exit 1
+          fi
+          debugfs -R 'stat /openpilot/.git/HEAD' build/userdata-openpilot.img 2>&1 | grep -q 'Inode:'
+          debugfs -R 'stat /continue.sh' build/userdata-openpilot.img 2>&1 | grep -q 'Inode:'
 
       - name: package content-addressed update
         run: |
@@ -159,6 +171,18 @@ jobs:
           python3 tools/build/package_flash.py \
             --version "$VAMOS_VERSION" \
             --base-url "${VAMOS_PUBLIC_URL%/}/vamos/flash/objects"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("build/flash/flash.json").read_text())
+          assert manifest["manifest_version"] == 2
+          assert manifest["base"]["image"]["size"] == 250069680 * 512
+          assert manifest["base"]["operations"][0] == {
+              "offset": 0, "operation": "erase", "size": 250069680 * 512,
+          }
+          assert manifest["optional_payloads"]["openpilot"]["operations"]
+          PY
 
       - name: sign update manifest
         env:

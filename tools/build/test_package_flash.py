@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import hashlib
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from package_flash import CHUNK_SIZE, package_image, package_programmer
+from package_flash import CHUNK_SIZE, package_base_image, package_delta, package_programmer
 
 
 class PackageFlashTest(unittest.TestCase):
-  def test_packages_program_and_erase_chunks(self) -> None:
+  def test_base_erases_target_and_packages_only_nonzero_chunks(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
       root = Path(temporary)
       image = root / "dragon.img"
@@ -19,14 +18,43 @@ class PackageFlashTest(unittest.TestCase):
 
       with patch("package_flash.OUTPUT_DIR", root / "out"):
         (root / "out").mkdir()
-        chunks, digest, size = package_image(image, "https://updates.example/objects")
+        operations, size = package_base_image(image, "https://updates.example/objects")
 
       self.assertEqual(size, CHUNK_SIZE * 2)
-      self.assertEqual(digest, hashlib.sha256(first + bytes(CHUNK_SIZE)).hexdigest())
-      self.assertEqual(chunks[0]["operation"], "program")
-      self.assertLess(chunks[0]["compressed_size"], CHUNK_SIZE)
-      self.assertEqual(chunks[1]["operation"], "erase")
-      self.assertNotIn("url", chunks[1])
+      self.assertEqual(operations[0], {"offset": 0, "operation": "erase", "size": size})
+      self.assertEqual(len(operations), 2)
+      self.assertEqual(operations[1]["operation"], "program")
+      self.assertLess(operations[1]["compressed_size"], CHUNK_SIZE)
+
+  def test_delta_packages_program_and_erase_ranges(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      root = Path(temporary)
+      baseline = root / "userdata.img"
+      updated = root / "userdata-openpilot.img"
+      keep = b"same" + bytes(CHUNK_SIZE - len("same"))
+      removed = b"remove" + bytes(CHUNK_SIZE - len("remove"))
+      added = b"openpilot" + bytes(CHUNK_SIZE - len("openpilot"))
+      baseline.write_bytes(keep + removed + bytes(CHUNK_SIZE))
+      updated.write_bytes(keep + bytes(CHUNK_SIZE) + added)
+
+      with patch("package_flash.OUTPUT_DIR", root / "out"):
+        (root / "out").mkdir()
+        operations, size = package_delta(
+          baseline,
+          updated,
+          4096,
+          "https://updates.example/objects",
+        )
+
+      self.assertEqual(size, CHUNK_SIZE * 3)
+      self.assertEqual(len(operations), 2)
+      self.assertEqual(operations[0], {
+        "offset": 4096 + CHUNK_SIZE,
+        "operation": "erase",
+        "size": CHUNK_SIZE,
+      })
+      self.assertEqual(operations[1]["offset"], 4096 + 2 * CHUNK_SIZE)
+      self.assertEqual(operations[1]["operation"], "program")
 
   def test_rejects_lfs_pointer_programmer(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
