@@ -10,6 +10,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from ssh_key import default_ssh_key
+
 
 VAMOS_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BUILD_DIR = VAMOS_ROOT / "build"
@@ -266,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
   parser.add_argument(
     "--identity",
     type=Path,
-    default=Path(os.environ.get("DRAGON_SSH_KEY", "~/.ssh/comma_setup")).expanduser(),
+    default=default_ssh_key(),
   )
   args = parser.parse_args(argv)
 

@@ -20,6 +20,20 @@ def sha256(data: bytes) -> str:
   return hashlib.sha256(data).hexdigest()
 
 
+def operations_for_payload(manifest: dict, payload: str) -> list[dict]:
+  if manifest.get("sector_size") != SECTOR_SIZE:
+    raise ValueError("unsupported local flash sector size")
+  if manifest.get("manifest_version") == 1:
+    if payload != "base":
+      raise ValueError("legacy flash manifests contain one bundled payload")
+    return manifest["chunks"]
+  if manifest.get("manifest_version") == 2:
+    if payload == "base":
+      return manifest["base"]["operations"]
+    return manifest["optional_payloads"]["openpilot"]["operations"]
+  raise ValueError("unsupported local flash manifest")
+
+
 def main() -> None:
   parser = argparse.ArgumentParser()
   parser.add_argument("manifest", type=Path)
@@ -28,12 +42,10 @@ def main() -> None:
   args = parser.parse_args()
 
   manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-  if manifest.get("manifest_version") != 2 or manifest.get("sector_size") != SECTOR_SIZE:
-    raise SystemExit("unsupported local flash manifest")
-  if args.payload == "base":
-    operations = manifest["base"]["operations"]
-  else:
-    operations = manifest["optional_payloads"]["openpilot"]["operations"]
+  try:
+    operations = operations_for_payload(manifest, args.payload)
+  except (KeyError, TypeError, ValueError) as error:
+    raise SystemExit(str(error)) from error
 
   if args.output.exists():
     shutil.rmtree(args.output)

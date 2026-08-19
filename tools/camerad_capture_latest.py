@@ -15,10 +15,12 @@ import textwrap
 import time
 from pathlib import Path
 
+from ssh_key import default_ssh_key
+
 
 NCM_IP = "192.168.42.2"
 SSH_OPTS = [
-  "-i", os.path.expanduser("~/.ssh/comma_setup"),
+  "-i", str(default_ssh_key()),
   "-o", "StrictHostKeyChecking=no",
   "-o", "UserKnownHostsFile=/dev/null",
   "-o", "GlobalKnownHostsFile=/dev/null",
