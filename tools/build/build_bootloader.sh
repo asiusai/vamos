@@ -26,7 +26,16 @@ if [ ! -f "$package" ] || ! echo "$GRUB_PACKAGE_SHA256  $package" | sha256sum --
   mv "$package.tmp" "$package"
 fi
 if [ ! -f "$GRUB_MODULES/modinfo.sh" ]; then
-  dpkg-deb --extract "$package" "$GRUB_CACHE/root"
+  if command -v dpkg-deb >/dev/null 2>&1; then
+    dpkg-deb --extract "$package" "$GRUB_CACHE/root"
+  elif command -v ar >/dev/null 2>&1 && command -v bsdtar >/dev/null 2>&1; then
+    data_member="$(ar t "$package" | awk '/^data\.tar/{print; exit}')"
+    [ -n "$data_member" ] || { echo "ERROR: Debian package has no data archive" >&2; exit 1; }
+    ar p "$package" "$data_member" | bsdtar -xf - -C "$GRUB_CACHE/root"
+  else
+    echo "ERROR: extracting GRUB requires dpkg-deb or ar and bsdtar" >&2
+    exit 1
+  fi
 fi
 
 mkdir -p "$BUILD_DIR"

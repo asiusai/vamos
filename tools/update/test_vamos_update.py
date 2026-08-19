@@ -139,6 +139,13 @@ class StateFileTest(unittest.TestCase):
       self.assertEqual(state_file.stat().st_mode & 0o777, 0o644)
 
 
+class DiskPathTest(unittest.TestCase):
+  def test_partition_names_cover_nvme_emmc_and_scsi_disks(self) -> None:
+    self.assertEqual(update.disk_partition(5, Path("/dev/nvme0n1")), Path("/dev/nvme0n1p5"))
+    self.assertEqual(update.disk_partition(5, Path("/dev/mmcblk0")), Path("/dev/mmcblk0p5"))
+    self.assertEqual(update.disk_partition(5, Path("/dev/sda")), Path("/dev/sda5"))
+
+
 class LayoutInitializationTest(unittest.TestCase):
   def test_layout_is_marked_ready_only_after_boot_control_finishes(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
@@ -219,14 +226,14 @@ class LayoutInitializationTest(unittest.TestCase):
         update.initialize_layout(confirm=True)
 
     ensure_filesystems.assert_called_once_with()
-    migrate.assert_called_once_with(Path(f"{update.DISK}p5"))
+    migrate.assert_called_once_with(update.disk_partition(5))
     finish.assert_called_once_with()
 
   def test_incomplete_layout_only_formats_missing_filesystems(self) -> None:
     results = {
-      str(update.DISK) + "p3": "vfat\n",
-      str(update.DISK) + "p4": "ext4\n",
-      str(update.DISK) + "p5": "",
+      str(update.disk_partition(3)): "vfat\n",
+      str(update.disk_partition(4)): "ext4\n",
+      str(update.disk_partition(5)): "",
     }
 
     def fake_run(command, **kwargs):
@@ -238,8 +245,8 @@ class LayoutInitializationTest(unittest.TestCase):
       update._ensure_incomplete_layout_filesystems()
 
     commands = [call.args[0] for call in run.call_args_list]
-    self.assertIn(["mkfs.ext4", "-F", "-L", "VAMOS-DATA", str(update.DISK) + "p5"], commands)
-    self.assertNotIn(["mkfs.vfat", "-F", "32", "-n", "VAMOS-B", str(update.DISK) + "p3"], commands)
+    self.assertIn(["mkfs.ext4", "-F", "-L", "VAMOS-DATA", str(update.disk_partition(5))], commands)
+    self.assertNotIn(["mkfs.vfat", "-F", "32", "-n", "VAMOS-B", str(update.disk_partition(3))], commands)
 
 
 class ImageWriteTest(unittest.TestCase):

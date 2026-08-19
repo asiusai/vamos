@@ -23,22 +23,6 @@ CHUNK_SIZE = 16 * 1024 * 1024
 SECTOR_SIZE = 512
 PROGRAMMER = ROOT / "firmware-dragon/flat_build/spinor/dragon-q6a/prog_firehose_ddr.elf"
 
-# Asius v1 currently ships this 128 GB 2230 NVMe. The signed manifest carries
-# this allowlist so a generic Qualcomm EDL device cannot be selected and
-# accidentally overwritten.
-STORAGE_PROFILES = [
-  {
-    "block_size": 512,
-    "manufacturer_id": 642131526,
-    "mem_type": "NVMe",
-    "num_physical": 1,
-    "page_size": 512,
-    "prod_name": "KINGSTON OM3PGP4128P-AH",
-    "total_blocks": 250069680,
-  },
-]
-
-
 def sha256_bytes(data: bytes) -> str:
   return hashlib.sha256(data).hexdigest()
 
@@ -229,7 +213,6 @@ def main() -> None:
     "product": PRODUCT,
     "programmer": package_programmer(args.programmer, args.base_url),
     "sector_size": SECTOR_SIZE,
-    "storage_profiles": STORAGE_PROFILES,
     "version": args.version,
   }
   manifest_path = OUTPUT_DIR / "flash.json"

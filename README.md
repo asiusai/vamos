@@ -25,6 +25,22 @@ the release checklist.
 ./vamos device-update comma@192.168.88.20
 ```
 
+EDL flashing probes storage in UFS, NVMe, eMMC, then SD-card order and
+requires 512-byte logical sectors. For diagnostics or recovery, bypass probing
+with `VAMOS_EDL_MEMORY=Ufs|Nvme|Sdcc` and optional `VAMOS_EDL_SLOT=0|1`.
+CLI transfers default to conservative 64 KiB USB payloads; override that with
+`VAMOS_EDL_MAX_PAYLOAD` when benchmarking a known-stable link.
+Factory disks default to the 64 GB eMMC geometry so one signed image also fits
+larger supported media; `VAMOS_STORAGE_SECTORS` remains available for builds
+that intentionally target a different minimum capacity.
+
+Fresh devices authorize the intentionally shared `tools/ssh/comma_setup.b64` key
+once when no SSH keys have been provisioned, allowing initial access as
+`comma@192.168.42.2` over USB NCM. Host tools use that checked-in key by
+default; set `DRAGON_SSH_KEY` or pass a tool-specific identity option to use an
+operator key. The bootstrap authorization is limited to local RFC 1918 source
+addresses and can be replaced in `/data/params/d/GithubSshKeys`.
+
 ## Dragon NPU
 
 The Dragon image includes the pinned QCS6490 cDSP firmware userspace, FastRPC
@@ -116,8 +132,9 @@ stable slot, pending slot, generation, and immutable rootfs PARTUUIDs.
 The selector marks a trial attempted before starting its kernel. Userspace
 commits it only after runit reaches the launcher and disarms the hardware
 watchdog. A failed or interrupted trial rolls back on the next boot. Because
-all selection state is on the NVMe, EL2 mode, missing EFI variables, firmware
-resets, and moving the drive to another Dragon do not affect the selected slot.
+all selection state is on the boot storage, EL2 mode, missing EFI variables,
+firmware resets, and moving the media to another Dragon do not affect the
+selected slot.
 
 Install a signed HTTP manifest:
 

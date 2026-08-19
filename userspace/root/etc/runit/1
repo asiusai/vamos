@@ -134,33 +134,49 @@ mount_part() {
     fi
 }
 
+storage_root="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+storage_disk_name="$(lsblk -n -o PKNAME "$storage_root" 2>/dev/null | head -n 1)"
+if [ -z "$storage_disk_name" ]; then
+    for candidate in nvme0n1 mmcblk0 sda; do
+        if [ -b "/dev/$candidate" ]; then
+            storage_disk_name="$candidate"
+            break
+        fi
+    done
+fi
+case "$storage_disk_name" in
+    *[0-9]) userdata_candidate="/dev/${storage_disk_name}p5" ;;
+    ?*) userdata_candidate="/dev/${storage_disk_name}5" ;;
+    *) userdata_candidate="" ;;
+esac
+
 # New images are compact two-partition disks. Expand them into A/B plus
 # persistent userdata on first boot; an interrupted migration is resumed on
 # the next boot while the original rootfs /data remains available.
 ab_init_failed=0
 if [ -f /ASIUS ] && [ -x /usr/bin/vamos-update ]; then
-    userdata_type="$(blkid -s TYPE -o value /dev/nvme0n1p5 2>/dev/null || true)"
-    if { [ ! -b /dev/nvme0n1p5 ] && [ ! -e /dev/disk/by-partlabel/userdata ]; } ||
-       { [ -b /dev/nvme0n1p5 ] && [ -z "$userdata_type" ]; }; then
+    userdata_type="$(blkid -s TYPE -o value "$userdata_candidate" 2>/dev/null || true)"
+    if { [ ! -b "$userdata_candidate" ] && [ ! -e /dev/disk/by-partlabel/userdata ]; } ||
+       { [ -b "$userdata_candidate" ] && [ -z "$userdata_type" ]; }; then
         echo "=> Initializing rollback-safe A/B storage"
         /usr/bin/vamos-update initialize --yes || ab_init_failed=1
-        udevadm trigger --action=add /sys/class/block/nvme0n1 2>/dev/null || true
+        udevadm trigger --action=add "/sys/class/block/$storage_disk_name" 2>/dev/null || true
         udevadm settle --timeout=5 || echo "WARN: A/B partitions did not settle"
     fi
 fi
 
 if [ "$ab_init_failed" -eq 0 ] &&
-   { [ -b /dev/nvme0n1p5 ] || [ -e /dev/disk/by-partlabel/userdata ]; }; then
+   { [ -b "$userdata_candidate" ] || [ -e /dev/disk/by-partlabel/userdata ]; }; then
     # The Dragon continues general udev probing asynchronously for fast boot.
     # Settle this one partition so the updater can rely on its persistent link.
-    if [ -b /dev/nvme0n1p5 ] && [ ! -e /dev/disk/by-partlabel/userdata ]; then
-        udevadm trigger --action=add /sys/class/block/nvme0n1p5
+    if [ -b "$userdata_candidate" ] && [ ! -e /dev/disk/by-partlabel/userdata ]; then
+        udevadm trigger --action=add "/sys/class/block/${userdata_candidate##*/}"
         udevadm settle --timeout=2 ||
             echo "WARN: userdata udev event did not settle"
     fi
     echo "=> Mounting persistent userdata"
     userdata_dev="/dev/disk/by-partlabel/userdata"
-    [ -e "$userdata_dev" ] || userdata_dev="/dev/nvme0n1p5"
+    [ -e "$userdata_dev" ] || userdata_dev="$userdata_candidate"
     mount -o "rw,discard,noatime,nodiratime,nosuid,nodev" "$userdata_dev" /data ||
         echo "WARN: /data mount failed"
     if ! mountpoint -q /data; then
@@ -229,6 +245,14 @@ for d in /data/scons_cache /data/media/0/realdata /data/log /data/params/d /data
 done
 chown -R comma:comma /data/scons_cache /data/media /data/log /data/params /data/stats /data/safe_staging 2>/dev/null || true
 chmod 700 /data/etc/NetworkManager/system-connections 2>/dev/null || true
+if [ ! -e /data/.vamos-ssh-seeded ]; then
+    if [ ! -s /data/params/d/GithubSshKeys ] && [ -s /usr/comma/setup_keys ]; then
+        cp /usr/comma/setup_keys /data/params/d/GithubSshKeys
+        chown comma:comma /data/params/d/GithubSshKeys
+        chmod 600 /data/params/d/GithubSshKeys
+    fi
+    touch /data/.vamos-ssh-seeded
+fi
 echo "=> Setting hostname..."
 /usr/comma/set-hostname.sh
 

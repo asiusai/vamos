@@ -43,7 +43,8 @@ if ! lsusb -d 05c6:9008 >/dev/null 2>&1; then
 fi
 detach_qcserial
 
-EDL=(sudo edl-ng --memory=nvme --loader="$LOADER")
+detect_edl_storage "$LOADER"
+EDL=(sudo edl-ng "${EDL_TRANSPORT_ARGS[@]}" "${EDL_STORAGE_ARGS[@]}" --loader="$LOADER")
 RAWPROGRAM_DIR="$DIR/build/manual-flash"
 
 flash_payload() {
