@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Flash just the ESP partition (kernel + dtb) to Dragon Q6A eMMC via EDL.
+# Flash just the ESP partition (kernel + dtb) to Dragon Q6A storage via EDL.
 # Rebuilds the ESP image from build/Image + DTB each time.
 set -euo pipefail
 
@@ -38,8 +38,9 @@ echo "== Building ESP image =="
 "$DIR/tools/build/build_esp.sh"
 
 echo "== Flashing ESP (kernel + dtb) to Dragon =="
-EDL=(sudo edl-ng --memory=nvme --loader="$LOADER")
-GPT_OUTPUT="$("${EDL[@]}" printgpt 2>&1)"
+detect_edl_storage "$LOADER"
+EDL=(sudo edl-ng "${EDL_TRANSPORT_ARGS[@]}" "${EDL_STORAGE_ARGS[@]}" --loader="$LOADER")
+GPT_OUTPUT="$("${EDL[@]}" printgpt --lun 0 2>&1)"
 printf '%s\n' "$GPT_OUTPUT"
 
 if grep -Eq 'Name:[[:space:]]+esp_a$' <<<"$GPT_OUTPUT" && grep -Eq 'Name:[[:space:]]+esp_b$' <<<"$GPT_OUTPUT"; then

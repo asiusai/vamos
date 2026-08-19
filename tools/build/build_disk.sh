@@ -23,11 +23,11 @@ USERDATA_OPENPILOT_IMG="$BUILD_DIR/userdata-openpilot.img"
 GRUBENV_A="$BUILD_DIR/grubenv_a.factory"
 GRUBENV_B="$BUILD_DIR/grubenv_b.factory"
 
-# Exact size of the currently supported Kingston OM3PGP4128P-AH. The signed
-# flash manifest independently binds this layout to the matching storage
-# geometry before any write occurs.
+# Build against the smallest shipping v1 storage geometry (the 64 GB eMMC).
+# The same image can be written to larger 512-byte-sector storage; flashers
+# reject media smaller than the signed image before erasing anything.
 SECTOR_SIZE=512
-STORAGE_SECTORS="${VAMOS_STORAGE_SECTORS:-250069680}"
+STORAGE_SECTORS="${VAMOS_STORAGE_SECTORS:-122142720}"
 ESP_SIZE=$((256 * 1024 * 1024))
 SYSTEM_SIZE=$((10 * 1024 * 1024 * 1024))
 START_SECTOR=2048

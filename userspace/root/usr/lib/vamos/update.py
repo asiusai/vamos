@@ -26,7 +26,45 @@ UPDATER_VERSION = 1
 MANIFEST_VERSION = 1
 PRODUCT = "asius-v1"
 LEGACY_PRODUCTS = {"radxa-dragon-q6a"}
-DISK = Path("/dev/nvme0n1")
+
+def _system_disk() -> Path:
+  override = os.environ.get("VAMOS_DISK")
+  if override:
+    return Path(override)
+
+  sources: list[str] = []
+  mounted_root = subprocess.run(
+    ["findmnt", "-n", "-o", "SOURCE", "/"],
+    check=False,
+    text=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+  ).stdout.strip()
+  if mounted_root:
+    sources.append(mounted_root)
+  for label in ("rootfs_a", "rootfs_b", "rootfs"):
+    candidate = Path("/dev/disk/by-partlabel") / label
+    if candidate.exists():
+      sources.append(str(candidate.resolve()))
+
+  for source in sources:
+    parent = subprocess.run(
+      ["lsblk", "-n", "-o", "PKNAME", source],
+      check=False,
+      text=True,
+      stdout=subprocess.PIPE,
+      stderr=subprocess.DEVNULL,
+    ).stdout.strip().splitlines()
+    if parent and parent[0]:
+      return Path("/dev") / parent[0]
+
+  for candidate in (Path("/dev/nvme0n1"), Path("/dev/mmcblk0"), Path("/dev/sda")):
+    if candidate.exists():
+      return candidate
+  return Path("/dev/nvme0n1")
+
+
+DISK = _system_disk()
 PARTLABEL_DIR = Path("/dev/disk/by-partlabel")
 STATE_DIR = Path("/data/vamos-update")
 STATE_FILE = STATE_DIR / "state.json"
@@ -98,6 +136,12 @@ def run(command: Sequence[str], *, check: bool = True, capture: bool = True) -> 
     stdout=subprocess.PIPE if capture else None,
     stderr=subprocess.STDOUT if capture else None,
   )
+
+
+def disk_partition(number: int, disk: Path | None = None) -> Path:
+  target = DISK if disk is None else disk
+  separator = "p" if target.name[-1:].isdigit() else ""
+  return Path(f"{target}{separator}{number}")
 
 
 def atomic_write_json(path: Path, value: object) -> None:
@@ -984,7 +1028,7 @@ def _finish_layout_initialization() -> None:
     os.sync()
   else:
     with tempfile.TemporaryDirectory(prefix="vamos-data-ready-") as mount_dir:
-      run(["mount", str(DISK) + "p5", mount_dir], capture=False)
+      run(["mount", str(disk_partition(5)), mount_dir], capture=False)
       try:
         (Path(mount_dir) / LAYOUT_READY_MARKER.name).touch()
         os.sync()
@@ -995,9 +1039,9 @@ def _finish_layout_initialization() -> None:
 
 def _ensure_incomplete_layout_filesystems() -> None:
   filesystems = (
-    (Path(f"{DISK}p3"), "vfat", ["mkfs.vfat", "-F", "32", "-n", "VAMOS-B"]),
-    (Path(f"{DISK}p4"), "ext4", ["mkfs.ext4", "-F", "-L", "VAMOS-B"]),
-    (Path(f"{DISK}p5"), "ext4", ["mkfs.ext4", "-F", "-L", "VAMOS-DATA"]),
+    (disk_partition(3), "vfat", ["mkfs.vfat", "-F", "32", "-n", "VAMOS-B"]),
+    (disk_partition(4), "ext4", ["mkfs.ext4", "-F", "-L", "VAMOS-B"]),
+    (disk_partition(5), "ext4", ["mkfs.ext4", "-F", "-L", "VAMOS-DATA"]),
   )
   for device, expected_type, format_command in filesystems:
     result = run(["blkid", "-s", "TYPE", "-o", "value", str(device)], check=False)
@@ -1025,7 +1069,7 @@ def initialize_layout(*, confirm: bool) -> None:
       return
     log("resuming incomplete A/B userdata migration")
     _ensure_incomplete_layout_filesystems()
-    _migrate_userdata(Path(f"{DISK}p5"))
+    _migrate_userdata(disk_partition(5))
     _finish_layout_initialization()
     return
   if len(partitions) != 2 or labels not in (["esp", "rootfs"], ["esp_a", "rootfs_a"]):
@@ -1067,7 +1111,7 @@ def initialize_layout(*, confirm: bool) -> None:
     "root_a": f"PARTUUID={p2['uuid']}",
     "root_b": "PARTLABEL=rootfs_b",
   })
-  _install_selector_on_slot("a", BOOT_SELECTOR_SOURCE.read_bytes(), migration_control, device=Path(f"{DISK}p1"))
+  _install_selector_on_slot("a", BOOT_SELECTOR_SOURCE.read_bytes(), migration_control, device=disk_partition(1))
 
   lines = [
     "label: gpt",
@@ -1080,9 +1124,9 @@ def initialize_layout(*, confirm: bool) -> None:
     "",
     _sfdisk_partition_line(1, p1, "esp_a"),
     _sfdisk_partition_line(2, p2, "rootfs_a"),
-    f"{DISK}p3 : start={p3_start}, size={esp_sectors}, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name=\"esp_b\"",
-    f"{DISK}p4 : start={p4_start}, size={system_sectors}, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name=\"rootfs_b\"",
-    f"{DISK}p5 : start={p5_start}, size={last_lba - p5_start + 1}, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name=\"userdata\"",
+    f"{disk_partition(3)} : start={p3_start}, size={esp_sectors}, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name=\"esp_b\"",
+    f"{disk_partition(4)} : start={p4_start}, size={system_sectors}, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name=\"rootfs_b\"",
+    f"{disk_partition(5)} : start={p5_start}, size={last_lba - p5_start + 1}, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name=\"userdata\"",
     "",
   ]
   layout = "\n".join(lines)
@@ -1094,7 +1138,7 @@ def initialize_layout(*, confirm: bool) -> None:
   run(["udevadm", "settle", "--timeout=10"], check=False)
 
   for number in (3, 4, 5):
-    device = Path(f"{DISK}p{number}")
+    device = disk_partition(number)
     for _ in range(50):
       if device.exists():
         break
@@ -1102,11 +1146,11 @@ def initialize_layout(*, confirm: bool) -> None:
     if not device.exists():
       raise UpdateError(f"{device} did not appear; reboot into slot A and run initialize again")
 
-  run(["mkfs.vfat", "-F", "32", "-n", "VAMOS-B", f"{DISK}p3"], capture=False)
-  run(["mkfs.ext4", "-F", "-L", "VAMOS-B", f"{DISK}p4"], capture=False)
-  run(["mkfs.ext4", "-F", "-L", "VAMOS-DATA", f"{DISK}p5"], capture=False)
+  run(["mkfs.vfat", "-F", "32", "-n", "VAMOS-B", str(disk_partition(3))], capture=False)
+  run(["mkfs.ext4", "-F", "-L", "VAMOS-B", str(disk_partition(4))], capture=False)
+  run(["mkfs.ext4", "-F", "-L", "VAMOS-DATA", str(disk_partition(5))], capture=False)
 
-  _migrate_userdata(Path(f"{DISK}p5"))
+  _migrate_userdata(disk_partition(5))
   _finish_layout_initialization()
 
 
@@ -1119,7 +1163,7 @@ def _sfdisk_partition_line(number: int, partition: dict, name: str) -> str:
   if partition.get("uuid"):
     fields.append(f"uuid={partition['uuid']}")
   fields.append(f"name=\"{name}\"")
-  return f"{DISK}p{number} : " + ", ".join(fields)
+  return f"{disk_partition(number)} : " + ", ".join(fields)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

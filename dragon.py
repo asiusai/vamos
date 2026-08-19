@@ -28,6 +28,8 @@ import subprocess
 import sys
 import time
 
+from tools.ssh_key import default_ssh_key
+
 def find_hwmon(name="nct6799"):
     for h in os.listdir("/sys/class/hwmon"):
         try:
@@ -48,7 +50,7 @@ def find_hwmon(name="nct6799"):
 PORT = os.environ.get("DRAGON_UART", "/dev/ttyUSB0")
 BAUD = 115200
 NCM_IP = "192.168.42.2"
-SSH_KEY = os.path.expanduser("~/.ssh/comma_setup")
+SSH_KEY = str(default_ssh_key())
 OFF_SETTLE_SECS = 5
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HEALTH_SCRIPT = os.path.join(SCRIPT_DIR, "dragon_health.py")
@@ -100,7 +102,7 @@ def cmd_reboot(_args):
 
 def find_ncm_interface():
     for iface in os.listdir("/sys/class/net"):
-        if not iface.startswith("enx"):
+        if iface == "lo":
             continue
         try:
             with open(f"/sys/class/net/{iface}/device/../idVendor") as f:
