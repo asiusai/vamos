@@ -13,6 +13,5 @@ sudo resize2fs $(findmnt -n -o SOURCE /) &>/dev/null || sudo resize2fs $(findmnt
 sudo -E TMPDIR=$TMPDIR UV_NO_CACHE=1 $UV_PATH "$@"
 
 # cleanup
-sudo mount -o ro,remount /
 sudo rm -rf $TMPDIR
 sudo mount -o remount /tmp

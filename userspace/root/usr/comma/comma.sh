@@ -54,28 +54,11 @@ ln -s /data/tmp/vscode-server ~/.vscode-server
 ln -s /data/tmp/vscode-server ~/.cursor-server
 ln -s /data/tmp/vscode-server ~/.windsurf-server
 
-# Initial Dragon images contain a git-complete openpilot checkout. OTA rootfs
-# images never contain /data, so an existing checkout remains untouched.
-if [[ ! -s $CONTINUE ]]; then
-  rm -f "$CONTINUE"
-  if git -C /data/openpilot rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    cat > "$CONTINUE.tmp" << 'CONT'
-#!/usr/bin/env bash
-cd /data/openpilot
-exec /data/openpilot/launch_openpilot.sh
-CONT
-    chmod +x "$CONTINUE.tmp"
-    mv "$CONTINUE.tmp" "$CONTINUE"
-  else
-    echo "ERROR: built-in openpilot checkout is missing; refusing to create an invalid continue.sh"
-  fi
-fi
-
 while true; do
   pkill -f "$SETUP"
   handle_setup_access
 
-  if [ -f $CONTINUE ]; then
+  if [ -f $CONTINUE ] && git -C /data/openpilot rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     if [[ -f /ASIUS ]]; then
       mkdir -p /data/params/d
       rm -f /data/params/d/AthenadPairingUntil
@@ -84,13 +67,6 @@ while true; do
       done
     fi
 
-    if [ -f /run/vamos-trial-boot ]; then
-      echo "committing healthy vamOS trial boot"
-      if ! sudo /usr/bin/vamos-boot commit; then
-        echo "vamOS trial commit failed; waiting for watchdog rollback"
-        while true; do sleep 60; done
-      fi
-    fi
     exec "$CONTINUE"
   fi
 
@@ -99,6 +75,10 @@ while true; do
   fi
 
   if [[ -f /ASIUS ]]; then
+    if [[ ! -e $CONTINUE ]]; then
+      echo "No openpilot workload configured; leaving vamOS services running"
+      exit 0
+    fi
     if ! "$SETUP"; then
       echo "headless setup is waiting for recovery conditions"
       sleep 30

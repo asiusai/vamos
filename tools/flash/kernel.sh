@@ -5,6 +5,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null && pwd)"
 cd "$DIR"
+. "$DIR/tools/flash/edl_usb.sh"
 
 ESP_IMG="$DIR/build/esp.img"
 KERNEL_IMAGE="$DIR/build/Image"
@@ -31,6 +32,7 @@ if ! lsusb -d 05c6:9008 >/dev/null 2>&1; then
   echo "Enter EDL via BIOS menu 'Reboot into EDL / 9008' or the EDL button, then retry."
   exit 1
 fi
+detach_qcserial
 
 echo "== Building ESP image =="
 "$DIR/tools/build/build_esp.sh"
