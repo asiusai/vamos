@@ -32,7 +32,9 @@ CLI transfers default to conservative 64 KiB USB payloads; override that with
 `VAMOS_EDL_MAX_PAYLOAD` when benchmarking a known-stable link.
 Factory disks default to the 64 GB eMMC geometry so one signed image also fits
 larger supported media; `VAMOS_STORAGE_SECTORS` remains available for builds
-that intentionally target a different minimum capacity.
+that intentionally target a different minimum capacity. On first boot, the
+backup GPT, userdata partition, and ext4 filesystem expand to use the remaining
+capacity of larger eMMC, NVMe, UFS, or SD media.
 
 Fresh devices authorize the intentionally shared `tools/ssh/comma_setup.b64` key
 once when no SSH keys have been provisioned, allowing initial access as
