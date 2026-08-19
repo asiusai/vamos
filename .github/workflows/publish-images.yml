@@ -71,7 +71,9 @@ jobs:
           fi
           source_tag="vamos-v${version}"
           if git ls-remote --exit-code origin "refs/tags/$source_tag" >/dev/null 2>&1; then
-            git fetch origin "refs/tags/$source_tag:refs/tags/$source_tag"
+            # actions/checkout creates the triggering annotated tag locally.
+            # Force-refresh it so fetching the same tag object is idempotent.
+            git fetch --force origin "refs/tags/$source_tag:refs/tags/$source_tag"
             tagged_commit=$(git rev-list -n 1 "$source_tag")
             if [ "$tagged_commit" != "$GITHUB_SHA" ]; then
               echo "$source_tag points to $tagged_commit, not release source $GITHUB_SHA" >&2
