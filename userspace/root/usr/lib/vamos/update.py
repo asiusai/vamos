@@ -82,6 +82,7 @@ WATCHDOG_DEVICE = Path("/dev/watchdog0")
 WATCHDOG_READY_MARKER = Path("/run/vamos-watchdog-ready")
 WATCHDOG_DISARMED_MARKER = Path("/run/vamos-watchdog-disarmed")
 UPDATE_PUBLIC_KEY = Path("/usr/share/vamos/update-public.pem")
+EXPAND_BACKUP = Path("/run/vamos-partition-table-before-expand.sfdisk")
 
 ESP_SIZE = 256 * 1024 * 1024
 SYSTEM_SIZE = 10 * 1024 * 1024 * 1024
@@ -969,6 +970,60 @@ def _relocate_backup_gpt(table: dict) -> dict:
   return relocated
 
 
+def expand_userdata() -> bool:
+  """Grow the factory userdata partition and filesystem to fill larger media."""
+  if os.geteuid() != 0:
+    raise UpdateError("userdata expansion must run as root")
+
+  table = _layout_json()
+  partitions = table.get("partitions", [])
+  labels = [partition.get("name") for partition in partitions]
+  expected = ["esp_a", "rootfs_a", "esp_b", "rootfs_b", "userdata"]
+  if labels[:5] != expected or len(partitions) != 5:
+    log(f"userdata expansion skipped for partition layout: {labels}")
+    return False
+
+  table = _relocate_backup_gpt(table)
+  partitions = table["partitions"]
+  userdata = partitions[4]
+  start = int(userdata["start"])
+  current_size = int(userdata["size"])
+  expanded_size = int(table["lastlba"]) - start + 1
+  if expanded_size < current_size:
+    raise UpdateError("userdata partition exceeds the physical disk")
+  if expanded_size == current_size:
+    return False
+
+  backup = EXPAND_BACKUP
+  backup.write_text(run(["sfdisk", "--dump", str(DISK)]).stdout, encoding="utf-8")
+  line = _sfdisk_partition_line(5, {**userdata, "size": expanded_size}, "userdata") + "\n"
+  log(f"growing userdata from {current_size} to {expanded_size} sectors")
+  completed = subprocess.run(
+    ["sfdisk", "--no-reread", "--force", "-N", "5", str(DISK)],
+    input=line,
+    text=True,
+  )
+  if completed.returncode != 0:
+    raise UpdateError(f"sfdisk failed while growing userdata; previous table is in {backup}")
+  run(["partx", "-u", "--nr", "5", str(DISK)], check=False, capture=False)
+  run(["udevadm", "settle", "--timeout=10"], check=False)
+
+  device = disk_partition(5)
+  for _ in range(50):
+    if device.exists():
+      break
+    time.sleep(0.1)
+  if not device.exists():
+    raise UpdateError(f"{device} did not appear after growing userdata")
+  actual_sectors = int(run(["blockdev", "--getsz", str(device)]).stdout.strip())
+  if actual_sectors != expanded_size:
+    raise UpdateError(f"kernel reports {actual_sectors} userdata sectors, expected {expanded_size}")
+  run(["resize2fs", str(device)], capture=False)
+  backup.unlink(missing_ok=True)
+  log("userdata now uses the remaining physical storage")
+  return True
+
+
 def _rsync_userdata(source: Path, destination: Path) -> None:
   completed = run([
     "rsync", "-aHAXx", "--numeric-ids", "--exclude=.tmp_value_*",
@@ -1187,6 +1242,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
   initialize_parser = subparsers.add_parser("initialize", help="migrate a legacy Dragon disk to A/B")
   initialize_parser.add_argument("--yes", action="store_true")
+  subparsers.add_parser("expand", help="grow factory userdata to fill larger storage")
 
   args = parser.parse_args(argv)
   try:
@@ -1204,6 +1260,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0 if verify_installed() else 1
       elif args.command == "initialize":
         initialize_layout(confirm=args.yes)
+      elif args.command == "expand":
+        expand_userdata()
     return 0
   except (UpdateError, OSError, urllib.error.URLError, json.JSONDecodeError, lzma.LZMAError) as exc:
     print(f"vamos-update: ERROR: {exc}", file=sys.stderr)

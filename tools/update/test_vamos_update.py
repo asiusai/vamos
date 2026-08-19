@@ -189,6 +189,67 @@ class LayoutInitializationTest(unittest.TestCase):
     run.assert_any_call(["blockdev", "--rereadpt", str(update.DISK)], check=False, capture=False)
     layout_json.assert_called_once_with()
 
+  def test_factory_userdata_expands_to_relocated_disk_end(self) -> None:
+    table = {
+      "lastlba": 900,
+      "partitions": [
+        {"name": "esp_a", "start": 1, "size": 10},
+        {"name": "rootfs_a", "start": 11, "size": 100},
+        {"name": "esp_b", "start": 111, "size": 10},
+        {"name": "rootfs_b", "start": 121, "size": 100},
+        {
+          "name": "userdata", "start": 221, "size": 280,
+          "type": "linux", "uuid": "userdata-uuid",
+        },
+      ],
+    }
+
+    def fake_run(command, **kwargs):
+      if command[:2] == ["sfdisk", "--dump"]:
+        return subprocess.CompletedProcess(command, 0, "old table\n", "")
+      if command[:2] == ["blockdev", "--getsz"]:
+        return subprocess.CompletedProcess(command, 0, "680\n", "")
+      return subprocess.CompletedProcess(command, 0, "", "")
+
+    with tempfile.TemporaryDirectory() as temporary:
+      partition = Path(temporary) / "disk5"
+      backup = Path(temporary) / "partition-table-before-expand.sfdisk"
+      partition.touch()
+      with (
+        mock.patch.object(update.os, "geteuid", return_value=0),
+        mock.patch.object(update, "EXPAND_BACKUP", backup),
+        mock.patch.object(update, "_layout_json", return_value=table),
+        mock.patch.object(update, "_relocate_backup_gpt", return_value=table),
+        mock.patch.object(update, "disk_partition", return_value=partition),
+        mock.patch.object(update, "run", side_effect=fake_run) as run,
+        mock.patch.object(update.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as subprocess_run,
+      ):
+        self.assertTrue(update.expand_userdata())
+      self.assertFalse(backup.exists())
+
+    partition_update = subprocess_run.call_args
+    self.assertEqual(partition_update.args[0][3:5], ["-N", "5"])
+    self.assertIn("start=221", partition_update.kwargs["input"])
+    self.assertIn("size=680", partition_update.kwargs["input"])
+    run.assert_any_call(["resize2fs", str(partition)], capture=False)
+
+  def test_factory_userdata_expansion_is_noop_at_image_size(self) -> None:
+    table = {
+      "lastlba": 500,
+      "partitions": [
+        {"name": "esp_a"}, {"name": "rootfs_a"}, {"name": "esp_b"}, {"name": "rootfs_b"},
+        {"name": "userdata", "start": 221, "size": 280},
+      ],
+    }
+    with (
+      mock.patch.object(update.os, "geteuid", return_value=0),
+      mock.patch.object(update, "_layout_json", return_value=table),
+      mock.patch.object(update, "_relocate_backup_gpt", return_value=table),
+      mock.patch.object(update.subprocess, "run") as subprocess_run,
+    ):
+      self.assertFalse(update.expand_userdata())
+    subprocess_run.assert_not_called()
+
   def test_userdata_rsync_tolerates_files_vanishing(self) -> None:
     result = subprocess.CompletedProcess(["rsync"], 24)
     with mock.patch.object(update, "run", return_value=result) as run:

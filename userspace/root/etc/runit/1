@@ -150,11 +150,14 @@ case "$storage_disk_name" in
     *) userdata_candidate="" ;;
 esac
 
-# New images are compact two-partition disks. Expand them into A/B plus
-# persistent userdata on first boot; an interrupted migration is resumed on
-# the next boot while the original rootfs /data remains available.
+# A common factory image uses the smallest supported disk geometry. Grow its
+# userdata partition on larger eMMC, NVMe, UFS, or SD media before mounting it.
+# Legacy two-partition disks are expanded into A/B plus persistent userdata;
+# an interrupted migration is resumed on the next boot.
 ab_init_failed=0
 if [ -f /ASIUS ] && [ -x /usr/bin/vamos-update ]; then
+    /usr/bin/vamos-update expand ||
+        echo "WARN: userdata could not be expanded to fill the physical storage"
     userdata_type="$(blkid -s TYPE -o value "$userdata_candidate" 2>/dev/null || true)"
     if { [ ! -b "$userdata_candidate" ] && [ ! -e /dev/disk/by-partlabel/userdata ]; } ||
        { [ -b "$userdata_candidate" ] && [ -z "$userdata_type" ]; }; then
