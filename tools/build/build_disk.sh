@@ -185,11 +185,16 @@ OP_DATE="$(git -C "$OP_SRC" log -1 --format=%ci)"
 OP_VERSION="$(sed -n 's/.*COMMA_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' "$OP_SRC/openpilot/common/version.h" | head -1)"
 OP_DST="$MOUNT_DIR/openpilot"
 CONTINUE="$MOUNT_DIR/continue.sh"
+LFS_PATHS="$BUILD_DIR/tmp-disk/openpilot-lfs-paths"
 docker exec "$MOUNT_CONTAINER_ID" mkdir -p "$OP_DST"
 
-# Preserve Git, submodule, and LFS metadata so first boot only performs the
-# normal local openpilot build and never needs to download its source.
-tar -C "$OP_SRC" -cf - . \
+# Preserve Git and submodule metadata so first boot only performs the normal
+# local openpilot build and never needs to download its source. Do not copy
+# materialized LFS worktree files here: their bytes already exist in .git/lfs,
+# and writing them before replacing them with hardlinks leaves gigabytes of
+# duplicate data in freed ext4 blocks that the raw-image delta still carries.
+git -C "$OP_SRC" lfs ls-files -n > "$LFS_PATHS"
+tar -C "$OP_SRC" --no-wildcards --exclude-from="$LFS_PATHS" -cf - . \
   | docker exec -i "$MOUNT_CONTAINER_ID" tar -C "$OP_DST" -xf -
 
 docker exec "$MOUNT_CONTAINER_ID" bash -c '
@@ -209,9 +214,13 @@ linked_bytes=0
 while read -r oid marker path; do
   worktree="$OP_DST/$path"
   object="$OP_DST/.git/lfs/objects/${oid:0:2}/${oid:2:2}/$oid"
-  [ -f "$object" ] && [ -f "$worktree" ] || continue
-  cmp -s "$object" "$worktree" || continue
-  mode="$(stat -c %a "$worktree")"
+  if [ ! -f "$object" ]; then
+    echo "ERROR: packaged LFS object is missing for $path ($oid)" >&2
+    exit 1
+  fi
+  mode="$(git -C "$OP_DST" ls-files -s -- "$path" | awk "NR == 1 { print substr(\$1, 4) }")"
+  [ -n "$mode" ] || mode=644
+  mkdir -p "$(dirname "$worktree")"
   ln -f "$object" "$worktree"
   chmod "$mode" "$worktree"
   linked=$((linked + 1))
