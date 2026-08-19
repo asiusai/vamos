@@ -80,6 +80,7 @@ xbps-install -y \
   squashfs-tools \
   tmux \
   traceroute \
+  usbutils \
   iw \
   wireless-regdb \
   wireless_tools \
