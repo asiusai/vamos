@@ -43,6 +43,16 @@ default; set `DRAGON_SSH_KEY` or pass a tool-specific identity option to use an
 operator key. The bootstrap authorization is limited to local RFC 1918 source
 addresses and can be replaced in `/data/params/d/GithubSshKeys`.
 
+A running Dragon can enter Qualcomm EDL without the hardware button:
+
+```bash
+sudo reboot-edl
+```
+
+The command syncs buffered writes and requests the QCS6490 firmware's `edl`
+PSCI reset mode. A Firehose reset returns to normal boot only when the EDL input
+is no longer asserted; release the recovery button or USB-VBUS pull-down first.
+
 ## Dragon NPU
 
 The Dragon image includes the pinned QCS6490 cDSP firmware userspace, FastRPC
