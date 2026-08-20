@@ -53,6 +53,21 @@ The command syncs buffered writes and requests the QCS6490 firmware's `edl`
 PSCI reset mode. A Firehose reset returns to normal boot only when the EDL input
 is no longer asserted; release the recovery button or USB-VBUS pull-down first.
 
+On the Dragon development bench, `dragon.py` automates the complete transition
+through a USB hub with real ganged VBUS switching:
+
+```bash
+./dragon.py edl                 # request reboot-edl over NCM
+./dragon.py normal              # delayed Firehose reset with dock VBUS off
+./dragon.py dock status
+./dragon.py dock on|off|cycle
+```
+
+The default dock locations are `1-1` (USB 2) and `2-1` (USB 3). Override them
+with `DRAGON_DOCK_USB2_HUB` and `DRAGON_DOCK_USB3_HUB`. The host tool assigns
+`192.168.42.50/24` directly when a new random NCM MAC prevents the network
+manager from reusing its previous connection.
+
 ## Dragon NPU
 
 The Dragon image includes the pinned QCS6490 cDSP firmware userspace, FastRPC
