@@ -25,9 +25,12 @@ the release checklist.
 ./vamos device-update comma@192.168.88.20
 ```
 
-EDL flashing probes storage in UFS, NVMe, eMMC, then SD-card order and
-requires 512-byte logical sectors. For diagnostics or recovery, bypass probing
-with `VAMOS_EDL_MEMORY=Ufs|Nvme|Sdcc` and optional `VAMOS_EDL_SLOT=0|1`.
+EDL flashing defaults to the Asius v1 eMMC (`Sdcc` slot 0) and requires
+512-byte logical sectors. Override the hardware target with
+`VAMOS_EDL_MEMORY=Ufs|Nvme|Sdcc` and optional `VAMOS_EDL_SLOT=0|1` (SD card is
+`Sdcc` slot 1). The signed QCS6490 programmer hangs after configuring an
+unsupported backend, so it cannot safely probe multiple storage types in one
+EDL session.
 CLI transfers default to conservative 64 KiB USB payloads; override that with
 `VAMOS_EDL_MAX_PAYLOAD` when benchmarking a known-stable link.
 Factory disks default to the 64 GB eMMC geometry so one signed image also fits
