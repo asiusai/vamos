@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Dragon Q6A control: power, EDL, UART, SSH.
+"""Dragon Q6A control: power, USB dock, EDL, UART, SSH.
 
-Hardware: 12V via CHA_FAN1 (pwm1 on nct6799 / hwmon5), EDL over direct USB,
-serial on /dev/ttyUSB0, network over USB NCM (192.168.42.2).
+Hardware: 12V via CHA_FAN1 (pwm1 on nct6799 / hwmon5), EDL/NCM through a
+ganged-power USB dock, serial on /dev/ttyUSB0, NCM at 192.168.42.2.
 
 Usage:
   dragon.py on                        Power on via fan header
   dragon.py off                       Power off
   dragon.py reboot                    Power off, settle, power on
-  dragon.py edl                       Cold cycle + navigate BIOS menu to EDL
+  dragon.py edl                       Enter EDL through a running vamOS device
+  dragon.py edl --bios                Cold cycle + navigate BIOS menu to EDL
   dragon.py edl --no-cycle            Skip power cycle, just navigate
+  dragon.py normal                    Reset EDL to normal boot using dock VBUS
+  dragon.py dock on|off|cycle|status  Control the development dock VBUS
   dragon.py ssh [cmd...]               SSH to Dragon over USB NCM (run cmd if given)
   dragon.py status                     Show power, NCM, SSH, UART status
   dragon.py health [--target USER@HOST] Run health check
@@ -24,6 +27,7 @@ import codecs
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -50,9 +54,16 @@ def find_hwmon(name="nct6799"):
 PORT = os.environ.get("DRAGON_UART", "/dev/ttyUSB0")
 BAUD = 115200
 NCM_IP = "192.168.42.2"
+NCM_HOST_IP = "192.168.42.50/24"
 SSH_KEY = str(default_ssh_key())
 OFF_SETTLE_SECS = 5
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+EDL_LOADER = os.path.join(
+    SCRIPT_DIR,
+    "firmware-dragon/flat_build/spinor/dragon-q6a/prog_firehose_ddr.elf",
+)
+DOCK_USB2_HUB = os.environ.get("DRAGON_DOCK_USB2_HUB", "1-1")
+DOCK_USB3_HUB = os.environ.get("DRAGON_DOCK_USB3_HUB", "2-1")
 HEALTH_SCRIPT = os.path.join(SCRIPT_DIR, "dragon_health.py")
 REMOTE_HEALTH_SCRIPT = "/tmp/dragon_health.py"
 SSH_HOSTKEY_OPTS = [
@@ -123,11 +134,70 @@ def ensure_ncm():
         sys.exit("No Dragon NCM interface found — is the USB cable connected?")
     print(f"[ncm] bringing up {iface}")
     subprocess.run(["sudo", "ip", "link", "set", iface, "up"], check=True)
-    subprocess.run(["sudo", "dhcpcd", "-1", iface],
-                   capture_output=True, text=True)
+    if shutil.which("dhcpcd"):
+        subprocess.run(["sudo", "dhcpcd", "-1", iface],
+                       capture_output=True, text=True)
     _, host_ip = check_ncm()
     if not host_ip:
-        sys.exit(f"[ncm] DHCP failed on {iface} — Dragon may not have NCM enabled")
+        # The gadget MAC changes across boots, so network managers do not always
+        # reapply the bench connection. The Dragon is fixed at .2; configure the
+        # host side directly instead of depending on a MAC-specific profile.
+        subprocess.run(["sudo", "ip", "address", "replace",
+                        NCM_HOST_IP, "dev", iface], check=True)
+        time.sleep(1)
+        _, host_ip = check_ncm()
+    if not host_ip:
+        sys.exit(f"[ncm] failed to configure {iface}")
+
+# -- USB development dock --
+
+def dock_hub(action, location, check=True):
+    if not shutil.which("uhubctl"):
+        sys.exit("uhubctl not found — install it before controlling dock VBUS")
+    cmd = ["sudo", "uhubctl", "-f", "-e", "-l", location]
+    if action:
+        cmd.extend(["-a", action])
+    return subprocess.run(cmd, check=check)
+
+def dock_power(enabled):
+    action = "on" if enabled else "off"
+    locations = (DOCK_USB2_HUB, DOCK_USB3_HUB)
+    if enabled:
+        # The dock's USB 3 half can disappear when its ganged outputs are off.
+        # Restore USB 2 first, then allow USB 3 to re-enumerate before enabling it.
+        dock_hub(action, locations[0])
+        time.sleep(2)
+        last_error = None
+        for _ in range(10):
+            try:
+                dock_hub(action, locations[1])
+                break
+            except subprocess.CalledProcessError as exc:
+                last_error = exc
+                time.sleep(0.5)
+        else:
+            raise last_error
+    else:
+        for location in locations:
+            dock_hub(action, location)
+
+def cmd_dock(args):
+    if args.dock_action == "status":
+        for location in (DOCK_USB2_HUB, DOCK_USB3_HUB):
+            dock_hub(None, location, check=False)
+        return
+    if args.dock_action == "cycle":
+        if args.seconds < 0:
+            sys.exit("dock --seconds must not be negative")
+        print("[dock] VBUS off")
+        dock_power(False)
+        time.sleep(args.seconds)
+        print("[dock] VBUS on")
+        dock_power(True)
+        return
+    enabled = args.dock_action == "on"
+    print(f"[dock] VBUS {'on' if enabled else 'off'}")
+    dock_power(enabled)
 
 # -- status --
 
@@ -187,10 +257,9 @@ def cmd_status(_args):
     iface, host_ip = check_ncm()
     if iface and not host_ip:
         try:
-            subprocess.run(["sudo", "ip", "link", "set", iface, "up"], check=True, capture_output=True)
-            subprocess.run(["sudo", "dhcpcd", "-1", iface], check=True, capture_output=True, timeout=10)
+            ensure_ncm()
             _, host_ip = check_ncm()
-        except Exception:
+        except (Exception, SystemExit):
             pass
 
     print(f"  ncm:      {NCM_IP}" if host_ip else "  ncm:      no")
@@ -216,14 +285,49 @@ def cmd_ssh(args):
 # -- edl --
 
 def wait_for_edl_usb(timeout=30):
-    for _ in range(timeout):
-        r = subprocess.run(["lsusb"], capture_output=True, text=True)
-        if "05c6:9008" in r.stdout:
+    return wait_for_usb("05c6:9008", timeout)
+
+def wait_for_usb(vid_pid, timeout=30):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = subprocess.run(["lsusb", "-d", vid_pid],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
             return True
-        time.sleep(1)
+        time.sleep(0.5)
     return False
 
 def cmd_edl(args):
+    if check_edl():
+        print("[edl] Dragon is already in EDL mode (05c6:9008)")
+        return 0
+
+    iface, _host_ip = check_ncm()
+    if iface and not args.bios and not args.no_cycle:
+        ensure_ncm()
+        print("[edl] requesting firmware EDL reset over NCM")
+        try:
+            subprocess.run(
+                ["ssh", *SSH_OPTS, "-o", "BatchMode=yes",
+                 "-o", "ConnectTimeout=4", f"comma@{NCM_IP}",
+                 "sudo reboot-edl"],
+                capture_output=True, text=True, timeout=6,
+            )
+        except subprocess.TimeoutExpired:
+            # A successful reboot tears down NCM before SSH can close cleanly.
+            pass
+        if wait_for_edl_usb(timeout=30):
+            print("[edl] Dragon is in EDL mode (05c6:9008)")
+            return 0
+        if args.software_only:
+            print("[edl] software EDL reset did not enumerate", file=sys.stderr)
+            return 2
+        print("[edl] software reset failed; falling back to BIOS navigation",
+              file=sys.stderr)
+
+    return cmd_edl_bios(args)
+
+def cmd_edl_bios(args):
     try:
         import serial
     except ImportError:
@@ -265,6 +369,70 @@ def cmd_edl(args):
         return 0
     print("[edl] EDL device did not appear on USB within 30s", file=sys.stderr)
     return 2
+
+def detach_qcserial():
+    base = "/sys/bus/usb/drivers/qcserial"
+    if not os.path.isdir(base):
+        return
+    for name in os.listdir(base):
+        if ":" not in name or not os.path.islink(os.path.join(base, name)):
+            continue
+        subprocess.run(["sudo", "tee", os.path.join(base, "unbind")],
+                       input=name, text=True, stdout=subprocess.DEVNULL,
+                       check=True)
+
+def cmd_normal(args):
+    if not check_edl():
+        if wait_for_usb("1d6b:0103", timeout=1):
+            print("[normal] Dragon is already in normal NCM mode")
+            ensure_ncm()
+            return 0
+        sys.exit("[normal] Dragon is not visible in EDL or NCM mode")
+    if not shutil.which("edl-ng"):
+        sys.exit("edl-ng not found")
+    if args.delay < 4:
+        sys.exit("normal --delay must be at least 4 seconds")
+    if not os.path.isfile(EDL_LOADER):
+        sys.exit(f"Firehose loader not found: {EDL_LOADER}")
+
+    memory = os.environ.get("VAMOS_EDL_MEMORY", "Sdcc").capitalize()
+    if memory == "Emmc":
+        memory = "Sdcc"
+    if memory not in {"Ufs", "Nvme", "Sdcc"}:
+        sys.exit("VAMOS_EDL_MEMORY must be Ufs, Nvme, or Sdcc")
+    slot = os.environ.get("VAMOS_EDL_SLOT", "0")
+    if slot not in {"0", "1"}:
+        sys.exit("VAMOS_EDL_SLOT must be 0 or 1")
+
+    detach_qcserial()
+    reset_cmd = [
+        "sudo", "edl-ng", "--maxpayload=65536",
+        f"--memory={memory}", f"--slot={slot}",
+        f"--loader={EDL_LOADER}", "reset", f"--delay={args.delay}",
+    ]
+    print(f"[normal] scheduling Firehose reset in {args.delay}s")
+    subprocess.run(reset_cmd, check=True)
+
+    dock_off = True
+    try:
+        print("[normal] dock VBUS off")
+        dock_power(False)
+        time.sleep(args.delay + 2)
+    finally:
+        if dock_off:
+            print("[normal] dock VBUS on")
+            dock_power(True)
+
+    if not wait_for_usb("1d6b:0103", timeout=30):
+        if check_edl():
+            print("[normal] Dragon returned to EDL; VBUS did not release EDL",
+                  file=sys.stderr)
+        else:
+            print("[normal] NCM did not enumerate within 30s", file=sys.stderr)
+        return 2
+    ensure_ncm()
+    print(f"[normal] Dragon is in normal mode at {NCM_IP}")
+    return 0
 
 # -- uart --
 
@@ -399,14 +567,26 @@ def main():
     sub.add_parser("off", help="Power off")
     sub.add_parser("reboot", help="Power cycle")
     sub.add_parser("status", help="Show Dragon status")
+    dock_p = sub.add_parser("dock", help="Control development dock VBUS")
+    dock_p.add_argument("dock_action", choices=["on", "off", "cycle", "status"])
+    dock_p.add_argument("--seconds", type=float, default=3.0,
+                        help="Off time for dock cycle (default 3 seconds)")
     ssh_p = sub.add_parser("ssh", help="SSH over USB NCM")
     ssh_p.add_argument("ssh_args", nargs="*")
 
-    edl_p = sub.add_parser("edl", help="Enter EDL mode via BIOS")
+    edl_p = sub.add_parser("edl", help="Enter EDL mode over NCM, with BIOS fallback")
+    edl_p.add_argument("--bios", action="store_true",
+                       help="Force the legacy BIOS navigation method")
+    edl_p.add_argument("--software-only", action="store_true",
+                       help="Do not fall back to BIOS if reboot-edl fails")
     edl_p.add_argument("--no-cycle", action="store_true",
                        help="Skip power cycle (assume BIOS already at main menu)")
     edl_p.add_argument("--f2-wait", type=float, default=10.0,
                        help="Seconds to press F2 after power-on (default 10)")
+
+    normal_p = sub.add_parser("normal", help="Reset EDL to normal boot via dock VBUS")
+    normal_p.add_argument("--delay", type=int, default=8,
+                          help="Firehose reset delay in seconds (default 8)")
 
     uart_p = sub.add_parser("uart", help="UART commands")
     uart_p.add_argument("uart_cmd", choices=["read", "send", "exec", "login", "wake"])
@@ -423,8 +603,10 @@ def main():
         ap.print_help()
         sys.exit(1)
 
-    dispatch = {"on": cmd_on, "off": cmd_off, "reboot": cmd_reboot, "status": cmd_status,
-                "ssh": cmd_ssh, "edl": cmd_edl, "uart": cmd_uart, "health": cmd_health}
+    dispatch = {"on": cmd_on, "off": cmd_off, "reboot": cmd_reboot,
+                "status": cmd_status, "dock": cmd_dock, "ssh": cmd_ssh,
+                "edl": cmd_edl, "normal": cmd_normal, "uart": cmd_uart,
+                "health": cmd_health}
     ret = dispatch[args.cmd](args)
     sys.exit(ret or 0)
 
