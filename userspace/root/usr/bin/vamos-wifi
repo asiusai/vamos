@@ -1,0 +1,111 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+usage() {
+  echo "usage: vamos-wifi connect SSID [--hidden] | disconnect | forget SSID | scan" >&2
+  exit 2
+}
+
+wifi_profiles() {
+  nmcli -t --escape no -f UUID,TYPE connection show |
+    while IFS=: read -r uuid type; do
+      if [ "$type" = "802-11-wireless" ]; then
+        printf '%s\n' "$uuid"
+      fi
+    done
+}
+
+profiles_for_ssid() {
+  local wanted_ssid=$1 uuid profile_ssid
+  while IFS= read -r uuid; do
+    profile_ssid=$(nmcli -t --escape no -g 802-11-wireless.ssid connection show uuid "$uuid" 2>/dev/null || true)
+    if [ "$profile_ssid" = "$wanted_ssid" ]; then
+      printf '%s\n' "$uuid"
+    fi
+  done < <(wifi_profiles)
+}
+
+forget_ssid() {
+  local ssid=$1 uuid
+  while IFS= read -r uuid; do
+    nmcli connection delete uuid "$uuid" >/dev/null
+  done < <(profiles_for_ssid "$ssid")
+}
+
+connect_network() {
+  local ssid=$1 hidden=$2 password password_file profile_name
+  local -a connect_args up_args
+
+  IFS= read -r password || true
+  profile_name="openpilot connection $ssid"
+  password_file=""
+  cleanup() {
+    if [ -n "$password_file" ]; then
+      rm -f -- "$password_file"
+    fi
+  }
+  trap cleanup EXIT
+
+  # Never let an incomplete profile consume a newly supplied password. A
+  # successful connection will be recreated and persisted by NetworkManager.
+  forget_ssid "$ssid"
+
+  connect_args=(--wait 35 device wifi connect "$ssid" ifname wlan0 name "$profile_name")
+  if [ "$hidden" = "yes" ]; then
+    connect_args+=(hidden yes)
+  fi
+
+  if [ -n "$password" ]; then
+    password_file=$(mktemp /tmp/vamos-wifi-passwd.XXXXXX)
+    chmod 600 "$password_file"
+    printf '802-11-wireless-security.psk:%s\n' "$password" > "$password_file"
+    connect_args=(--passwd-file "$password_file" "${connect_args[@]}")
+  fi
+
+  if nmcli "${connect_args[@]}"; then
+    exit 0
+  fi
+
+  # Some fullmac adapters initially associate to the WPA2 side of a WPA2/WPA3
+  # transition network even though SAE is supported. Requiring protected
+  # management frames removes that legacy path while NetworkManager still owns
+  # AP security completion and key-management selection.
+  if [ -n "$password" ] && nmcli connection show "$profile_name" >/dev/null 2>&1; then
+    nmcli connection modify "$profile_name" 802-11-wireless-security.pmf required
+    up_args=(--wait 35 --passwd-file "$password_file" connection up "$profile_name" ifname wlan0)
+    if nmcli "${up_args[@]}"; then
+      exit 0
+    fi
+  fi
+
+  forget_ssid "$ssid"
+  echo "Could not connect to $ssid. Check the password and hotspot settings." >&2
+  exit 1
+}
+
+case "${1:-}" in
+  connect)
+    [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
+    hidden=no
+    if [ "$#" -eq 3 ]; then
+      [ "$3" = "--hidden" ] || usage
+      hidden=yes
+    fi
+    connect_network "$2" "$hidden"
+    ;;
+  disconnect)
+    [ "$#" -eq 1 ] || usage
+    nmcli device disconnect wlan0
+    ;;
+  forget)
+    [ "$#" -eq 2 ] || usage
+    forget_ssid "$2"
+    ;;
+  scan)
+    [ "$#" -eq 1 ] || usage
+    nmcli device wifi rescan ifname wlan0
+    ;;
+  *)
+    usage
+    ;;
+esac
