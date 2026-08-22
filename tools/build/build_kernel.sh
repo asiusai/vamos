@@ -154,7 +154,7 @@ build_kernel() {
   make CC="$CC_CMD" O="$KBUILD_OUT" olddefconfig
 
   echo "-- Building kernel with $(nproc) cores --"
-  make CC="$CC_CMD" -j$(nproc) O="$KBUILD_OUT" Image Image.gz "$DTB_TARGET"
+  make -j"$(nproc)" "${make_args[@]}" Image Image.gz vmlinuz.efi "$DTB_TARGET"
 
   echo "-- Building and installing kernel modules --"
   make CC="$CC_CMD" -j$(nproc) O="$KBUILD_OUT" modules
@@ -165,10 +165,12 @@ build_kernel() {
   mkdir -p "$OUT_DIR"
   cp "$KBUILD_OUT/arch/arm64/boot/Image" "$OUT_DIR/Image"
   cp "$KBUILD_OUT/arch/arm64/boot/Image.gz" "$OUT_DIR/Image.gz"
-  cp "$KBUILD_OUT/arch/arm64/boot/dts/${DTB_TARGET}" "$OUT_DIR/$(basename "$DTB_TARGET")"
+  cp "$KBUILD_OUT/arch/arm64/boot/vmlinuz.efi" "$OUT_DIR/vmlinuz.efi"
+  cp "$KBUILD_OUT/arch/arm64/boot/dts/$DTB_TARGET" "$OUT_DIR/$(basename "$DTB_TARGET")"
 
   echo "-- Done --"
-  ls -lh "$OUT_DIR/Image" "$OUT_DIR/Image.gz" "$OUT_DIR/$(basename "$DTB_TARGET")"
+  ls -lh "$OUT_DIR/Image" "$OUT_DIR/Image.gz" "$OUT_DIR/vmlinuz.efi" \
+    "$OUT_DIR/$(basename "$DTB_TARGET")"
 }
 
 cleanup() {

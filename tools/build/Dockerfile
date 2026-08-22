@@ -26,8 +26,9 @@ RUN /tmp/vamos/base_setup.sh
 
 # Qualcomm QCS6490 FastRPC and QAIRT v68 runtime. The installer fetches pinned,
 # checksum-verified Radxa packages and installs only the cDSP runtime pieces.
+COPY ./userspace/audio/QCS6490-Asius-Panda-tplg.bin /tmp/vamos/audio/
 COPY ./userspace/install_qnn_runtime.sh /tmp/vamos/
-RUN /tmp/vamos/install_qnn_runtime.sh && rm /tmp/vamos/install_qnn_runtime.sh
+RUN /tmp/vamos/install_qnn_runtime.sh && rm -rf /tmp/vamos/install_qnn_runtime.sh /tmp/vamos/audio
 
 # ################### #
 # ###### vamOS ###### #
@@ -93,8 +94,8 @@ RUN rm -rf \
       /etc/init.d /etc/initscripts \
       /etc/sv/adsp /etc/sv/cdsp /etc/sv/fs_setup /etc/sv/gpio \
       /etc/sv/ipa_fws /etc/sv/irsc_util /etc/sv/leprop /etc/sv/lte \
-      /etc/sv/modemmanager /etc/sv/rmtfs /etc/sv/sound \
-      /usr/comma/lte /usr/comma/sound /usr/comma/wlan /usr/local/qr-linux \
+      /etc/sv/modemmanager /etc/sv/rmtfs \
+      /usr/comma/lte /usr/comma/wlan /usr/local/qr-linux \
       /usr/lib/firmware/ipa /usr/lib/firmware/wlan/qca_cld \
       /usr/lib/NetworkManager/system-connections/lte.nmconnection \
       /system/rfs && \
@@ -145,7 +146,7 @@ RUN printf '\nif [ -f ~/.bash_aliases ]; then\n    . ~/.bash_aliases\nfi\n' >> /
 RUN mkdir -p /root/.config
 
 # Enable the minimal Dragon services. Comma hardware services for its screen,
-# modem, audio, and SDM845 remote processors remain disabled.
+# modem, and SDM845 remote processors remain disabled.
 RUN for svc in \
   sshd rsyslogd busybox-ntpd iptables \
   avahi-ssh-publish ssh-param-watcher ncm-param-watcher dnsmasq varwatch power_monitor \
@@ -153,7 +154,7 @@ RUN for svc in \
   keygen \
   bluetoothd \
   github-runner \
-  openpilot init-qcom vamos-boot-commit \
+  openpilot init-qcom sound vamos-boot-commit \
   agetty-ttyMSM0 agetty-ttyAMA0; do \
     ln -sf /etc/sv/$svc /etc/runit/runsvdir/default/; \
   done
