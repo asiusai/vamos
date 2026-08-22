@@ -50,6 +50,12 @@ connect_network() {
   # successful connection will be recreated and persisted by NetworkManager.
   forget_ssid "$ssid"
 
+  # The AIC8800 scan cache can age out between opening the app and submitting
+  # a password. Refresh the selected SSID here so connect does not depend on a
+  # previous UI scan still being present.
+  nmcli device wifi rescan ifname wlan0 ssid "$ssid" >/dev/null 2>&1 || true
+  nmcli device wifi list ifname wlan0 --rescan yes >/dev/null
+
   connect_args=(--wait 35 device wifi connect "$ssid" ifname wlan0 name "$profile_name")
   if [ "$hidden" = "yes" ]; then
     connect_args+=(hidden yes)
@@ -59,20 +65,21 @@ connect_network() {
     password_file=$(mktemp /tmp/vamos-wifi-passwd.XXXXXX)
     chmod 600 "$password_file"
     printf '802-11-wireless-security.psk:%s\n' "$password" > "$password_file"
-    connect_args=(--passwd-file "$password_file" "${connect_args[@]}")
+    connect_args=(--ask "${connect_args[@]}")
   fi
 
-  if nmcli "${connect_args[@]}"; then
+  if { [ -n "$password" ] && printf '%s\n' "$password" || true; } | nmcli "${connect_args[@]}"; then
     exit 0
   fi
 
-  # Some fullmac adapters initially associate to the WPA2 side of a WPA2/WPA3
-  # transition network even though SAE is supported. Requiring protected
-  # management frames removes that legacy path while NetworkManager still owns
-  # AP security completion and key-management selection.
+  # The AIC8800 fullmac firmware repeatedly chooses the rejected WPA2 path on
+  # some WPA2/WPA3 transition hotspots even after NetworkManager completes a
+  # profile with both PSK and SAE. Retry through NetworkManager with the legacy
+  # path removed. This hardware workaround belongs here at the OS boundary;
+  # openpilot and the app do not select or persist Wi-Fi security modes.
   if [ -n "$password" ] && nmcli connection show "$profile_name" >/dev/null 2>&1; then
-    nmcli connection modify "$profile_name" 802-11-wireless-security.pmf required
-    up_args=(--wait 35 --passwd-file "$password_file" connection up "$profile_name" ifname wlan0)
+    nmcli connection modify "$profile_name" 802-11-wireless-security.key-mgmt sae 802-11-wireless-security.pmf required
+    up_args=(--wait 35 connection up "$profile_name" ifname wlan0 passwd-file "$password_file")
     if nmcli "${up_args[@]}"; then
       exit 0
     fi
