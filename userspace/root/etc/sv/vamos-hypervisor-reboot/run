@@ -1,0 +1,18 @@
+#!/bin/sh
+# Complete a one-shot EL2 recovery without interfering with an A/B trial boot.
+exec 2>&1
+
+reboot_marker=/run/vamos-hypervisor-reboot-required
+
+while [ ! -e "$reboot_marker" ]; do
+  sleep 60
+done
+
+while [ -e /run/vamos-trial-boot ] || [ ! -e /run/vamos-stage1-ready ]; do
+  sleep 1
+done
+
+echo "vamos-hypervisor-reboot: rebooting to apply the EL2 override"
+sync
+reboot
+while true; do sleep 60; done
