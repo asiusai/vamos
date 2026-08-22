@@ -68,13 +68,14 @@ make_esp a "$ENV_A" "$temporary/esp-a.img"
 make_esp b "$ENV_B" "$temporary/esp-b.img"
 
 DISK="$temporary/disk.img"
-truncate -s 144M "$DISK"
+truncate -s 160M "$DISK"
 sgdisk --clear \
   --new=1:2048:+64M --typecode=1:ef00 --change-name=1:esp_a \
-  --new=2:0:+64M --typecode=2:ef00 --change-name=2:esp_b \
+  --new=2:0:+1M --typecode=2:8300 --change-name=2:rootfs_a \
+  --new=3:0:+64M --typecode=3:ef00 --change-name=3:esp_b \
   "$DISK" >/dev/null
 START_A="$(sgdisk --info=1 "$DISK" | sed -n 's/^First sector: \([0-9]*\).*/\1/p')"
-START_B="$(sgdisk --info=2 "$DISK" | sed -n 's/^First sector: \([0-9]*\).*/\1/p')"
+START_B="$(sgdisk --info=3 "$DISK" | sed -n 's/^First sector: \([0-9]*\).*/\1/p')"
 dd if="$temporary/esp-a.img" of="$DISK" bs=512 seek="$START_A" conv=notrunc status=none
 dd if="$temporary/esp-b.img" of="$DISK" bs=512 seek="$START_B" conv=notrunc status=none
 

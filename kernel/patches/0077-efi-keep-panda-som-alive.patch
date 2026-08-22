@@ -1,0 +1,53 @@
+diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
+--- a/drivers/firmware/efi/libstub/fdt.c
++++ b/drivers/firmware/efi/libstub/fdt.c
+@@ -75,6 +75,41 @@ static void asius_enable_panda_spi(void *fdt)
+ 			 status);
+ }
+ 
++static void asius_keep_panda_som_alive(void *fdt)
++{
++	static const char tlmm_path[] = "/soc@0/pinctrl@f100000";
++	fdt32_t gpios[] = {
++		cpu_to_fdt32(27),
++		cpu_to_fdt32(0),
++	};
++	int node;
++	int status;
++	int tlmm;
++
++	tlmm = fdt_path_offset(fdt, tlmm_path);
++	if (tlmm < 0) {
++		efi_warn("Failed to find TLMM for Asius panda SOM GPIO: %d\n",
++			 tlmm);
++		return;
++	}
++
++	node = fdt_subnode_offset(fdt, tlmm, "panda-som-alive-hog");
++	if (node == -FDT_ERR_NOTFOUND)
++		node = fdt_add_subnode(fdt, tlmm, "panda-som-alive-hog");
++	if (node < 0) {
++		efi_warn("Failed to add Asius panda SOM GPIO: %d\n", node);
++		return;
++	}
++
++	status = fdt_setprop(fdt, node, "gpio-hog", NULL, 0) ?:
++		 fdt_setprop(fdt, node, "gpios", gpios, sizeof(gpios)) ?:
++		 fdt_setprop(fdt, node, "output-high", NULL, 0) ?:
++		 fdt_setprop_string(fdt, node, "line-name", "PANDA_SOM_GPIO");
++	if (status)
++		efi_warn("Failed to configure Asius panda SOM GPIO: %d\n",
++			 status);
++}
++
+ #define ASIUS_PWRKEY_PATH \
+ 	"/soc@0/spmi@c440000/pmic@0/pon@1300/pwrkey"
+ #define ASIUS_PAIR_KEY_CODE		148
+@@ -793,6 +828,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+ 	}
+ 
+ 	asius_enable_panda_spi(fdt);
++	asius_keep_panda_som_alive(fdt);
+ 	asius_repurpose_power_key(fdt);
+ 	asius_enable_dragon_cameras(fdt);
+ 
