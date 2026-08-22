@@ -123,7 +123,7 @@ new file mode 100644
 index 0000000..1e793de
 --- /dev/null
 +++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
-@@ -0,0 +1,1607 @@
+@@ -0,0 +1,1546 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +/*
 + * Copyright (c) 2025 Radxa Computer (Shenzhen) Co., Ltd.
@@ -1082,67 +1082,6 @@ index 0000000..1e793de
 +	pinctrl-0 = <&mi2s0_mclk>, <&mi2s0_sclk>, <&mi2s0_ws>,
 +		    <&mi2s0_data0>, <&mi2s0_data1>;
 +	pinctrl-names = "default";
-+
-+	audio-routing =
-+		"IN1_HPHL", "HPHL_OUT",
-+		"IN2_HPHR", "HPHR_OUT",
-+		"AMIC2", "MIC BIAS2",
-+		// "TX DMIC0", "MIC BIAS1",
-+		// "TX DMIC1", "MIC BIAS2",
-+		// "TX DMIC2", "MIC BIAS3",
-+		"TX SWR_ADC1", "ADC2_OUTPUT";
-+		// "VA DMIC0", "VA MIC BIAS3",
-+		// "VA DMIC1", "VA MIC BIAS3",
-+		// "VA DMIC2", "VA MIC BIAS1",
-+		// "VA DMIC3", "VA MIC BIAS1";
-+
-+	wcd-playback-dai-link {
-+		link-name = "WCD Playback";
-+
-+		cpu {
-+			sound-dai = <&q6apmbedai RX_CODEC_DMA_RX_0>;
-+		};
-+
-+		codec {
-+			sound-dai = <&wcd938x 0>, <&swr0 0>, <&lpass_rx_macro 0>;
-+		};
-+
-+		platform {
-+			sound-dai = <&q6apm>;
-+		};
-+	};
-+
-+	wcd-capture-dai-link {
-+		link-name = "WCD Capture";
-+
-+		cpu {
-+			sound-dai = <&q6apmbedai TX_CODEC_DMA_TX_3>;
-+		};
-+
-+		codec {
-+			sound-dai = <&wcd938x 1>, <&swr1 0>, <&lpass_tx_macro 0>;
-+		};
-+
-+		platform {
-+			sound-dai = <&q6apm>;
-+		};
-+	};
-+
-+	dp0-dai-link {
-+		link-name = "DP0 Playback";
-+
-+		cpu {
-+			sound-dai = <&q6apmbedai DISPLAY_PORT_RX_0>;
-+		};
-+
-+		codec {
-+			sound-dai = <&mdss_dp>;
-+		};
-+
-+		platform {
-+			sound-dai = <&q6apm>;
-+		};
-+	};
 +
 +	panda-playback-dai-link {
 +		link-name = "Panda Playback";

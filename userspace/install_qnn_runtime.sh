@@ -9,6 +9,7 @@ RADXA_REPO=https://radxa-repo.github.io/noble/pool/main
 
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)
 
 fetch() {
   local name=$1 url=$2 expected=$3
@@ -38,8 +39,8 @@ fetch fastrpc-test.deb \
   "$QCS_REPO/f/fastrpc/fastrpc-test_1.0.6-3_arm64.deb" \
   363185f6f98ab5ec263fe9982f9baea801a9bd971583ad98cb00a6ae5f4bc76d
 fetch firmware.deb \
-  "$RADXA_REPO/r/radxa-firmware/radxa-firmware-qcs6490_0.2.39_all.deb" \
-  e5a15d1d6ef64d346ce0f2559ce8cedd50498632fb637704fa62ada009df0573
+  "$RADXA_REPO/r/radxa-firmware/radxa-firmware-qcs6490_0.2.41_all.deb" \
+  8d53cc8da941bf748f3cd1fe7086da5fda73c680a6ffa96bfb77d95c9f1d9604
 
 for package in qnn fastrpc libcdsprpc listener fastrpc-test firmware; do
   extract_deb "$package.deb" "$work_dir/$package"
@@ -49,6 +50,18 @@ qnn_lib="$work_dir/qnn/usr/lib/aarch64-linux-gnu"
 fastrpc_lib="$work_dir/libcdsprpc/usr/lib/aarch64-linux-gnu"
 listener_lib="$work_dir/listener/usr/lib/aarch64-linux-gnu"
 firmware_dsp="$work_dir/firmware/usr/share/qcom/qcs6490/radxa/dragon-q6a/dsp/cdsp"
+firmware_boot="$work_dir/firmware/lib/firmware/qcom/qcs6490/radxa/dragon-q6a"
+audio_topology="$script_dir/audio/QCS6490-Asius-Panda-tplg.bin"
+
+install -d /lib/firmware/qcom/qcs6490/radxa/dragon-q6a
+for firmware in adsp.mbn adspr.jsn adspua.jsn cdsp.mbn cdspr.jsn; do
+  install -m644 "$firmware_boot/$firmware" \
+    "/lib/firmware/qcom/qcs6490/radxa/dragon-q6a/$firmware"
+done
+install -m644 "$audio_topology" \
+  /lib/firmware/qcom/qcs6490/radxa/dragon-q6a/QCS6490-Radxa-Dragon-Q6A-tplg.bin
+ln -sfn radxa/dragon-q6a/QCS6490-Radxa-Dragon-Q6A-tplg.bin \
+  /lib/firmware/qcom/qcs6490/QCS6490-Radxa-Dragon-Q6A-tplg.bin
 
 install -Dm644 "$fastrpc_lib/libcdsprpc.so.1.0.0" /usr/lib/libcdsprpc.so.1.0.0
 ln -sf libcdsprpc.so.1.0.0 /usr/lib/libcdsprpc.so.1

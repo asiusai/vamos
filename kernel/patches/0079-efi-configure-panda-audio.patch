@@ -1,0 +1,204 @@
+diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
+--- a/drivers/firmware/efi/libstub/fdt.c
++++ b/drivers/firmware/efi/libstub/fdt.c
+@@ -110,6 +110,192 @@ static void asius_keep_panda_som_alive(void *fdt)
+ 			 status);
+ }
+ 
++static int asius_fdt_get_or_add_subnode(void *fdt, int parent,
++					const char *name)
++{
++	int node;
++
++	node = fdt_subnode_offset(fdt, parent, name);
++	if (node == -FDT_ERR_NOTFOUND)
++		node = fdt_add_subnode(fdt, parent, name);
++
++	return node;
++}
++
++static int asius_fdt_configure_audio_codec(void *fdt, const char *name,
++					   const char *compatible,
++					   u32 channels, u32 *phandle)
++{
++	int node;
++	int status;
++
++	node = asius_fdt_get_or_add_subnode(fdt, 0, name);
++	if (node < 0)
++		return node;
++
++	status = fdt_setprop_string(fdt, node, "compatible", compatible) ?:
++		 fdt_setprop_u32(fdt, node, "#sound-dai-cells", 0);
++	if (status)
++		return status;
++
++	if (channels) {
++		status = fdt_setprop_u32(fdt, node, "num-channels", channels);
++		if (status)
++			return status;
++	}
++
++	*phandle = fdt_get_phandle(fdt, node);
++	if (!*phandle) {
++		status = fdt_generate_phandle(fdt, phandle);
++		if (status)
++			return status;
++		status = fdt_setprop_u32(fdt, node, "phandle", *phandle);
++	}
++
++	return status;
++}
++
++static int asius_fdt_configure_audio_link(void *fdt, int sound,
++					  const char *node_name,
++					  const char *link_name,
++					  u32 cpu_phandle, u32 dai_id,
++					  u32 codec_phandle,
++					  u32 platform_phandle)
++{
++	fdt32_t cpu_dai[] = {
++		cpu_to_fdt32(cpu_phandle),
++		cpu_to_fdt32(dai_id),
++	};
++	fdt32_t codec_dai = cpu_to_fdt32(codec_phandle);
++	fdt32_t platform_dai = cpu_to_fdt32(platform_phandle);
++	int codec;
++	int cpu;
++	int link;
++	int platform;
++	int status;
++
++	link = asius_fdt_get_or_add_subnode(fdt, sound, node_name);
++	if (link < 0)
++		return link;
++	status = fdt_setprop_string(fdt, link, "link-name", link_name);
++	if (status)
++		return status;
++
++	cpu = asius_fdt_get_or_add_subnode(fdt, link, "cpu");
++	if (cpu < 0)
++		return cpu;
++	status = fdt_setprop(fdt, cpu, "sound-dai", cpu_dai,
++			     sizeof(cpu_dai));
++	if (status)
++		return status;
++
++	codec = asius_fdt_get_or_add_subnode(fdt, link, "codec");
++	if (codec < 0)
++		return codec;
++	status = fdt_setprop(fdt, codec, "sound-dai", &codec_dai,
++			     sizeof(codec_dai));
++	if (status)
++		return status;
++
++	platform = asius_fdt_get_or_add_subnode(fdt, link, "platform");
++	if (platform < 0)
++		return platform;
++
++	return fdt_setprop(fdt, platform, "sound-dai", &platform_dai,
++			   sizeof(platform_dai));
++}
++
++static void asius_configure_panda_audio(void *fdt)
++{
++	static const char old_links[][24] = {
++		"wcd-playback-dai-link",
++		"wcd-capture-dai-link",
++		"dp0-dai-link",
++	};
++	static const char pin_paths[][64] = {
++		"/soc@0/pinctrl@f100000/mi2s0-mclk-state",
++		"/soc@0/pinctrl@f100000/mi2s0-sclk-state",
++		"/soc@0/pinctrl@f100000/mi2s0-ws-state",
++		"/soc@0/pinctrl@f100000/mi2s0-data0-state",
++		"/soc@0/pinctrl@f100000/mi2s0-data1-state",
++	};
++	fdt32_t pinctrl[ARRAY_SIZE(pin_paths)];
++	u32 capture_codec;
++	u32 playback_codec;
++	u32 q6apm_phandle;
++	u32 q6bedai_phandle;
++	int node;
++	int q6apm;
++	int q6bedai;
++	int sound;
++	int status;
++	int i;
++
++	sound = fdt_path_offset(fdt, "/sound");
++	q6apm = fdt_node_offset_by_compatible(fdt, -1, "qcom,q6apm");
++	q6bedai = fdt_node_offset_by_compatible(fdt, -1,
++						"qcom,q6apm-lpass-dais");
++	if (sound < 0 || q6apm < 0 || q6bedai < 0) {
++		efi_warn("Failed to find Asius panda audio nodes: %d %d %d\n",
++			 sound, q6apm, q6bedai);
++		return;
++	}
++
++	q6apm_phandle = fdt_get_phandle(fdt, q6apm);
++	q6bedai_phandle = fdt_get_phandle(fdt, q6bedai);
++	if (!q6apm_phandle || !q6bedai_phandle) {
++		efi_warn("Asius panda audio Q6 nodes have no phandles\n");
++		return;
++	}
++
++	for (i = 0; i < ARRAY_SIZE(pin_paths); i++) {
++		node = fdt_path_offset(fdt, pin_paths[i]);
++		if (node < 0 || !fdt_get_phandle(fdt, node)) {
++			efi_warn("Failed to find Asius panda audio pin %d: %d\n",
++				 i, node);
++			return;
++		}
++		pinctrl[i] = cpu_to_fdt32(fdt_get_phandle(fdt, node));
++	}
++
++	status = asius_fdt_configure_audio_codec(fdt, "panda-audio-input",
++						 "dmic-codec", 2, &capture_codec) ?:
++		 asius_fdt_configure_audio_codec(fdt, "panda-audio-output",
++						  "maxim,max98357a", 0,
++						  &playback_codec);
++	if (status)
++		goto fail;
++
++	sound = fdt_path_offset(fdt, "/sound");
++	for (i = 0; i < ARRAY_SIZE(old_links); i++) {
++		node = fdt_subnode_offset(fdt, sound, old_links[i]);
++		if (node >= 0) {
++			status = fdt_del_node(fdt, node);
++			if (status)
++				goto fail;
++			sound = fdt_path_offset(fdt, "/sound");
++		}
++	}
++
++	status = fdt_delprop(fdt, sound, "audio-routing");
++	if (status == -FDT_ERR_NOTFOUND)
++		status = 0;
++	status = status ?:
++		 fdt_setprop(fdt, sound, "pinctrl-0", pinctrl, sizeof(pinctrl)) ?:
++		 fdt_setprop_string(fdt, sound, "pinctrl-names", "default") ?:
++		 asius_fdt_configure_audio_link(fdt, sound,
++						 "panda-playback-dai-link",
++						 "Panda Playback", q6bedai_phandle,
++						 16, playback_codec, q6apm_phandle) ?:
++		 asius_fdt_configure_audio_link(fdt, sound,
++						 "panda-capture-dai-link",
++						 "Panda Capture", q6bedai_phandle,
++						 17, capture_codec, q6apm_phandle);
++fail:
++	if (status)
++		efi_warn("Failed to configure Asius panda audio: %d\n", status);
++}
++
+ #define ASIUS_PWRKEY_PATH \
+ 	"/soc@0/spmi@c440000/pmic@0/pon@1300/pwrkey"
+ #define ASIUS_PAIR_KEY_CODE		148
+@@ -829,6 +1015,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+ 
+ 	asius_enable_panda_spi(fdt);
+ 	asius_keep_panda_som_alive(fdt);
++	asius_configure_panda_audio(fdt);
+ 	asius_repurpose_power_key(fdt);
+ 	asius_enable_dragon_cameras(fdt);
+ 
