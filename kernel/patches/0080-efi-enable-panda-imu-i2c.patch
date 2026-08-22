@@ -1,0 +1,39 @@
+diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
+--- a/drivers/firmware/efi/libstub/fdt.c
++++ b/drivers/firmware/efi/libstub/fdt.c
+@@ -110,6 +110,27 @@ static void asius_keep_panda_som_alive(void *fdt)
+ 			 status);
+ }
+ 
++static void asius_enable_panda_imu_i2c(void *fdt)
++{
++	static const char i2c6_path[] =
++		"/soc@0/geniqup@9c0000/i2c@998000";
++	int i2c;
++	int status;
++
++	i2c = fdt_path_offset(fdt, i2c6_path);
++	if (i2c < 0) {
++		efi_warn("Failed to find Asius panda IMU I2C controller: %d\n",
++			 i2c);
++		return;
++	}
++
++	status = fdt_setprop_string(fdt, i2c, "status", "okay") ?:
++		 fdt_setprop(fdt, i2c, "qcom,enable-gsi-dma", NULL, 0);
++	if (status)
++		efi_warn("Failed to enable Asius panda IMU I2C controller: %d\n",
++			 status);
++}
++
+ static int asius_fdt_get_or_add_subnode(void *fdt, int parent,
+ 					const char *name)
+ {
+@@ -1015,6 +1036,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+ 	}
+ 
+ 	asius_enable_panda_spi(fdt);
++	asius_enable_panda_imu_i2c(fdt);
+ 	asius_keep_panda_som_alive(fdt);
+ 	asius_configure_panda_audio(fdt);
+ 	asius_repurpose_power_key(fdt);
