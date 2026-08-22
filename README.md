@@ -17,18 +17,19 @@ the release checklist.
 ./vamos build esp          # build the 256 MiB boot ESP
 ./vamos build ota          # build ESP and package a full OTA release
 ./vamos build disk         # build the common factory disk + optional userdata
-./vamos flash kernel       # replace the ESP through EDL
-./vamos flash system       # factory flash with openpilot (default)
-./vamos flash system --without-openpilot  # factory flash vamOS only
-./vamos flash all          # flash system and kernel
+./vamos flash kernel --storage nvme  # replace an NVMe ESP through EDL
+./vamos flash system --storage emmc  # factory flash eMMC with openpilot
+./vamos flash system --storage ufs --without-openpilot  # vamOS-only UFS
+./vamos flash all --storage emmc     # flash system and kernel
 ./vamos profile diff A B   # diff two rootfs profiles
 ./vamos device-update comma@192.168.88.20
 ```
 
 EDL flashing defaults to the Asius v1 eMMC (`Sdcc` slot 0) and requires
-512-byte logical sectors. Override the hardware target with
-`VAMOS_EDL_MEMORY=Ufs|Nvme|Sdcc` and optional `VAMOS_EDL_SLOT=0|1` (SD card is
-`Sdcc` slot 1). The signed QCS6490 programmer hangs after configuring an
+512-byte logical sectors. Select the hardware target with
+`--storage emmc|nvme|ufs`; `--emmc`, `--nvme`, and `--ufs` are equivalent
+shortcuts. Low-level tooling can still use `VAMOS_EDL_MEMORY=Ufs|Nvme|Sdcc`
+and optional `VAMOS_EDL_SLOT=0|1` (SD card is `Sdcc` slot 1). The signed QCS6490 programmer hangs after configuring an
 unsupported backend, so it cannot safely probe multiple storage types in one
 EDL session.
 CLI transfers default to conservative 64 KiB USB payloads; override that with
