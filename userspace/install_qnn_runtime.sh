@@ -27,17 +27,17 @@ fetch qnn.deb \
   "$QCS_REPO/q/qcom-qairt/qcom-qnn-sdk-v68_0.1.0-2_all.deb" \
   306fd647b88902d170831980ca68a31d77d77923534e2070783fbeca132a6e54
 fetch fastrpc.deb \
-  "$QCS_REPO/f/fastrpc/fastrpc_1.0.6-3_arm64.deb" \
-  b82b63dab9e7bc9f10e19db0cce308559c3983a9014fdc88afe2b0e2f03b2f72
+  "$QCS_REPO/f/fastrpc/fastrpc_1.0.7-1_arm64.deb" \
+  8519ce08b8cc0e31d8cdefcce4d66660cecac3d0c6a8e7fddd44504fbc5ed7e0
 fetch libcdsprpc.deb \
-  "$QCS_REPO/f/fastrpc/libcdsprpc1_1.0.6-3_arm64.deb" \
-  9f73fcedb46bdbf226cc025fa1287b21da3394786429e78f49ca9e718a742a17
+  "$QCS_REPO/f/fastrpc/libcdsprpc1_1.0.7-1_arm64.deb" \
+  81710b08c142be240998329c23ff6d11271c132e4a475ad048a64971db92eb20
 fetch listener.deb \
-  "$QCS_REPO/f/fastrpc/libcdsp-default-listener1_1.0.6-3_arm64.deb" \
-  4d5be884127c9275eb2b92388a3fa503d04a9a97b52c6be0473f6fed060063a7
+  "$QCS_REPO/f/fastrpc/libcdsp-default-listener1_1.0.7-1_arm64.deb" \
+  cbca67dabb91b1cf78fcee0c13c7bc778b331150f69bad218d78b846bed8ec22
 fetch fastrpc-test.deb \
-  "$QCS_REPO/f/fastrpc/fastrpc-test_1.0.6-3_arm64.deb" \
-  363185f6f98ab5ec263fe9982f9baea801a9bd971583ad98cb00a6ae5f4bc76d
+  "$QCS_REPO/f/fastrpc/fastrpc-test_1.0.7-1_arm64.deb" \
+  e0241a2648fc1097344b19b914b9bc23950d0cdb93079467a03f7510ab9110a2
 fetch firmware.deb \
   "$RADXA_REPO/r/radxa-firmware/radxa-firmware-qcs6490_0.2.41_all.deb" \
   8d53cc8da941bf748f3cd1fe7086da5fda73c680a6ffa96bfb77d95c9f1d9604
