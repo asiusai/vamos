@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Arm the Dragon Q6A one-shot UEFI override required to boot Linux at EL2."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import struct
+import subprocess
+import sys
+from pathlib import Path
+
+
+VARIABLE_NAME = "HypervisorOverride-e9139283-6a58-402f-b397-4c4671c9e067"
+EFI_ATTRIBUTES = 0x7  # non-volatile, boot-service, and runtime access
+ENABLE_VALUE = 1
+
+
+def env_path(name: str, default: str) -> Path:
+  return Path(os.environ.get(name, default))
+
+
+KVM_DEVICE = env_path("VAMOS_KVM_DEVICE", "/dev/kvm")
+EFIVARS_DIR = env_path("VAMOS_EFIVARS_DIR", "/sys/firmware/efi/efivars")
+STATE_DIR = env_path("VAMOS_HYPERVISOR_STATE_DIR", "/data/vamos-hypervisor")
+BIOS_VERSION_FILE = env_path("VAMOS_BIOS_VERSION_FILE", "/sys/class/dmi/id/bios_version")
+REBOOT_MARKER = env_path(
+  "VAMOS_HYPERVISOR_REBOOT_MARKER", "/run/vamos-hypervisor-reboot-required"
+)
+
+
+class HypervisorError(RuntimeError):
+  pass
+
+
+def bios_version() -> str:
+  try:
+    value = BIOS_VERSION_FILE.read_text().strip()
+  except OSError:
+    value = "unknown"
+  return value or "unknown"
+
+
+def mounted(path: Path) -> bool:
+  if os.environ.get("VAMOS_EFIVARS_MOUNTED") == "1":
+    return True
+  result = subprocess.run(
+    ["mountpoint", "-q", str(path)],
+    check=False,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+  )
+  return result.returncode == 0
+
+
+def ensure_efivars() -> None:
+  EFIVARS_DIR.mkdir(parents=True, exist_ok=True)
+  if mounted(EFIVARS_DIR):
+    return
+  result = subprocess.run(
+    ["mount", "-t", "efivarfs", "efivarfs", str(EFIVARS_DIR)],
+    check=False,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True,
+  )
+  if result.returncode != 0:
+    detail = result.stdout.strip() or "mount failed"
+    raise HypervisorError(f"cannot mount efivarfs: {detail}")
+
+
+def variable_path() -> Path:
+  return EFIVARS_DIR / VARIABLE_NAME
+
+
+def read_variable() -> tuple[int, int]:
+  path = variable_path()
+  try:
+    data = path.read_bytes()
+  except OSError as exc:
+    raise HypervisorError(f"cannot read {path}: {exc}") from exc
+  if len(data) < 8:
+    raise HypervisorError(f"{path} is only {len(data)} bytes")
+  return struct.unpack_from("<II", data)
+
+
+def armed_version_file() -> Path:
+  return STATE_DIR / "armed-bios-version"
+
+
+def previously_armed_for_current_bios() -> bool:
+  try:
+    return armed_version_file().read_text().strip() == bios_version()
+  except OSError:
+    return False
+
+
+def record_armed_version() -> None:
+  STATE_DIR.mkdir(parents=True, exist_ok=True)
+  target = armed_version_file()
+  temporary = target.with_suffix(".tmp")
+  temporary.write_text(f"{bios_version()}\n")
+  os.replace(temporary, target)
+
+
+def write_enable_override() -> None:
+  path = variable_path()
+  subprocess.run(
+    ["chattr", "-i", str(path)],
+    check=False,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+  )
+  payload = struct.pack("<II", EFI_ATTRIBUTES, ENABLE_VALUE)
+  try:
+    path.write_bytes(payload)
+  except OSError as exc:
+    raise HypervisorError(f"cannot write {path}: {exc}") from exc
+  if read_variable() != (EFI_ATTRIBUTES, ENABLE_VALUE):
+    raise HypervisorError("UEFI did not retain the EL2 override")
+
+
+def status() -> str:
+  if KVM_DEVICE.exists():
+    return "active: /dev/kvm is available; Linux booted at EL2"
+  ensure_efivars()
+  attributes, value = read_variable()
+  suffix = " (enable pending)" if value == ENABLE_VALUE else ""
+  return f"inactive: UEFI override value={value}, attributes=0x{attributes:x}{suffix}"
+
+
+def enable(*, automatic: bool) -> str:
+  if KVM_DEVICE.exists():
+    return "active: /dev/kvm is available; no UEFI change needed"
+
+  ensure_efivars()
+  attributes, value = read_variable()
+  if value == ENABLE_VALUE:
+    record_armed_version()
+    REBOOT_MARKER.parent.mkdir(parents=True, exist_ok=True)
+    REBOOT_MARKER.touch()
+    return "armed: EL2 override is already pending; reboot required"
+
+  if automatic and previously_armed_for_current_bios():
+    raise HypervisorError(
+      "EL2 is still unavailable after this BIOS version was armed; refusing a reboot loop"
+    )
+
+  write_enable_override()
+  record_armed_version()
+  REBOOT_MARKER.parent.mkdir(parents=True, exist_ok=True)
+  REBOOT_MARKER.touch()
+  return (
+    f"armed: changed UEFI override from value={value}, attributes=0x{attributes:x}; "
+    "reboot required"
+  )
+
+
+def main() -> int:
+  parser = argparse.ArgumentParser(
+    description="manage the Dragon Q6A UEFI override required by Venus"
+  )
+  parser.add_argument("command", choices=("status", "enable", "auto"))
+  args = parser.parse_args()
+  try:
+    if args.command == "status":
+      print(status())
+    else:
+      print(enable(automatic=args.command == "auto"))
+    return 0
+  except HypervisorError as exc:
+    print(f"vamos-hypervisor: ERROR: {exc}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+  raise SystemExit(main())

@@ -125,11 +125,15 @@ Dragon Q6A uses the mainline Qualcomm Venus V4L2 memory-to-memory driver. The
 root filesystem includes `qcom/vpu-2.0/venus.mbn`; openpilot can pass the VFE's
 NV12 DMA buffers directly to Venus without a CPU copy.
 
-Venus also requires `Hypervisor Settings -> Hypervisor Override` to be Enabled
-in Dragon UEFI so Linux boots at EL2. Without EL2, starting an encoder session
-can reboot the board. This setting is not changed automatically. The tested
-firmware also makes EFI variables unavailable to Linux, so Dragon updates use
-the disk-resident selector described below and never require `BootNext`.
+Venus also requires Linux to boot at EL2. vamOS checks for `/dev/kvm` during
+boot and, when EL2 is unavailable, writes the Dragon UEFI one-shot
+`HypervisorOverride` variable. It reboots only after any A/B trial has been
+committed, and records the BIOS version so a failed override cannot cause a
+reboot loop. `vamos-hypervisor status` reports the current state, while
+`vamos-hypervisor enable` explicitly retries the override. The tested firmware
+makes EFI variables unavailable after Linux has booted at EL2; the helper exits
+before mounting efivarfs in that state. Dragon updates use the disk-resident
+selector described below and never require `BootNext`.
 
 Build the images separately, then deploy them. The device reboots into a
 one-shot trial of the new slot:
