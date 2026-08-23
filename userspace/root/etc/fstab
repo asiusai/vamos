@@ -10,15 +10,15 @@
 /dev/disk/by-partlabel/modem_a            /firmware   vfat    ro,nofail                                                    0      0
 
 # Persistent storage partition (read-only)
-# sda2 = persist (eMMC)
+# sda2 = persist (legacy storage layout)
 /dev/disk/by-partlabel/persist            /persist    squashfs ro,nosuid,nodev,noexec,nofail                               0      0
 
 # Userdata partition (main writable storage)
-# sda12 = userdata (eMMC)
+# sda12 = userdata (legacy storage layout)
 /dev/disk/by-partlabel/userdata           /data       ext4    discard,noatime,nodiratime,nosuid,nodev,nofail               0      0
 
 # Cache partition
-# sda11 = cache (eMMC)
+# sda11 = cache (legacy storage layout)
 /dev/disk/by-partlabel/cache              /cache      ext4    relatime,data=ordered,noauto_da_alloc,discard,noexec,nodev,nosuid,nofail 0 0
 
 # tmpfs mounts

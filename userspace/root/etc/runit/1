@@ -137,7 +137,7 @@ mount_part() {
 storage_root="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
 storage_disk_name="$(lsblk -n -o PKNAME "$storage_root" 2>/dev/null | head -n 1)"
 if [ -z "$storage_disk_name" ]; then
-    for candidate in nvme0n1 mmcblk0 sda; do
+    for candidate in nvme0n1 sda; do
         if [ -b "/dev/$candidate" ]; then
             storage_disk_name="$candidate"
             break
@@ -151,7 +151,7 @@ case "$storage_disk_name" in
 esac
 
 # A common factory image uses the smallest supported disk geometry. Grow its
-# userdata partition on larger eMMC, NVMe, UFS, or SD media before mounting it.
+# userdata partition on larger NVMe or UFS media before mounting it.
 # Legacy two-partition disks are expanded into A/B plus persistent userdata;
 # an interrupted migration is resumed on the next boot.
 ab_init_failed=0

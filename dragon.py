@@ -395,19 +395,14 @@ def cmd_normal(args):
     if not os.path.isfile(EDL_LOADER):
         sys.exit(f"Firehose loader not found: {EDL_LOADER}")
 
-    memory = os.environ.get("VAMOS_EDL_MEMORY", "Sdcc").capitalize()
-    if memory == "Emmc":
-        memory = "Sdcc"
-    if memory not in {"Ufs", "Nvme", "Sdcc"}:
-        sys.exit("VAMOS_EDL_MEMORY must be Ufs, Nvme, or Sdcc")
-    slot = os.environ.get("VAMOS_EDL_SLOT", "0")
-    if slot not in {"0", "1"}:
-        sys.exit("VAMOS_EDL_SLOT must be 0 or 1")
+    memory = os.environ.get("VAMOS_EDL_MEMORY", "Nvme").capitalize()
+    if memory not in {"Ufs", "Nvme"}:
+        sys.exit("VAMOS_EDL_MEMORY must be Ufs or Nvme")
 
     detach_qcserial()
     reset_cmd = [
         "sudo", "edl-ng", "--maxpayload=65536",
-        f"--memory={memory}", f"--slot={slot}",
+        f"--memory={memory}", "--slot=0",
         f"--loader={EDL_LOADER}", "reset", f"--delay={args.delay}",
     ]
     print(f"[normal] scheduling Firehose reset in {args.delay}s")

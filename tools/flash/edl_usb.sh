@@ -21,33 +21,29 @@ if ! [[ "$EDL_MAX_PAYLOAD" =~ ^[0-9]+$ ]] || [ "$EDL_MAX_PAYLOAD" -lt 4096 ]; th
 fi
 EDL_TRANSPORT_ARGS=(--maxpayload="$EDL_MAX_PAYLOAD")
 
-# Select the known v1 storage target unless the operator supplies a hardware
-# override. This signed programmer can ACK an unsupported backend and then hang
-# before another backend can be selected, so sequential runtime probing is not
-# safe. Qualcomm exposes eMMC and SD cards as SDCC slots 0 and 1.
+# Default to NVMe unless the operator explicitly selects a UFS device. This
+# signed programmer can ACK an unsupported backend and then hang before another
+# backend can be selected, so sequential runtime probing is not safe.
 detect_edl_storage() {
-  local memory slot label selection
+  local memory label selection
 
   if ! command -v edl-ng >/dev/null 2>&1; then
     echo "ERROR: edl-ng is required for EDL flashing" >&2
     return 1
   fi
 
-  selection="${VAMOS_EDL_MEMORY:-emmc}"
+  selection="${VAMOS_EDL_MEMORY:-nvme}"
   case "${selection,,}" in
     ufs) memory=Ufs; label=UFS ;;
     nvme) memory=Nvme; label=NVMe ;;
-    emmc|sdcc) memory=Sdcc; label=eMMC/SDCC ;;
-    *) echo "ERROR: VAMOS_EDL_MEMORY must be Ufs, Nvme, or Sdcc" >&2; return 2 ;;
+    *) echo "ERROR: VAMOS_EDL_MEMORY must be Ufs or Nvme" >&2; return 2 ;;
   esac
-  slot="${VAMOS_EDL_SLOT:-0}"
-  case "$slot" in 0|1) ;; *) echo "ERROR: VAMOS_EDL_SLOT must be 0 or 1" >&2; return 2 ;; esac
 
-  EDL_STORAGE_ARGS=(--memory="$memory" --slot="$slot")
-  if [ -n "${VAMOS_EDL_MEMORY:-}" ] || [ -n "${VAMOS_EDL_SLOT:-}" ]; then
-    EDL_STORAGE_LABEL="$label slot $slot (explicit)"
+  EDL_STORAGE_ARGS=(--memory="$memory" --slot=0)
+  if [ -n "${VAMOS_EDL_MEMORY:-}" ]; then
+    EDL_STORAGE_LABEL="$label slot 0 (explicit)"
   else
-    EDL_STORAGE_LABEL="eMMC/SDCC slot 0 (Asius v1 default)"
+    EDL_STORAGE_LABEL="NVMe slot 0 (Asius v1 default)"
   fi
   echo "== Using $EDL_STORAGE_LABEL =="
 }

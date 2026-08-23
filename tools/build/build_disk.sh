@@ -23,7 +23,7 @@ USERDATA_OPENPILOT_IMG="$BUILD_DIR/userdata-openpilot.img"
 GRUBENV_A="$BUILD_DIR/grubenv_a.factory"
 GRUBENV_B="$BUILD_DIR/grubenv_b.factory"
 
-# Build against the smallest shipping v1 storage geometry (the 64 GB eMMC).
+# Build against the minimum supported v1 NVMe/UFS geometry (64 GB).
 # The same image can be written to larger 512-byte-sector storage; flashers
 # reject media smaller than the signed image before erasing anything.
 SECTOR_SIZE=512

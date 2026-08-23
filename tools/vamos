@@ -18,7 +18,7 @@ configure_flash_storage() {
     case "$1" in
       --storage)
         if [ "$#" -lt 2 ]; then
-          echo "ERROR: --storage requires emmc, nvme, or ufs" >&2
+          echo "ERROR: --storage requires nvme or ufs" >&2
           exit 2
         fi
         storage="$2"
@@ -28,7 +28,7 @@ configure_flash_storage() {
         storage="${1#*=}"
         shift
         ;;
-      --emmc|--nvme|--ufs)
+      --nvme|--ufs)
         storage="${1#--}"
         shift
         ;;
@@ -41,11 +41,10 @@ configure_flash_storage() {
 
   [ -n "$storage" ] || return 0
   case "${storage,,}" in
-    emmc|sdcc) export VAMOS_EDL_MEMORY=Sdcc ;;
     nvme) export VAMOS_EDL_MEMORY=Nvme ;;
     ufs) export VAMOS_EDL_MEMORY=Ufs ;;
     *)
-      echo "ERROR: --storage must be emmc, nvme, or ufs" >&2
+      echo "ERROR: --storage must be nvme or ufs" >&2
       exit 2
       ;;
   esac
@@ -90,7 +89,7 @@ case "${1:-}" in
     case "$flash_target" in
       kernel)
         if [ "${#FLASH_ARGS[@]}" -ne 0 ]; then
-          echo "Usage: vamos flash kernel [--storage emmc|nvme|ufs]" >&2
+          echo "Usage: vamos flash kernel [--storage nvme|ufs]" >&2
           exit 2
         fi
         exec "$DIR/tools/flash/kernel.sh"
@@ -103,7 +102,7 @@ case "${1:-}" in
           "$DIR/tools/flash/kernel.sh"
         ;;
       *)
-        echo "Usage: vamos flash <kernel|system|all> [--storage emmc|nvme|ufs]" >&2
+        echo "Usage: vamos flash <kernel|system|all> [--storage nvme|ufs]" >&2
         exit 1
         ;;
     esac ;;
@@ -124,7 +123,7 @@ case "${1:-}" in
     echo "  build disk         Assemble initial disk image → build/dragon.img"
     echo "  build all          Do all three in order"
     echo "  flash system       Flash vamOS; accepts --storage and --without-openpilot"
-    echo "  flash kernel       Flash the ESP; accepts --storage emmc|nvme|ufs"
+    echo "  flash kernel       Flash the ESP; accepts --storage nvme|ufs"
     echo "  flash all          Flash system + kernel; accepts --storage"
     echo "  profile [diff]     Profile rootfs or diff two profiles"
     echo "  device-update HOST Install local vamOS images over SSH"

@@ -18,34 +18,33 @@ the release checklist.
 ./vamos build ota          # build ESP and package a full OTA release
 ./vamos build disk         # build the common factory disk + optional userdata
 ./vamos flash kernel --storage nvme  # replace an NVMe ESP through EDL
-./vamos flash system --storage emmc  # factory flash eMMC with openpilot
+./vamos flash system --storage nvme  # factory flash NVMe with openpilot
 ./vamos flash system --storage ufs --without-openpilot  # vamOS-only UFS
-./vamos flash all --storage emmc     # flash system and kernel
+./vamos flash all --storage nvme     # flash system and kernel
 ./vamos profile diff A B   # diff two rootfs profiles
 ./vamos device-update comma@192.168.88.20
 ```
 
-EDL flashing defaults to the Asius v1 eMMC (`Sdcc` slot 0) and requires
-512-byte logical sectors. Select the hardware target with
-`--storage emmc|nvme|ufs`; `--emmc`, `--nvme`, and `--ufs` are equivalent
-shortcuts. Low-level tooling can still use `VAMOS_EDL_MEMORY=Ufs|Nvme|Sdcc`
-and optional `VAMOS_EDL_SLOT=0|1` (SD card is `Sdcc` slot 1). The signed QCS6490 programmer hangs after configuring an
+EDL flashing defaults to Asius v1 NVMe and requires 512-byte logical sectors.
+Select the hardware target with `--storage nvme|ufs`; `--nvme` and `--ufs` are
+equivalent shortcuts. Low-level tooling can still use
+`VAMOS_EDL_MEMORY=Nvme|Ufs`. The signed QCS6490 programmer hangs after configuring an
 unsupported backend, so it cannot safely probe multiple storage types in one
 EDL session.
 CLI transfers default to conservative 64 KiB USB payloads; override that with
 `VAMOS_EDL_MAX_PAYLOAD` when benchmarking a known-stable link.
-Factory disks default to the 64 GB eMMC geometry so one signed image also fits
-larger supported media; `VAMOS_STORAGE_SECTORS` remains available for builds
-that intentionally target a different minimum capacity. On first boot, the
-backup GPT, userdata partition, and ext4 filesystem expand to use the remaining
-capacity of larger eMMC, NVMe, UFS, or SD media.
+Factory disks use a 64 GB minimum NVMe/UFS geometry so one signed image also
+fits larger supported media; `VAMOS_STORAGE_SECTORS` remains available for
+builds that intentionally target a different minimum capacity. On first boot,
+the backup GPT, userdata partition, and ext4 filesystem expand to use the
+remaining capacity of larger NVMe or UFS media.
 
 Fresh devices authorize the intentionally shared `tools/ssh/comma_setup.b64` key
 once when no SSH keys have been provisioned, allowing initial access as
-`comma@192.168.42.2` over USB NCM. Host tools use that checked-in key by
-default; set `DRAGON_SSH_KEY` or pass a tool-specific identity option to use an
-operator key. The bootstrap authorization is limited to local RFC 1918 source
-addresses and can be replaced in `/data/params/d/GithubSshKeys`.
+`comma@192.168.42.2` over USB NCM or through another reachable network path.
+Host tools use that checked-in key by default; set `DRAGON_SSH_KEY` or pass a
+tool-specific identity option to use an operator key. The bootstrap key can be
+replaced in `/data/params/d/GithubSshKeys`.
 
 A running Dragon can enter Qualcomm EDL without the hardware button:
 
