@@ -3,3 +3,7 @@
 # retains the completed state without a resident `sleep infinity` process.
 /usr/comma/init.qcom.sh
 touch /run/runit/service/init-qcom/down
+# The marker controls the next runsv start, but runsv has already selected the
+# service as up for this boot. Explicitly change its desired state so this
+# one-shot is not restarted after the finish script exits.
+sv down .

@@ -1,3 +1,9 @@
 [submodule "kernel/linux"]
 	path = kernel/linux
 	url = https://github.com/torvalds/linux.git
+[submodule "bootloader/u-boot"]
+	path = bootloader/u-boot
+	url = https://source.denx.de/u-boot/u-boot.git
+[submodule "bootloader/qtestsign"]
+	path = bootloader/qtestsign
+	url = https://github.com/msm8916-mainline/qtestsign.git

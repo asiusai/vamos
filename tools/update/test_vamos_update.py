@@ -140,10 +140,48 @@ class StateFileTest(unittest.TestCase):
 
 
 class DiskPathTest(unittest.TestCase):
-  def test_partition_names_cover_nvme_emmc_and_scsi_disks(self) -> None:
+  def test_partition_names_cover_nvme_and_ufs_scsi_disks(self) -> None:
     self.assertEqual(update.disk_partition(5, Path("/dev/nvme0n1")), Path("/dev/nvme0n1p5"))
-    self.assertEqual(update.disk_partition(5, Path("/dev/mmcblk0")), Path("/dev/mmcblk0p5"))
     self.assertEqual(update.disk_partition(5, Path("/dev/sda")), Path("/dev/sda5"))
+
+  def test_rejects_emmc_disks(self) -> None:
+    with self.assertRaises(update.UpdateError):
+      update.disk_partition(5, Path("/dev/mmcblk0"))
+
+  def test_slot_partitions_are_selected_from_system_disk(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      disk = Path(temporary) / "sda"
+      for number in range(1, 6):
+        Path(f"{disk}{number}").touch()
+      with mock.patch.object(update, "DISK", disk), \
+           mock.patch.object(update, "_supported_system_disk", return_value=True):
+        self.assertEqual(update.partition_path("a", "esp"), Path(f"{disk}1"))
+        self.assertEqual(update.partition_path("a", "system"), Path(f"{disk}2"))
+        self.assertEqual(update.partition_path("b", "esp"), Path(f"{disk}3"))
+        self.assertEqual(update.partition_path("b", "system"), Path(f"{disk}4"))
+
+  def test_layout_rejects_userdata_mounted_from_another_disk(self) -> None:
+    def fake_run(command, **kwargs):
+      if command[0] == "blockdev":
+        return subprocess.CompletedProcess(command, 0, "1\n", "")
+      if command[0] == "findmnt":
+        return subprocess.CompletedProcess(command, 0, "/dev/nvme0n1p5\n", "")
+      raise AssertionError(command)
+
+    with tempfile.TemporaryDirectory() as temporary:
+      disk = Path(temporary) / "sda"
+      for number in range(1, 6):
+        Path(f"{disk}{number}").touch()
+      with (
+        mock.patch.object(update, "DISK", disk),
+        mock.patch.object(update, "_supported_system_disk", return_value=True),
+        mock.patch.object(update, "ESP_SIZE", 1),
+        mock.patch.object(update, "SYSTEM_SIZE", 1),
+        mock.patch.object(update, "run", side_effect=fake_run),
+        mock.patch.object(update.os.path, "ismount", return_value=True),
+      ):
+        with self.assertRaisesRegex(update.UpdateError, "expected"):
+          update.verify_layout()
 
 
 class LayoutInitializationTest(unittest.TestCase):
@@ -169,12 +207,14 @@ class LayoutInitializationTest(unittest.TestCase):
       self.assertTrue(ready_marker.is_file())
 
   def test_compact_image_gpt_is_relocated_to_physical_disk_end(self) -> None:
-    table = {"lastlba": 100}
-    relocated = {"lastlba": 966}
+    table = {"firstlba": 34, "lastlba": 100}
+    relocated = {"firstlba": 34, "lastlba": 966}
 
     def fake_run(command, **kwargs):
-      if command[:2] == ["blockdev", "--getsz"]:
-        return subprocess.CompletedProcess(command, 0, "1000\n", "")
+      if command[:2] == ["blockdev", "--getsize64"]:
+        return subprocess.CompletedProcess(command, 0, "512000\n", "")
+      if command[:2] == ["blockdev", "--getss"]:
+        return subprocess.CompletedProcess(command, 0, "512\n", "")
       return subprocess.CompletedProcess(command, 0, "", "")
 
     with (
@@ -188,6 +228,23 @@ class LayoutInitializationTest(unittest.TestCase):
     ], capture=False)
     run.assert_any_call(["blockdev", "--rereadpt", str(update.DISK)], check=False, capture=False)
     layout_json.assert_called_once_with()
+
+  def test_ufs_gpt_uses_4k_entry_array_geometry(self) -> None:
+    table = {"firstlba": 6, "lastlba": 500}
+    relocated = {"firstlba": 6, "lastlba": 994}
+
+    def fake_run(command, **kwargs):
+      if command[:2] == ["blockdev", "--getsize64"]:
+        return subprocess.CompletedProcess(command, 0, str(1000 * 4096) + "\n", "")
+      if command[:2] == ["blockdev", "--getss"]:
+        return subprocess.CompletedProcess(command, 0, "4096\n", "")
+      return subprocess.CompletedProcess(command, 0, "", "")
+
+    with (
+      mock.patch.object(update, "run", side_effect=fake_run),
+      mock.patch.object(update, "_layout_json", return_value=relocated),
+    ):
+      self.assertIs(update._relocate_backup_gpt(table), relocated)
 
   def test_factory_userdata_expands_to_relocated_disk_end(self) -> None:
     table = {
@@ -207,8 +264,10 @@ class LayoutInitializationTest(unittest.TestCase):
     def fake_run(command, **kwargs):
       if command[:2] == ["sfdisk", "--dump"]:
         return subprocess.CompletedProcess(command, 0, "old table\n", "")
-      if command[:2] == ["blockdev", "--getsz"]:
-        return subprocess.CompletedProcess(command, 0, "680\n", "")
+      if command[:2] == ["blockdev", "--getsize64"]:
+        return subprocess.CompletedProcess(command, 0, str(680 * 4096) + "\n", "")
+      if command[:2] == ["blockdev", "--getss"]:
+        return subprocess.CompletedProcess(command, 0, "4096\n", "")
       return subprocess.CompletedProcess(command, 0, "", "")
 
     with tempfile.TemporaryDirectory() as temporary:
@@ -233,6 +292,18 @@ class LayoutInitializationTest(unittest.TestCase):
     self.assertIn("size=680", partition_update.kwargs["input"])
     run.assert_any_call(["resize2fs", str(partition)], capture=False)
 
+  def test_logical_sector_count_uses_device_sector_size(self) -> None:
+    for sector_size in (512, 4096):
+      with self.subTest(sector_size=sector_size):
+        size_bytes = 31221760 * sector_size
+
+        def fake_run(command, **kwargs):
+          value = size_bytes if command[1] == "--getsize64" else sector_size
+          return subprocess.CompletedProcess(command, 0, f"{value}\n", "")
+
+        with mock.patch.object(update, "run", side_effect=fake_run):
+          self.assertEqual(update._logical_sector_count(Path("/dev/test")), 31221760)
+
   def test_factory_userdata_expansion_is_noop_at_image_size(self) -> None:
     table = {
       "lastlba": 500,
@@ -249,6 +320,33 @@ class LayoutInitializationTest(unittest.TestCase):
     ):
       self.assertFalse(update.expand_userdata())
     subprocess_run.assert_not_called()
+
+  def test_interrupted_userdata_filesystem_expansion_resumes(self) -> None:
+    table = {
+      "lastlba": 500,
+      "partitions": [
+        {"name": "esp_a"}, {"name": "rootfs_a"}, {"name": "esp_b"}, {"name": "rootfs_b"},
+        {"name": "userdata", "start": 221, "size": 280},
+      ],
+    }
+    with tempfile.TemporaryDirectory() as temporary:
+      directory = Path(temporary)
+      partition = directory / "disk5"
+      backup = directory / "partition-table-before-expand.sfdisk"
+      partition.touch()
+      backup.write_text("old table\n")
+      with (
+        mock.patch.object(update.os, "geteuid", return_value=0),
+        mock.patch.object(update, "EXPAND_BACKUP", backup),
+        mock.patch.object(update, "_layout_json", return_value=table),
+        mock.patch.object(update, "_relocate_backup_gpt", return_value=table),
+        mock.patch.object(update, "disk_partition", return_value=partition),
+        mock.patch.object(update, "run") as run,
+      ):
+        self.assertTrue(update.expand_userdata())
+
+      run.assert_called_once_with(["resize2fs", str(partition)], capture=False)
+      self.assertFalse(backup.exists())
 
   def test_userdata_rsync_tolerates_files_vanishing(self) -> None:
     result = subprocess.CompletedProcess(["rsync"], 24)
@@ -488,6 +586,7 @@ class BootControlSafetyTest(unittest.TestCase):
       "phase": "armed",
       "root_a": "PARTUUID=1111-aaaa",
       "root_b": "PARTUUID=2222-bbbb",
+      "edl_request": 0,
     }
     values.update(overrides)
     return values
@@ -501,6 +600,16 @@ class BootControlSafetyTest(unittest.TestCase):
       update.encode_boot_control(self.control(root_a="/dev/nvme0n1p2"))
     with self.assertRaises(update.UpdateError):
       update.decode_boot_control(payload[:-1])
+
+  def test_accepts_single_legacy_uboot_nul_before_padding(self) -> None:
+    payload = update.encode_boot_control(self.control())
+    content_length = len(payload.rstrip(b"#"))
+    legacy = payload[:content_length] + b"\0" + payload[content_length + 1:]
+    self.assertEqual(update.decode_boot_control(legacy), self.control())
+
+    malformed = payload[:content_length] + b"\0\0" + payload[content_length + 2:]
+    with self.assertRaises(update.UpdateError):
+      update.decode_boot_control(malformed)
 
   def test_redundant_state_selection_prefers_conservative_tie(self) -> None:
     controls = [
@@ -524,6 +633,26 @@ class BootControlSafetyTest(unittest.TestCase):
     for call in write.call_args_list:
       control = update.decode_boot_control(call.args[1])
       self.assertEqual(control["phase"], "armed")
+
+  def test_edl_request_is_redundant_and_preserves_ota_state(self) -> None:
+    with (
+      mock.patch.object(update.os, "geteuid", return_value=0),
+      mock.patch.object(update, "selected_boot_control", return_value=self.control(phase="attempted")),
+      mock.patch.object(update, "_write_control_to_slot", return_value=True) as write,
+      mock.patch.object(update.os, "sync") as sync,
+      mock.patch.object(update, "run") as run,
+    ):
+      generation = update.request_edl(reboot=False)
+
+    self.assertEqual(generation, 8)
+    self.assertEqual([call.args[0] for call in write.call_args_list], ["a", "b"])
+    for call in write.call_args_list:
+      control = update.decode_boot_control(call.args[1])
+      self.assertEqual(control["phase"], "attempted")
+      self.assertEqual(control["pending"], "b")
+      self.assertEqual(control["edl_request"], 1)
+    sync.assert_called_once()
+    run.assert_not_called()
 
   def test_selector_migration_preserves_running_kernel(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:

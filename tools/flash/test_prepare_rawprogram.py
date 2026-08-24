@@ -28,6 +28,15 @@ class PrepareRawprogramTest(unittest.TestCase):
     self.assertIs(operations_for_payload(manifest, "base"), base)
     self.assertIs(operations_for_payload(manifest, "openpilot"), openpilot)
 
+  def test_accepts_ufs_sector_size(self) -> None:
+    operations = [{"operation": "erase", "offset": 0, "size": 4096}]
+    manifest = {
+      "manifest_version": 2,
+      "sector_size": 4096,
+      "base": {"operations": operations},
+    }
+    self.assertIs(operations_for_payload(manifest, "base"), operations)
+
 
 if __name__ == "__main__":
   unittest.main()

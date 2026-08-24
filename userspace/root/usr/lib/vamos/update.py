@@ -27,6 +27,12 @@ MANIFEST_VERSION = 1
 PRODUCT = "asius-v1"
 LEGACY_PRODUCTS = {"radxa-dragon-q6a"}
 
+
+def _supported_system_disk(path: Path) -> bool:
+  # Qualcomm UFS is exposed through the SCSI disk layer; NVMe uses its native
+  # block naming.  v1 deliberately has no SD/eMMC update target.
+  return re.fullmatch(r"(?:nvme\d+n\d+|sd[a-z]+)", path.name) is not None
+
 def _system_disk() -> Path:
   override = os.environ.get("VAMOS_DISK")
   if override:
@@ -56,9 +62,11 @@ def _system_disk() -> Path:
       stderr=subprocess.DEVNULL,
     ).stdout.strip().splitlines()
     if parent and parent[0]:
-      return Path("/dev") / parent[0]
+      candidate = Path("/dev") / parent[0]
+      if _supported_system_disk(candidate):
+        return candidate
 
-  for candidate in (Path("/dev/nvme0n1"), Path("/dev/mmcblk0"), Path("/dev/sda")):
+  for candidate in (Path("/dev/nvme0n1"), Path("/dev/sda")):
     if candidate.exists():
       return candidate
   return Path("/dev/nvme0n1")
@@ -97,6 +105,12 @@ BOOT_CONTROL = Path("EFI/vamos/grubenv")
 ESP_VOLUME_LABEL = {"a": "VAMOS-A", "b": "VAMOS-B"}
 ROOT_LABEL = {"a": "rootfs_a", "b": "rootfs_b"}
 ESP_LABEL = {"a": "esp_a", "b": "esp_b"}
+PARTITION_NUMBER = {
+  ("a", "esp"): 1,
+  ("a", "system"): 2,
+  ("b", "esp"): 3,
+  ("b", "system"): 4,
+}
 GRUB_ENV_SIZE = 1024
 GRUB_ENV_HEADER = (
   b"# GRUB Environment Block\n"
@@ -141,6 +155,8 @@ def run(command: Sequence[str], *, check: bool = True, capture: bool = True) -> 
 
 def disk_partition(number: int, disk: Path | None = None) -> Path:
   target = DISK if disk is None else disk
+  if not _supported_system_disk(target):
+    raise UpdateError(f"unsupported system disk {target}; vamOS v1 supports only NVMe and UFS")
   separator = "p" if target.name[-1:].isdigit() else ""
   return Path(f"{target}{separator}{number}")
 
@@ -408,17 +424,21 @@ def current_slot() -> str:
     return match.group(1)
 
   result = run(["findmnt", "-n", "-o", "SOURCE", "/"]).stdout.strip()
-  for slot, label in ROOT_LABEL.items():
-    if label in result or Path(result).resolve() == (PARTLABEL_DIR / label).resolve():
+  for slot in ("a", "b"):
+    if Path(result).resolve() == partition_path(slot, "system").resolve():
       return slot
   raise UpdateError("cannot determine active vamOS slot")
 
 
 def partition_path(slot: str, image_name: str) -> Path:
-  label = ESP_LABEL[slot] if image_name == "esp" else ROOT_LABEL[slot]
-  path = PARTLABEL_DIR / label
+  try:
+    number = PARTITION_NUMBER[(slot, image_name)]
+  except KeyError as exc:
+    raise UpdateError(f"invalid slot or image name: {slot}/{image_name}") from exc
+  path = disk_partition(number)
   if not path.exists():
-    raise UpdateError(f"required partition {label} does not exist")
+    label = ESP_LABEL[slot] if image_name == "esp" else ROOT_LABEL[slot]
+    raise UpdateError(f"required partition {label} does not exist on system disk {DISK}")
   return path
 
 
@@ -550,10 +570,10 @@ def verify_arm64_efi(path: Path) -> None:
 
 
 def encode_boot_control(values: dict[str, str | int]) -> bytes:
-  ordered = ("generation", "active", "pending", "phase", "root_a", "root_b")
+  ordered = ("generation", "active", "pending", "phase", "root_a", "root_b", "edl_request")
   lines = []
   for key in ordered:
-    value = str(values.get(key, ""))
+    value = str(values.get(key, 0 if key == "edl_request" else ""))
     if "\n" in value or "\r" in value or "=" in key:
       raise UpdateError(f"invalid boot-control value for {key}")
     lines.append(f"{key}={value}\n".encode())
@@ -568,8 +588,14 @@ def encode_boot_control(values: dict[str, str | int]) -> bytes:
 def decode_boot_control(payload: bytes) -> dict[str, str | int]:
   if len(payload) != GRUB_ENV_SIZE or not payload.startswith(GRUB_ENV_HEADER):
     raise UpdateError("invalid GRUB boot-control block")
+  body = payload[len(GRUB_ENV_HEADER):].rstrip(b"#")
+  # Early U-Boot prototypes padded the block after snprintf() without
+  # replacing its terminating NUL. Accept that one exact legacy form so a
+  # deployed device can rewrite both copies canonically on its next update.
+  if body.endswith(b"\0"):
+    body = body[:-1]
   values: dict[str, str] = {}
-  for raw_line in payload[len(GRUB_ENV_HEADER):].rstrip(b"#").splitlines():
+  for raw_line in body.splitlines():
     try:
       key, separator, value = raw_line.decode("ascii").partition("=")
     except UnicodeDecodeError as exc:
@@ -584,15 +610,18 @@ def decode_boot_control(payload: bytes) -> dict[str, str | int]:
   active = values.get("active")
   pending = values.get("pending", "")
   phase = values.get("phase")
+  edl_request = values.get("edl_request", "0")
   if generation < 0 or active not in ("a", "b") or phase not in BOOT_PHASE_RANK:
     raise UpdateError("boot-control state is invalid")
+  if edl_request not in ("0", "1"):
+    raise UpdateError("boot-control EDL request is invalid")
   if phase != "stable" and (pending not in ("a", "b") or pending == active):
     raise UpdateError("boot-control trial target is invalid")
   for slot in ("a", "b"):
     root = values.get(f"root_{slot}", "")
     if not re.fullmatch(r"PART(?:UUID|LABEL)=[A-Za-z0-9._-]+", root):
       raise UpdateError(f"boot-control root for slot {slot} is invalid")
-  return {**values, "generation": generation}
+  return {**values, "generation": generation, "edl_request": int(edl_request)}
 
 
 @contextlib.contextmanager
@@ -685,6 +714,32 @@ def set_boot_control(active: str, pending: str = "", phase: str = "stable") -> i
   return generation
 
 
+def request_edl(*, reboot: bool = True) -> int:
+  if os.geteuid() != 0:
+    raise UpdateError("software EDL requires root privileges")
+  previous = selected_boot_control()
+  if previous is None:
+    raise UpdateError("no valid redundant boot-control state found")
+
+  values: dict[str, str | int] = {
+    "generation": int(previous["generation"]) + 1,
+    "active": str(previous["active"]),
+    "pending": str(previous.get("pending", "")),
+    "phase": str(previous["phase"]),
+    "root_a": str(previous["root_a"]),
+    "root_b": str(previous["root_b"]),
+    "edl_request": 1,
+  }
+  payload = encode_boot_control(values)
+  written = [_write_control_to_slot(slot, payload) for slot in ("a", "b")]
+  if not any(written):
+    raise UpdateError("no bootable ESP accepted the software EDL request")
+  os.sync()
+  if reboot:
+    run(["reboot", "-f"], capture=False)
+  return int(values["generation"])
+
+
 def _install_selector_on_slot(slot: str, selector: bytes, control: bytes, *, device: Path | None = None) -> None:
   device = device or partition_path(slot, "esp")
   run(["fatlabel", str(device), ESP_VOLUME_LABEL[slot]], capture=False)
@@ -759,11 +814,14 @@ def verify_layout() -> None:
       raise UpdateError(f"{esp} is not exactly {ESP_SIZE} bytes")
     if block_size(system) != SYSTEM_SIZE:
       raise UpdateError(f"{system} is not exactly {SYSTEM_SIZE} bytes")
-  userdata = PARTLABEL_DIR / "userdata"
+  userdata = disk_partition(5)
   if not userdata.exists():
-    raise UpdateError("userdata partition does not exist")
+    raise UpdateError(f"userdata partition does not exist on system disk {DISK}")
   if not os.path.ismount("/data"):
     raise UpdateError("/data is not mounted from persistent userdata")
+  data_source = run(["findmnt", "-n", "-o", "SOURCE", "/data"]).stdout.strip()
+  if not data_source or Path(data_source).resolve() != userdata.resolve():
+    raise UpdateError(f"/data is mounted from {data_source or 'an unknown source'}, expected {userdata}")
 
 
 def activate_staged(*, reboot: bool = False) -> dict:
@@ -935,10 +993,16 @@ def status() -> dict:
   with contextlib.suppress(Exception):
     result["boot_control"] = selected_boot_control()
   result["layout"] = {}
-  for label in ("esp_a", "rootfs_a", "esp_b", "rootfs_b", "userdata"):
-    path = PARTLABEL_DIR / label
+  partitions = {
+    "esp_a": disk_partition(1),
+    "rootfs_a": disk_partition(2),
+    "esp_b": disk_partition(3),
+    "rootfs_b": disk_partition(4),
+    "userdata": disk_partition(5),
+  }
+  for label, path in partitions.items():
     result["layout"][label] = {
-      "path": str(path.resolve()) if path.exists() else None,
+      "path": str(path) if path.exists() else None,
       "size": block_size(path) if path.exists() else None,
     }
   return result
@@ -952,9 +1016,23 @@ def _layout_json() -> dict:
   return json.loads(output[json_start:])["partitiontable"]
 
 
+def _logical_sector_count(device: Path) -> int:
+  size_bytes = int(run(["blockdev", "--getsize64", str(device)]).stdout.strip())
+  sector_size = int(run(["blockdev", "--getss", str(device)]).stdout.strip())
+  if sector_size <= 0 or size_bytes <= 0 or size_bytes % sector_size:
+    raise UpdateError(f"invalid geometry for {device}: {size_bytes} bytes, {sector_size}-byte sectors")
+  return size_bytes // sector_size
+
+
 def _relocate_backup_gpt(table: dict) -> dict:
-  device_sectors = int(run(["blockdev", "--getsz", str(DISK)]).stdout.strip())
-  expected_last_lba = device_sectors - 34
+  device_sectors = _logical_sector_count(DISK)
+  # GPT keeps one header plus its partition-entry array at each end.  The
+  # reserved span is 34 sectors on 512-byte media and 6 sectors on 4096-byte
+  # media; firstlba describes that span without assuming a sector size.
+  first_lba = int(table["firstlba"])
+  if first_lba <= 1 or first_lba >= device_sectors:
+    raise UpdateError("GPT has an invalid first usable LBA")
+  expected_last_lba = device_sectors - first_lba
   current_last_lba = int(table["lastlba"])
   if current_last_lba > expected_last_lba:
     raise UpdateError("GPT usable range exceeds the physical disk")
@@ -992,6 +1070,18 @@ def expand_userdata() -> bool:
   if expanded_size < current_size:
     raise UpdateError("userdata partition exceeds the physical disk")
   if expanded_size == current_size:
+    # A previous boot may have committed the partition-table change but been
+    # unable to observe the new block-device size before resize2fs.  The table
+    # backup is retained until the filesystem grow completes, so use it as an
+    # idempotent resume marker.
+    if EXPAND_BACKUP.exists():
+      device = disk_partition(5)
+      if not device.exists():
+        raise UpdateError(f"{device} is missing while resuming userdata expansion")
+      log("finishing interrupted userdata filesystem expansion")
+      run(["resize2fs", str(device)], capture=False)
+      EXPAND_BACKUP.unlink(missing_ok=True)
+      return True
     return False
 
   backup = EXPAND_BACKUP
@@ -1015,7 +1105,12 @@ def expand_userdata() -> bool:
     time.sleep(0.1)
   if not device.exists():
     raise UpdateError(f"{device} did not appear after growing userdata")
-  actual_sectors = int(run(["blockdev", "--getsz", str(device)]).stdout.strip())
+  actual_sectors = 0
+  for _ in range(50):
+    actual_sectors = _logical_sector_count(device)
+    if actual_sectors == expanded_size:
+      break
+    time.sleep(0.1)
   if actual_sectors != expanded_size:
     raise UpdateError(f"kernel reports {actual_sectors} userdata sectors, expected {expanded_size}")
   run(["resize2fs", str(device)], capture=False)
@@ -1240,6 +1335,9 @@ def main(argv: Sequence[str] | None = None) -> int:
   subparsers.add_parser("verify", help="verify the currently staged images")
   subparsers.add_parser("status", help="show slots, boot-control state, and update state")
 
+  edl_parser = subparsers.add_parser("request-edl", help="request one-shot EDL through U-Boot")
+  edl_parser.add_argument("--no-reboot", action="store_true")
+
   initialize_parser = subparsers.add_parser("initialize", help="migrate a legacy Dragon disk to A/B")
   initialize_parser.add_argument("--yes", action="store_true")
   subparsers.add_parser("expand", help="grow factory userdata to fill larger storage")
@@ -1258,6 +1356,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         activate_staged(reboot=args.reboot)
       elif args.command == "verify":
         return 0 if verify_installed() else 1
+      elif args.command == "request-edl":
+        request_edl(reboot=not args.no_reboot)
       elif args.command == "initialize":
         initialize_layout(confirm=args.yes)
       elif args.command == "expand":

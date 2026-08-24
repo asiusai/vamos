@@ -17,6 +17,14 @@ touch /run/motd && chmod 666 /run/motd
 mountpoint -q /dev/pts || mount -t devpts devpts /dev/pts -o mode=0620,gid=5,nosuid,noexec
 mountpoint -q /dev/shm || mount -t tmpfs shm /dev/shm -o mode=1777,nosuid,nodev
 
+# Start the audio/compute DSP firmware directly from the already-mounted root
+# while storage recovery and the rest of stage 1 continue. The remoteproc
+# drivers first probe before their firmware is available, so otherwise this is
+# delayed until stage 2 and pushes sound/I2S readiness back by several seconds.
+if [ -f /ASIUS ] && [ -x /usr/comma/init.qcom.sh ]; then
+    /usr/comma/init.qcom.sh --remoteprocs-only >/run/vamos-remoteproc-early.log 2>&1 &
+fi
+
 # Mount /var, /tmp, /rwtmp as tmpfs early (from fstab, but we need it before services start)
 mountpoint -q /var || mount -t tmpfs tmpfs /var -o rw,nosuid,nodev,size=128M,mode=755
 mountpoint -q /tmp || mount -t tmpfs tmpfs /tmp -o rw,nosuid,nodev,size=150M,mode=1777
@@ -79,10 +87,19 @@ if [ -x /usr/bin/udevd ]; then
     /usr/bin/udevd --daemon
     echo "=> udevd started, triggering events..."
     udevadm trigger --action=add --type=subsystems
-    udevadm trigger --action=add --type=devices
     if [ -f /ASIUS ]; then
+        # Platform drivers are built in and have already probed before init.
+        # Re-emitting every platform add event concurrently can race Qualcomm
+        # firmware-backed drivers after Secure Launch and cause a PSHOLD reset.
+        # Class/bus events still apply all device permissions and symlinks.
+        udevadm trigger --action=add --type=devices --subsystem-nomatch=platform
+        # socinfo is modular and openpilot reads its serial-number interface.
+        # Trigger this one known-safe platform device deterministically.
+        udevadm trigger --action=add --type=devices \
+            --subsystem-match=platform --sysname-match=qcom-socinfo
         echo "=> Continuing while Dragon udev probes finish asynchronously"
     else
+        udevadm trigger --action=add --type=devices
         echo "=> Waiting for udev to settle (timeout 30s)..."
         udevadm settle --timeout=30 || echo "WARN: udevadm settle timed out"
         echo "=> udev settle complete"
@@ -159,8 +176,7 @@ if [ -f /ASIUS ] && [ -x /usr/bin/vamos-update ]; then
     /usr/bin/vamos-update expand ||
         echo "WARN: userdata could not be expanded to fill the physical storage"
     userdata_type="$(blkid -s TYPE -o value "$userdata_candidate" 2>/dev/null || true)"
-    if { [ ! -b "$userdata_candidate" ] && [ ! -e /dev/disk/by-partlabel/userdata ]; } ||
-       { [ -b "$userdata_candidate" ] && [ -z "$userdata_type" ]; }; then
+    if [ ! -b "$userdata_candidate" ] || [ -z "$userdata_type" ]; then
         echo "=> Initializing rollback-safe A/B storage"
         /usr/bin/vamos-update initialize --yes || ab_init_failed=1
         udevadm trigger --action=add "/sys/class/block/$storage_disk_name" 2>/dev/null || true
@@ -168,8 +184,7 @@ if [ -f /ASIUS ] && [ -x /usr/bin/vamos-update ]; then
     fi
 fi
 
-if [ "$ab_init_failed" -eq 0 ] &&
-   { [ -b "$userdata_candidate" ] || [ -e /dev/disk/by-partlabel/userdata ]; }; then
+if [ "$ab_init_failed" -eq 0 ] && [ -b "$userdata_candidate" ]; then
     # The Dragon continues general udev probing asynchronously for fast boot.
     # Settle this one partition so the updater can rely on its persistent link.
     if [ -b "$userdata_candidate" ] && [ ! -e /dev/disk/by-partlabel/userdata ]; then
@@ -178,23 +193,31 @@ if [ "$ab_init_failed" -eq 0 ] &&
             echo "WARN: userdata udev event did not settle"
     fi
     echo "=> Mounting persistent userdata"
-    userdata_dev="/dev/disk/by-partlabel/userdata"
-    [ -e "$userdata_dev" ] || userdata_dev="$userdata_candidate"
+    userdata_dev="$userdata_candidate"
     mount -o "rw,discard,noatime,nodiratime,nosuid,nodev" "$userdata_dev" /data ||
         echo "WARN: /data mount failed"
     if ! mountpoint -q /data; then
         echo "ERROR: persistent userdata exists but could not be mounted"
-    elif [ -e /data/__system_reset__ ]; then
-        echo "=> Performing requested headless factory reset"
-        if ! /usr/comma/reset --early; then
-            echo "ERROR: factory reset failed; preserving reset marker for diagnosis"
+    else
+        if [ -e /run/vamos-partition-table-before-expand.sfdisk ]; then
+            # Some UFS kernels expose the enlarged partition to mount before
+            # blockdev reports its new size to the pre-mount expansion pass.
+            # Complete that recoverable step online during the same boot.
+            /usr/bin/vamos-update expand ||
+                echo "WARN: userdata filesystem expansion remains incomplete"
         fi
-    elif [ ! -f /data/.vamos-userdata ] || [ ! -f /data/.vamos-ab-ready ]; then
-        echo "=> Resuming interrupted A/B initialization"
-        if ! /usr/bin/vamos-update initialize --yes; then
-            echo "ERROR: userdata migration failed; retaining legacy rootfs data"
-            umount /data || true
-            ab_init_failed=1
+        if [ -e /data/__system_reset__ ]; then
+            echo "=> Performing requested headless factory reset"
+            if ! /usr/comma/reset --early; then
+                echo "ERROR: factory reset failed; preserving reset marker for diagnosis"
+            fi
+        elif [ ! -f /data/.vamos-userdata ] || [ ! -f /data/.vamos-ab-ready ]; then
+            echo "=> Resuming interrupted A/B initialization"
+            if ! /usr/bin/vamos-update initialize --yes; then
+                echo "ERROR: userdata migration failed; retaining legacy rootfs data"
+                umount /data || true
+                ab_init_failed=1
+            fi
         fi
     fi
 elif [ -f /ASIUS ]; then

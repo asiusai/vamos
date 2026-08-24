@@ -14,11 +14,30 @@ case "${1:-}" in
   *) echo "Usage: ./vamos flash system [--with-openpilot|--without-openpilot]" >&2; exit 2 ;;
 esac
 
-DISK_IMG="$DIR/build/dragon.img"
-USERDATA_IMG="$DIR/build/userdata.img"
-OPENPILOT_IMG="$DIR/build/userdata-openpilot.img"
-LAYOUT="$DIR/build/factory-layout.json"
-MANIFEST="$DIR/build/flash/flash.json"
+storage="${VAMOS_EDL_MEMORY:-Nvme}"
+case "${storage,,}" in
+  nvme)
+    DISK_IMG="$DIR/build/dragon.img"
+    USERDATA_IMG="$DIR/build/userdata.img"
+    OPENPILOT_IMG="$DIR/build/userdata-openpilot.img"
+    LAYOUT="$DIR/build/factory-layout.json"
+    MANIFEST_DIR="$DIR/build/flash"
+    RAWPROGRAM_DIR="$DIR/build/manual-flash"
+    ;;
+  ufs)
+    DISK_IMG="$DIR/build/dragon-ufs.img"
+    USERDATA_IMG="$DIR/build/userdata-ufs.img"
+    OPENPILOT_IMG="$DIR/build/userdata-openpilot-ufs.img"
+    LAYOUT="$DIR/build/factory-layout-ufs.json"
+    MANIFEST_DIR="$DIR/build/flash-ufs"
+    RAWPROGRAM_DIR="$DIR/build/manual-flash-ufs"
+    ;;
+  *)
+    echo "ERROR: VAMOS_EDL_MEMORY must be Ufs or Nvme" >&2
+    exit 2
+    ;;
+esac
+MANIFEST="$MANIFEST_DIR/flash.json"
 LOADER="$DIR/firmware-dragon/flat_build/spinor/dragon-q6a/prog_firehose_ddr.elf"
 
 for input in "$DISK_IMG" "$USERDATA_IMG" "$OPENPILOT_IMG" "$LAYOUT" "$LOADER"; do
@@ -33,7 +52,12 @@ if [ ! -f "$MANIFEST" ] || [ "$DISK_IMG" -nt "$MANIFEST" ] || \
    [ "$USERDATA_IMG" -nt "$MANIFEST" ] || [ "$OPENPILOT_IMG" -nt "$MANIFEST" ] || \
    [ "$LAYOUT" -nt "$MANIFEST" ]; then
   echo "== Packaging local factory operations =="
-  python3 "$DIR/tools/build/package_flash.py"
+  python3 "$DIR/tools/build/package_flash.py" \
+    --image "$DISK_IMG" \
+    --layout "$LAYOUT" \
+    --userdata "$USERDATA_IMG" \
+    --openpilot-userdata "$OPENPILOT_IMG" \
+    --output-dir "$MANIFEST_DIR"
 fi
 
 if ! lsusb -d 05c6:9008 >/dev/null 2>&1; then
@@ -45,7 +69,11 @@ detach_qcserial
 
 detect_edl_storage "$LOADER"
 EDL=(sudo edl-ng "${EDL_TRANSPORT_ARGS[@]}" "${EDL_STORAGE_ARGS[@]}" --loader="$LOADER")
-RAWPROGRAM_DIR="$DIR/build/manual-flash"
+FLASH_SECTOR_SIZE="$(jq -r '.sector_size' "$MANIFEST")"
+case "$FLASH_SECTOR_SIZE" in
+  512|4096) ;;
+  *) echo "ERROR: unsupported flash sector size: $FLASH_SECTOR_SIZE" >&2; exit 1 ;;
+esac
 
 flash_payload() {
   local payload="$1"
@@ -61,7 +89,8 @@ flash_payload() {
   while IFS=$'\t' read -r offset size; do
     [ -n "$offset" ] || continue
     echo "== Erasing $payload range at byte $offset ($size bytes) =="
-    "${EDL[@]}" erase-sector "$((offset / 512))" "$((size / 512))"
+    "${EDL[@]}" erase-sector \
+      "$((offset / FLASH_SECTOR_SIZE))" "$((size / FLASH_SECTOR_SIZE))"
   done < <(jq -r "$query" "$MANIFEST")
 
   if grep -q '<program ' "$output/rawprogram0.xml"; then

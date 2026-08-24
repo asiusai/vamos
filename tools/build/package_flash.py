@@ -20,7 +20,8 @@ MANIFEST_VERSION = 2
 # Keep each browser allocation modest while avoiding thousands of individual
 # HTTP requests and Firehose program commands for a source-complete payload.
 CHUNK_SIZE = 16 * 1024 * 1024
-SECTOR_SIZE = 512
+DEFAULT_SECTOR_SIZE = 512
+SUPPORTED_SECTOR_SIZES = (512, 4096)
 PROGRAMMER = ROOT / "firmware-dragon/flat_build/spinor/dragon-q6a/prog_firehose_ddr.elf"
 
 def sha256_bytes(data: bytes) -> str:
@@ -85,13 +86,19 @@ def read_chunk(source: BinaryIO) -> bytes:
   return source.read(CHUNK_SIZE)
 
 
-def package_base_image(source: Path, base_url: str) -> tuple[list[dict], int]:
+def package_base_image(
+  source: Path,
+  base_url: str,
+  sector_size: int = DEFAULT_SECTOR_SIZE,
+) -> tuple[list[dict], int]:
   """Erase the target, then package only non-zero ranges from the common disk."""
   if not source.is_file():
     raise FileNotFoundError(f"missing {source}; run ./vamos build disk first")
   image_size = source.stat().st_size
-  if image_size == 0 or image_size % SECTOR_SIZE:
-    raise ValueError(f"factory image size must be a non-zero multiple of {SECTOR_SIZE}")
+  if sector_size not in SUPPORTED_SECTOR_SIZES:
+    raise ValueError(f"unsupported factory sector size: {sector_size}")
+  if image_size == 0 or image_size % sector_size:
+    raise ValueError(f"factory image size must be a non-zero multiple of {sector_size}")
 
   operations: list[dict] = [{"offset": 0, "operation": "erase", "size": image_size}]
   offset = 0
@@ -109,6 +116,7 @@ def package_delta(
   updated: Path,
   target_offset: int,
   base_url: str,
+  sector_size: int = DEFAULT_SECTOR_SIZE,
 ) -> tuple[list[dict], int]:
   """Package changed ranges needed to turn baseline into updated exactly."""
   for image in (baseline, updated):
@@ -117,7 +125,9 @@ def package_delta(
   image_size = baseline.stat().st_size
   if updated.stat().st_size != image_size:
     raise ValueError("optional userdata images have different sizes")
-  if image_size == 0 or image_size % SECTOR_SIZE or target_offset % SECTOR_SIZE:
+  if sector_size not in SUPPORTED_SECTOR_SIZES:
+    raise ValueError(f"unsupported factory sector size: {sector_size}")
+  if image_size == 0 or image_size % sector_size or target_offset % sector_size:
     raise ValueError("optional userdata payload is not sector-aligned")
 
   operations: list[dict] = []
@@ -145,8 +155,8 @@ def load_layout(path: Path) -> dict:
     layout = json.loads(path.read_text(encoding="utf-8"))
   except (OSError, json.JSONDecodeError) as error:
     raise ValueError(f"invalid factory layout {path}: {error}") from error
-  if layout.get("sector_size") != SECTOR_SIZE:
-    raise ValueError("factory layout has the wrong sector size")
+  if layout.get("sector_size") not in SUPPORTED_SECTOR_SIZES:
+    raise ValueError("factory layout has an unsupported sector size")
   userdata = layout.get("partitions", {}).get("userdata", {})
   if not isinstance(userdata.get("start_sector"), int) or userdata["start_sector"] <= 0:
     raise ValueError("factory layout has no userdata start sector")
@@ -168,6 +178,7 @@ def prune_unreferenced_objects(manifest: dict) -> None:
 
 
 def main() -> None:
+  global OUTPUT_DIR
   parser = argparse.ArgumentParser(description="Package a signed-manifest-ready Asius v1 browser flash image")
   parser.add_argument(
     "--base-url",
@@ -178,21 +189,25 @@ def main() -> None:
   parser.add_argument("--userdata", type=Path, default=BUILD_DIR / "userdata.img")
   parser.add_argument("--openpilot-userdata", type=Path, default=BUILD_DIR / "userdata-openpilot.img")
   parser.add_argument("--programmer", type=Path, default=PROGRAMMER)
+  parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
   parser.add_argument(
     "--version",
     default=(ROOT / "userspace/root/VERSION").read_text(encoding="utf-8").strip(),
   )
   args = parser.parse_args()
 
+  OUTPUT_DIR = args.output_dir
   OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
   layout = load_layout(args.layout)
-  operations, image_size = package_base_image(args.image, args.base_url)
-  userdata_offset = layout["partitions"]["userdata"]["start_sector"] * SECTOR_SIZE
+  sector_size = layout["sector_size"]
+  operations, image_size = package_base_image(args.image, args.base_url, sector_size)
+  userdata_offset = layout["partitions"]["userdata"]["start_sector"] * sector_size
   openpilot_operations, userdata_size = package_delta(
     args.userdata,
     args.openpilot_userdata,
     userdata_offset,
     args.base_url,
+    sector_size,
   )
   manifest = {
     "base": {
@@ -212,7 +227,7 @@ def main() -> None:
     },
     "product": PRODUCT,
     "programmer": package_programmer(args.programmer, args.base_url),
-    "sector_size": SECTOR_SIZE,
+    "sector_size": sector_size,
     "version": args.version,
   }
   manifest_path = OUTPUT_DIR / "flash.json"

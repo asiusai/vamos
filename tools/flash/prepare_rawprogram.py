@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 
-SECTOR_SIZE = 512
+SUPPORTED_SECTOR_SIZES = (512, 4096)
 
 
 def sha256(data: bytes) -> str:
@@ -21,7 +21,7 @@ def sha256(data: bytes) -> str:
 
 
 def operations_for_payload(manifest: dict, payload: str) -> list[dict]:
-  if manifest.get("sector_size") != SECTOR_SIZE:
+  if manifest.get("sector_size") not in SUPPORTED_SECTOR_SIZES:
     raise ValueError("unsupported local flash sector size")
   if manifest.get("manifest_version") == 1:
     if payload != "base":
@@ -51,8 +51,9 @@ def main() -> None:
     shutil.rmtree(args.output)
   args.output.mkdir(parents=True)
   objects = args.manifest.parent
+  sector_size = manifest["sector_size"]
   root = ElementTree.Element("data", {
-    "SECTOR_SIZE_IN_BYTES": str(SECTOR_SIZE),
+    "SECTOR_SIZE_IN_BYTES": str(sector_size),
     "physical_partition_number": "0",
   })
 
@@ -71,12 +72,12 @@ def main() -> None:
     filename = f"chunk-{program_index:05d}.img"
     (args.output / filename).write_bytes(raw)
     ElementTree.SubElement(root, "program", {
-      "SECTOR_SIZE_IN_BYTES": str(SECTOR_SIZE),
+      "SECTOR_SIZE_IN_BYTES": str(sector_size),
       "filename": filename,
       "label": f"{args.payload}-{program_index}",
-      "num_partition_sectors": str(len(raw) // SECTOR_SIZE),
+      "num_partition_sectors": str(len(raw) // sector_size),
       "physical_partition_number": "0",
-      "start_sector": str(operation["offset"] // SECTOR_SIZE),
+      "start_sector": str(operation["offset"] // sector_size),
     })
     program_index += 1
 

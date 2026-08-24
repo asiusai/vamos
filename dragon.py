@@ -21,9 +21,12 @@ Usage:
   dragon.py uart exec 'cmd' [SECONDS] Send cmd, collect output
   dragon.py uart login PASSWORD       Root login sequence
   dragon.py uart wake                 Poke with newline, print response
+  dragon.py boottrace [--seconds 30]  Cold-boot UART milestone trace
 """
 import argparse
 import codecs
+import datetime
+import json
 import os
 import re
 import shlex
@@ -126,28 +129,45 @@ def find_ncm_interface():
             continue
     return None
 
-def ensure_ncm():
-    iface, host_ip = check_ncm()
-    if host_ip:
-        return
-    if not iface:
+def ensure_ncm(timeout=10):
+    """Configure the Dragon's re-enumerating USB gadget link."""
+    deadline = time.monotonic() + timeout
+    last_iface = None
+    saw_iface = False
+
+    while time.monotonic() < deadline:
+        iface, host_ip = check_ncm()
+        if host_ip:
+            return
+        if not iface:
+            time.sleep(0.25)
+            continue
+
+        saw_iface = True
+        if iface != last_iface:
+            print(f"[ncm] bringing up {iface}")
+            last_iface = iface
+
+        # The gadget can disappear and return with another MAC/interface name
+        # while early userspace configures it.  Rediscover it on every retry and
+        # never let a stale interface name abort software EDL.
+        link = subprocess.run(
+            ["sudo", "ip", "link", "set", iface, "up"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if link.returncode == 0:
+            subprocess.run(
+                ["sudo", "ip", "address", "replace", NCM_HOST_IP,
+                 "dev", iface],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        time.sleep(0.25)
+
+    if not saw_iface:
         sys.exit("No Dragon NCM interface found — is the USB cable connected?")
-    print(f"[ncm] bringing up {iface}")
-    subprocess.run(["sudo", "ip", "link", "set", iface, "up"], check=True)
-    if shutil.which("dhcpcd"):
-        subprocess.run(["sudo", "dhcpcd", "-1", iface],
-                       capture_output=True, text=True)
-    _, host_ip = check_ncm()
-    if not host_ip:
-        # The gadget MAC changes across boots, so network managers do not always
-        # reapply the bench connection. The Dragon is fixed at .2; configure the
-        # host side directly instead of depending on a MAC-specific profile.
-        subprocess.run(["sudo", "ip", "address", "replace",
-                        NCM_HOST_IP, "dev", iface], check=True)
-        time.sleep(1)
-        _, host_ip = check_ncm()
-    if not host_ip:
-        sys.exit(f"[ncm] failed to configure {iface}")
+    sys.exit("[ncm] Dragon USB gadget kept re-enumerating; try again")
 
 # -- USB development dock --
 
@@ -158,6 +178,19 @@ def dock_hub(action, location, check=True):
     if action:
         cmd.extend(["-a", action])
     return subprocess.run(cmd, check=check)
+
+def dock_power_available():
+    if not shutil.which("uhubctl"):
+        return False
+    for location in (DOCK_USB2_HUB, DOCK_USB3_HUB):
+        result = subprocess.run(
+            ["sudo", "uhubctl", "-f", "-e", "-l", location],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if result.returncode:
+            return False
+    return True
 
 def dock_power(enabled):
     action = "on" if enabled else "off"
@@ -297,33 +330,130 @@ def wait_for_usb(vid_pid, timeout=30):
         time.sleep(0.5)
     return False
 
+def request_uboot_edl(timeout=10):
+    """Reboot, interrupt zero-delay autoboot, and run U-Boot's EDL command."""
+    try:
+        import serial
+
+        iface, _host_ip = check_ncm()
+        if iface:
+            ensure_ncm()
+            subprocess.Popen(
+                ["ssh", *SSH_OPTS, "-o", "BatchMode=yes",
+                 "-o", "ConnectTimeout=4", f"comma@{NCM_IP}",
+                 "sudo reboot -f"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        # U-Boot has a zero-delay autoboot check.  A long blocking read makes
+        # the nominal 5 ms poke interval miss that single tstc() window.
+        with serial.Serial(PORT, BAUD, timeout=0.001) as uart:
+            uart.reset_input_buffer()
+            deadline = time.monotonic() + timeout
+            response = bytearray()
+            next_poke = 0.0
+            while time.monotonic() < deadline:
+                now = time.monotonic()
+                if now >= next_poke:
+                    # Queue a byte before U-Boot's zero-delay tstc() check.
+                    uart.write(b"\r")
+                    uart.flush()
+                    next_poke = now + 0.005
+                response.extend(uart.read(4096))
+                if len(response) > 16384:
+                    del response[:-16384]
+                # Require U-Boot's prompt at the start of a console line.  Kernel
+                # logs and shell output can legitimately contain the two-byte
+                # string "=>" and must not make us send the command into Linux.
+                if re.search(rb"(?:^|[\r\n])=>[ \t]*$", response):
+                    print("[edl] requesting Qualcomm SCM EDL reset from U-Boot")
+                    write_uart_command(uart, "edl")
+                    return True
+            if os.environ.get("VAMOS_EDL_DEBUG"):
+                print(strip_ansi(response.decode("utf-8", "replace")))
+    except (ImportError, OSError):
+        pass
+    return False
+
+def request_legacy_system_edl():
+    """Stage the current updater so old systems can request U-Boot EDL safely."""
+    updater = os.path.join(SCRIPT_DIR, "userspace", "root", "usr", "lib",
+                           "vamos", "update.py")
+    if not os.path.isfile(updater):
+        return False
+    remote = "/tmp/vamos-request-edl.py"
+    copied = subprocess.run(
+        ["scp", *SSH_OPTS, updater, f"comma@{NCM_IP}:{remote}"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if copied.returncode:
+        return False
+    subprocess.Popen(
+        ["ssh", *SSH_OPTS, "-o", "BatchMode=yes",
+         "-o", "ConnectTimeout=4", f"comma@{NCM_IP}",
+         f"sudo python3 {remote} request-edl"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return True
+
 def cmd_edl(args):
     if check_edl():
         print("[edl] Dragon is already in EDL mode (05c6:9008)")
         return 0
 
     iface, _host_ip = check_ncm()
-    if iface and not args.bios and not args.no_cycle:
+    if iface and not args.bios:
         ensure_ncm()
-        print("[edl] requesting firmware EDL reset over NCM")
-        try:
-            subprocess.run(
-                ["ssh", *SSH_OPTS, "-o", "BatchMode=yes",
-                 "-o", "ConnectTimeout=4", f"comma@{NCM_IP}",
-                 "sudo reboot-edl"],
-                capture_output=True, text=True, timeout=6,
-            )
-        except subprocess.TimeoutExpired:
-            # A successful reboot tears down NCM before SSH can close cleanly.
-            pass
+        # Legacy vamOS images implement reboot-edl with PSCI reset mode "edl",
+        # which enters Qualcomm's 05c6:900e ramdump transport on this platform.
+        # Only use the command after proving the installed updater supports the
+        # redundant ESP request consumed by U-Boot.
+        capability = subprocess.run(
+            ["ssh", *SSH_OPTS, "-o", "BatchMode=yes",
+             "-o", "ConnectTimeout=4", f"comma@{NCM_IP}",
+             "vamos-update request-edl --help"],
+            capture_output=True, text=True, timeout=6,
+        )
+        if capability.returncode == 0:
+            print("[edl] requesting one-shot U-Boot EDL reset over NCM")
+            try:
+                subprocess.run(
+                    ["ssh", *SSH_OPTS, "-o", "BatchMode=yes",
+                     "-o", "ConnectTimeout=4", f"comma@{NCM_IP}",
+                     "sudo reboot-edl"],
+                    capture_output=True, text=True, timeout=6,
+                )
+            except subprocess.TimeoutExpired:
+                # A successful reboot tears down NCM before SSH can close cleanly.
+                pass
+            if wait_for_edl_usb(timeout=30):
+                print("[edl] Dragon is in EDL mode (05c6:9008)")
+                return 0
+            print("[edl] Linux EDL reset did not enumerate; trying U-Boot",
+                  file=sys.stderr)
+        else:
+            print("[edl] legacy system lacks safe one-shot EDL; staging compatibility helper")
+            if request_legacy_system_edl():
+                if wait_for_edl_usb(timeout=30):
+                    print("[edl] Dragon is in EDL mode (05c6:9008)")
+                    return 0
+                print("[edl] compatibility EDL reset did not enumerate; trying U-Boot",
+                      file=sys.stderr)
+
+    if not args.bios and request_uboot_edl():
         if wait_for_edl_usb(timeout=30):
             print("[edl] Dragon is in EDL mode (05c6:9008)")
             return 0
-        if args.software_only:
-            print("[edl] software EDL reset did not enumerate", file=sys.stderr)
-            return 2
-        print("[edl] software reset failed; falling back to BIOS navigation",
+        print("[edl] U-Boot EDL reset did not enumerate", file=sys.stderr)
+
+    if args.software_only:
+        print("[edl] no working Linux/NCM or U-Boot software EDL path",
               file=sys.stderr)
+        return 2
 
     return cmd_edl_bios(args)
 
@@ -408,15 +538,20 @@ def cmd_normal(args):
     print(f"[normal] scheduling Firehose reset in {args.delay}s")
     subprocess.run(reset_cmd, check=True)
 
-    dock_off = True
-    try:
-        print("[normal] dock VBUS off")
-        dock_power(False)
+    if dock_power_available():
+        dock_off = False
+        try:
+            print("[normal] dock VBUS off")
+            dock_power(False)
+            dock_off = True
+            time.sleep(args.delay + 2)
+        finally:
+            if dock_off:
+                print("[normal] dock VBUS on")
+                dock_power(True)
+    else:
+        print("[normal] configured dock hubs are unavailable; using Firehose reset only")
         time.sleep(args.delay + 2)
-    finally:
-        if dock_off:
-            print("[normal] dock VBUS on")
-            dock_power(True)
 
     if not wait_for_usb("1d6b:0103", timeout=30):
         if check_edl():
@@ -459,6 +594,14 @@ def drain(s, seconds, echo=True):
     if not echo:
         return strip_ansi(bytes(buf).decode('utf-8', 'replace'))
 
+
+def write_uart_command(s, command):
+    """Pace console input so the early U-Boot GENI FIFO cannot drop bytes."""
+    for byte in command.encode('utf-8') + b'\r\n':
+        s.write(bytes((byte,)))
+        s.flush()
+        time.sleep(0.002)
+
 def cmd_uart(args):
     sub = args.uart_cmd
     if sub == "read":
@@ -484,8 +627,7 @@ def cmd_uart(args):
         secs = float(args.uart_args[1]) if len(args.uart_args) > 1 else 3.0
         with open_port() as s:
             drain(s, 0.3, echo=False)
-            s.write(command.encode('utf-8') + b'\r\n')
-            s.flush()
+            write_uart_command(s, command)
             drain(s, secs)
     elif sub == "login":
         if not args.uart_args:
@@ -521,6 +663,81 @@ def cmd_uart(args):
     else:
         sys.exit(f"uart: unknown subcommand '{sub}'")
 
+# -- boot timing --
+
+BOOT_MARKERS = (
+    ("sbl_start", re.compile(r"SBL1, Start")),
+    ("appsbl_loaded", re.compile(r"APPSBL Image Loaded")),
+    ("uefi_start", re.compile(r"UEFI Start")),
+    ("uboot_start", re.compile(r"U-Boot 20")),
+    ("kernel_handoff", re.compile(r"Starting kernel|Booting Linux")),
+    ("linux_start", re.compile(r"Linux version")),
+    ("pid1", re.compile(r"Run /sbin/init|runit.*pid 1", re.I)),
+    ("runit_stage1", re.compile(r"runit.*stage 1|stage 1", re.I)),
+    ("login", re.compile(r"login:")),
+)
+
+def cmd_boottrace(args):
+    if args.seconds <= 0:
+        sys.exit("boottrace --seconds must be positive")
+
+    with open_port() as serial_port:
+        drain(serial_port, 0.3, echo=False)
+        if not args.no_cycle:
+            print("[boottrace] power off", flush=True)
+            power(0)
+            time.sleep(OFF_SETTLE_SECS)
+            serial_port.reset_input_buffer()
+            print("[boottrace] power on", flush=True)
+            started = time.monotonic()
+            power(255)
+        else:
+            print("[boottrace] capturing without a power cycle", flush=True)
+            started = time.monotonic()
+
+        deadline = started + args.seconds
+        raw = bytearray()
+        pending = bytearray()
+        milestones = {}
+        while time.monotonic() < deadline:
+            data = serial_port.read(4096)
+            if data:
+                raw.extend(data)
+                pending.extend(data)
+                while b"\n" in pending:
+                    encoded, _, pending = pending.partition(b"\n")
+                    line = strip_ansi(encoded.decode("utf-8", "replace"))
+                    print(line, flush=True)
+                    elapsed = time.monotonic() - started
+                    for name, pattern in BOOT_MARKERS:
+                        if name not in milestones and pattern.search(line):
+                            milestones[name] = round(elapsed, 3)
+            if "ncm_usb" not in milestones and find_ncm_interface():
+                milestones["ncm_usb"] = round(time.monotonic() - started, 3)
+
+        if pending:
+            print(strip_ansi(pending.decode("utf-8", "replace")), flush=True)
+
+    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    output = args.output or os.path.join(SCRIPT_DIR, "build", "boot-traces", timestamp)
+    output = os.path.abspath(output)
+    os.makedirs(os.path.dirname(output), exist_ok=True)
+    uart_path = output + ".uart.log"
+    json_path = output + ".json"
+    with open(uart_path, "wb") as log_file:
+        log_file.write(raw)
+    result = {
+        "captured_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "duration_seconds": args.seconds,
+        "milestones_seconds_from_power_on": milestones,
+        "uart_log": uart_path,
+    }
+    with open(json_path, "w", encoding="utf-8") as result_file:
+        json.dump(result, result_file, indent=2, sort_keys=True)
+        result_file.write("\n")
+    print(json.dumps(result, indent=2, sort_keys=True))
+    print(f"[boottrace] wrote {json_path}")
+
 # -- health --
 
 def cmd_health(args):
@@ -548,6 +765,8 @@ def cmd_health(args):
     local_dir = "/tmp/dragon_health_local"
     os.makedirs(local_dir, exist_ok=True)
     print(f"\n[health] pulling snapshots to {local_dir}", flush=True)
+    if not args.target:
+        ensure_ncm()
     subprocess.run(["scp", *ssh_opts,
                     f"{target}:/tmp/dragon_health/*.jpg", local_dir])
     return ret
@@ -587,6 +806,14 @@ def main():
     uart_p.add_argument("uart_cmd", choices=["read", "send", "exec", "login", "wake"])
     uart_p.add_argument("uart_args", nargs="*")
 
+    trace_p = sub.add_parser("boottrace", help="Measure a cold boot over UART")
+    trace_p.add_argument("--seconds", type=float, default=30.0,
+                         help="capture duration after power-on (default 30)")
+    trace_p.add_argument("--output",
+                         help="output path prefix (default build/boot-traces/TIMESTAMP)")
+    trace_p.add_argument("--no-cycle", action="store_true",
+                         help="capture UART without changing Dragon power")
+
     health_p = sub.add_parser("health", help="Run system health check on Dragon")
     health_p.add_argument("--target", help="SSH target, e.g. comma@asius1. Defaults to USB NCM.")
     health_p.add_argument("--identity", help="SSH identity file for health target.")
@@ -601,7 +828,7 @@ def main():
     dispatch = {"on": cmd_on, "off": cmd_off, "reboot": cmd_reboot,
                 "status": cmd_status, "dock": cmd_dock, "ssh": cmd_ssh,
                 "edl": cmd_edl, "normal": cmd_normal, "uart": cmd_uart,
-                "health": cmd_health}
+                "boottrace": cmd_boottrace, "health": cmd_health}
     ret = dispatch[args.cmd](args)
     sys.exit(ret or 0)
 

@@ -17,6 +17,7 @@ the release checklist.
 ./vamos build esp          # build the 256 MiB boot ESP
 ./vamos build ota          # build ESP and package a full OTA release
 ./vamos build disk         # build the common factory disk + optional userdata
+./vamos build disk --storage ufs  # build the 4 KiB-sector UFS factory disk
 ./vamos flash kernel --storage nvme  # replace an NVMe ESP through EDL
 ./vamos flash system --storage nvme  # factory flash NVMe with openpilot
 ./vamos flash system --storage ufs --without-openpilot  # vamOS-only UFS
@@ -25,7 +26,8 @@ the release checklist.
 ./vamos device-update comma@192.168.88.20
 ```
 
-EDL flashing defaults to Asius v1 NVMe and requires 512-byte logical sectors.
+EDL flashing defaults to Asius v1 NVMe. NVMe factory images use 512-byte
+logical sectors; supported removable UFS modules use 4096-byte logical sectors.
 Select the hardware target with `--storage nvme|ufs`; `--nvme` and `--ufs` are
 equivalent shortcuts. Low-level tooling can still use
 `VAMOS_EDL_MEMORY=Nvme|Ufs`. The signed QCS6490 programmer hangs after configuring an
@@ -33,9 +35,9 @@ unsupported backend, so it cannot safely probe multiple storage types in one
 EDL session.
 CLI transfers default to conservative 64 KiB USB payloads; override that with
 `VAMOS_EDL_MAX_PAYLOAD` when benchmarking a known-stable link.
-Factory disks use a 64 GB minimum NVMe/UFS geometry so one signed image also
-fits larger supported media; `VAMOS_STORAGE_SECTORS` remains available for
-builds that intentionally target a different minimum capacity. On first boot,
+Factory disks use a 64 GB minimum geometry and target-specific GPTs;
+`VAMOS_STORAGE_BYTES` remains available for builds that intentionally target a
+different minimum capacity. On first boot,
 the backup GPT, userdata partition, and ext4 filesystem expand to use the
 remaining capacity of larger NVMe or UFS media.
 
@@ -52,16 +54,18 @@ A running Dragon can enter Qualcomm EDL without the hardware button:
 sudo reboot-edl
 ```
 
-The command syncs buffered writes and requests the QCS6490 firmware's `edl`
-PSCI reset mode. A Firehose reset returns to normal boot only when the EDL input
-is no longer asserted; release the recovery button or USB-VBUS pull-down first.
+The command writes a one-shot request to both redundant A/B boot-control
+records, syncs them, and reboots. U-Boot consumes and clears the request before
+loading Linux, then invokes the stock Qualcomm EDL secure-call sequence. This
+keeps the recovery request power-loss safe, preserves any OTA trial state, and
+does not rely on secure calls that the Dragon firmware rejects from Linux EL1.
 
 On the Dragon development bench, `dragon.py` automates the complete transition
 through a USB hub with real ganged VBUS switching:
 
 ```bash
 ./dragon.py edl                 # request reboot-edl over NCM
-./dragon.py normal              # delayed Firehose reset with dock VBUS off
+./dragon.py normal              # Firehose reset; cycle dock VBUS when available
 ./dragon.py dock status
 ./dragon.py dock on|off|cycle
 ```

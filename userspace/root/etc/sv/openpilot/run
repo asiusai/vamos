@@ -6,7 +6,7 @@ exec 2>&1
 # better when the backlight class exists before openpilot starts.
 if [ -f /ASIUS ]; then
   for i in $(seq 1 60); do
-    [ -e /dev/dri/card0 ] && break
+    [ -e /dev/dri/card0 ] && [ -r /sys/devices/soc0/soc_id ] && break
     sleep 0.5
   done
 

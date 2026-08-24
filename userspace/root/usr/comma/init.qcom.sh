@@ -47,6 +47,10 @@ start_remoteproc() {
 start_remoteproc adsp || true
 start_remoteproc cdsp || true
 
+if [ "${1:-}" = "--remoteprocs-only" ]; then
+  exit 0
+fi
+
 # don't restart whole SoC on subsystem crash
 for i in {0..7}; do
   echo "related" | sudo tee /sys/bus/msm_subsys/devices/subsys${i}/restart_level

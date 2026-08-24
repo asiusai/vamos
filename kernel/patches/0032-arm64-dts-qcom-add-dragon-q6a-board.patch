@@ -123,13 +123,19 @@ new file mode 100644
 index 0000000..1e793de
 --- /dev/null
 +++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
-@@ -0,0 +1,1546 @@
+@@ -0,0 +1,1565 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +/*
 + * Copyright (c) 2025 Radxa Computer (Shenzhen) Co., Ltd.
 + */
 +
 +/dts-v1/;
++/memreserve/ 0x80000000 0x00c00000;
++/memreserve/ 0x80c00000 0x02310000;
++/memreserve/ 0x84300000 0x1bd00000;
++/memreserve/ 0xa0800000 0x00300000;
++/memreserve/ 0xbb600000 0x04a00000;
++
 +
 +/* PM7250B is configured to use SID8/9 */
 +#define PM7250B_SID 8
@@ -149,6 +155,7 @@ index 0000000..1e793de
 +
 +/delete-node/ &adsp_mem;
 +/delete-node/ &cdsp_mem;
++/delete-node/ &gpu_zap_mem;
 +/delete-node/ &ipa_fw_mem;
 +/delete-node/ &mpss_mem;
 +/delete-node/ &remoteproc_mpss;
@@ -165,6 +172,10 @@ index 0000000..1e793de
 +	model = "asius v1";
 +	compatible = "radxa,dragon-q6a", "qcom,qcm6490";
 +	chassis-type = "embedded";
++	memory@80000000 {
++		device_type = "memory";
++		reg = <0x0 0x80000000 0x2 0x00000000>;
++	};
 +
 +	aliases {
 +		mmc0 = &sdhc_1;
@@ -281,43 +292,38 @@ index 0000000..1e793de
 +	};
 +
 +	reserved-memory {
-+		xbl_mem: xbl@80700000 {
-+			reg = <0x0 0x80700000 0x0 0x100000>;
++		xbl_mem: xbl@80600000 {
++			reg = <0x0 0x80600000 0x0 0x200000>;
 +			no-map;
 +		};
 +
-+		cdsp_secure_heap_mem: cdsp-secure-heap@81800000 {
-+			reg = <0x0 0x81800000 0x0 0x1e00000>;
++		lpass_ml_mem: lpass-ml@81800000 {
++			reg = <0x0 0x81800000 0x0 0xf00000>;
 +			no-map;
 +		};
 +
-+		camera_mem: camera@84300000 {
-+			reg = <0x0 0x84300000 0x0 0x500000>;
++		cdsp_secure_heap_mem: cdsp-secure-heap@82700000 {
++			reg = <0x0 0x82700000 0x0 0x10000>;
 +			no-map;
 +		};
 +
-+		adsp_mem: adsp@84800000 {
-+			reg = <0x0 0x84800000 0x0 0x2800000>;
++		adsp_mem: adsp@8b800000 {
++			reg = <0x0 0x8b800000 0x0 0x2800000>;
 +			no-map;
 +		};
 +
-+		cdsp_mem: cdsp@87000000 {
-+			reg = <0x0 0x87000000 0x0 0x1e00000>;
++		cdsp_mem: cdsp@8e000000 {
++			reg = <0x0 0x8e000000 0x0 0x1e00000>;
 +			no-map;
 +		};
 +
-+		video_mem: video@88e00000 {
-+			reg = <0x0 0x88e00000 0x0 0x700000>;
++		video_mem: video@8fe00000 {
++			reg = <0x0 0x8fe00000 0x0 0x500000>;
 +			no-map;
 +		};
 +
-+		cvp_mem: cvp@89500000 {
-+			reg = <0x0 0x89500000 0x0 0x500000>;
-+			no-map;
-+		};
-+
-+		gpu_microcode_mem: gpu-microcode@89a00000 {
-+			reg = <0x0 0x89a00000 0x0 0x2000>;
++		gpu_zap_mem: zap@90300000 {
++			reg = <0x0 0x90300000 0x0 0x5000>;
 +			no-map;
 +		};
 +
@@ -337,12 +343,12 @@ index 0000000..1e793de
 +		};
 +
 +		trusted_apps_mem: trusted-apps@c1800000 {
-+			reg = <0x0 0xc1800000 0x0 0x1c00000>;
++			reg = <0x0 0xc1800000 0x0 0x2200000>;
 +			no-map;
 +		};
 +
-+		debug_vm_mem: debug-vm@d0600000 {
-+			reg = <0x0 0xd0600000 0x0 0x100000>;
++		adsp_rpc_remote_heap_mem: adsp-rpc-remote-heap@c6500000 {
++			reg = <0x0 0xc6500000 0x0 0x800000>;
 +			no-map;
 +		};
 +	};
@@ -759,6 +765,9 @@ index 0000000..1e793de
 +			   <GCC_MSS_Q6SS_BOOT_CLK_SRC>,
 +			   <GCC_MSS_Q6_MEMNOC_AXI_CLK>,
 +			   <GCC_MSS_SNOC_AXI_CLK>,
++			   <GCC_QSPI_CNOC_PERIPH_AHB_CLK>,
++			   <GCC_QSPI_CORE_CLK>,
++			   <GCC_QSPI_CORE_CLK_SRC>,
 +			   <GCC_SEC_CTRL_CLK_SRC>,
 +			   <GCC_WPSS_AHB_BDG_MST_CLK>,
 +			   <GCC_WPSS_AHB_CLK>,
@@ -778,7 +787,8 @@ index 0000000..1e793de
 +};
 +
 +&gpu_zap_shader {
-+	firmware-name = "qcom/qcs6490/a660_zap.mbn";
++	/* Secure Launch hands Linux EL2, so Linux can clear secure mode itself. */
++	status = "disabled";
 +};
 +
 +/* Pin 27, 28 in GPIO header */
@@ -832,11 +842,11 @@ index 0000000..1e793de
 +};
 +
 +&mdss {
-+	status = "okay";
++	status = "disabled";
 +};
 +
 +&mdss_dp {
-+	status = "okay";
++	status = "disabled";
 +	sound-name-prefix = "Display Port0";
 +	pinctrl-names = "default";
 +	pinctrl-0 = <&dp_hot_plug_det>;
@@ -1021,7 +1031,8 @@ index 0000000..1e793de
 +
 +	use-polling;
 +
-+	status = "okay";
++	/* XBL/U-Boot own the boot flash; probing it from Linux resets the SoC. */
++	status = "disabled";
 +
 +	spi_flash: flash@0 {
 +		compatible = "winbond,w25q256jw", "jedec,spi-nor";
@@ -1061,11 +1072,11 @@ index 0000000..1e793de
 +	vmmc-supply = <&vreg_l7b_2p96>;
 +	vqmmc-supply = <&vreg_l19b_1p8>;
 +
-+	status = "okay";
++	status = "disabled";
 +};
 +
 +&sdhc_2 {
-+	status = "okay";
++	status = "disabled";
 +
 +	pinctrl-0 = <&sdc2_clk>, <&sdc2_cmd>, <&sdc2_data>, <&sd_cd>;
 +	pinctrl-1 = <&sdc2_clk_sleep>, <&sdc2_cmd_sleep>, <&sdc2_data_sleep>, <&sd_cd>;
@@ -1440,7 +1451,15 @@ index 0000000..1e793de
 +};
 +
 +&venus {
++	/* EL2 owns the SMMU, so boot Venus through its non-PAS contexts. */
++	iommus = <&apps_smmu 0x2180 0x20>,
++		 <&apps_smmu 0x2184 0x20>;
++
 +	status = "okay";
++
++	video-firmware {
++		iommus = <&apps_smmu 0x21a2 0x0>;
++	};
 +};
 +
 +/* PINCTRL - additions to nodes defined in sc7280.dtsi */

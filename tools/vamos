@@ -50,6 +50,43 @@ configure_flash_storage() {
   esac
 }
 
+configure_build_storage() {
+  local storage="nvme"
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --storage)
+        if [ "$#" -lt 2 ]; then
+          echo "ERROR: --storage requires nvme or ufs" >&2
+          exit 2
+        fi
+        storage="$2"
+        shift 2
+        ;;
+      --storage=*)
+        storage="${1#*=}"
+        shift
+        ;;
+      --nvme|--ufs)
+        storage="${1#--}"
+        shift
+        ;;
+      *)
+        echo "ERROR: unsupported build argument: $1" >&2
+        exit 2
+        ;;
+    esac
+  done
+
+  case "${storage,,}" in
+    nvme|ufs) export VAMOS_DISK_STORAGE="${storage,,}" ;;
+    *)
+      echo "ERROR: --storage must be nvme or ufs" >&2
+      exit 2
+      ;;
+  esac
+}
+
 setup() {
   git -C "$DIR" submodule update --init --depth 1
   if [ "$(uname)" = "Linux" ]; then
@@ -74,12 +111,21 @@ case "${1:-}" in
   build)
     case "${2:-}" in
       kernel) exec "$DIR/tools/build/build_kernel.sh" ;;
+      uboot)  exec "$DIR/tools/build/build_uboot.sh" ;;
       system) exec "$DIR/tools/build/build_system.sh" ;;
       esp)    exec "$DIR/tools/build/build_esp.sh" ;;
       ota)    "$DIR/tools/build/build_esp.sh" && exec python3 "$DIR/tools/build/package_ota.py" ;;
-      disk)   exec "$DIR/tools/build/build_disk.sh" ;;
-      all)    "$DIR/tools/build/build_kernel.sh" && "$DIR/tools/build/build_system.sh" && "$DIR/tools/build/build_disk.sh" ;;
-      *)      echo "Usage: vamos build <kernel|system|esp|ota|disk|all>"; exit 1 ;;
+      disk)
+        shift 2
+        configure_build_storage "$@"
+        exec "$DIR/tools/build/build_disk.sh"
+        ;;
+      all)
+        shift 2
+        configure_build_storage "$@"
+        "$DIR/tools/build/build_kernel.sh" && "$DIR/tools/build/build_system.sh" && "$DIR/tools/build/build_disk.sh"
+        ;;
+      *)      echo "Usage: vamos build <uboot|kernel|system|esp|ota|disk|all> [--storage nvme|ufs]"; exit 1 ;;
     esac ;;
   flash)
     flash_target="${2:-}"
@@ -94,6 +140,14 @@ case "${1:-}" in
         fi
         exec "$DIR/tools/flash/kernel.sh"
         ;;
+      uboot)
+        if [ "${#FLASH_ARGS[@]}" -gt 1 ] ||
+           { [ "${#FLASH_ARGS[@]}" -eq 1 ] && [ "${FLASH_ARGS[0]}" != "--restore-stock" ]; }; then
+          echo "Usage: vamos flash uboot [--restore-stock]" >&2
+          exit 2
+        fi
+        exec "$DIR/tools/flash/uboot.sh" "${FLASH_ARGS[@]}"
+        ;;
       system)
         exec "$DIR/tools/flash/system.sh" "${FLASH_ARGS[@]}"
         ;;
@@ -102,7 +156,7 @@ case "${1:-}" in
           "$DIR/tools/flash/kernel.sh"
         ;;
       *)
-        echo "Usage: vamos flash <kernel|system|all> [--storage nvme|ufs]" >&2
+        echo "Usage: vamos flash <uboot|kernel|system|all> [--storage nvme|ufs]" >&2
         exit 1
         ;;
     esac ;;
@@ -116,12 +170,14 @@ case "${1:-}" in
     echo "Usage: vamos <setup|build|flash|profile|device-update>"
     echo ""
     echo "  setup              Initialize submodules and udev rules"
+    echo "  build uboot        Build Dragon Q6A XBL-embedded U-Boot"
     echo "  build kernel       Build the kernel → build/Image + dtb"
     echo "  build system       Build the rootfs  → build/system.img (ext4)"
     echo "  build esp          Build update/boot ESP → build/esp.img"
     echo "  build ota          Package ESP + system → build/ota/vamos.json"
-    echo "  build disk         Assemble initial disk image → build/dragon.img"
-    echo "  build all          Do all three in order"
+    echo "  build disk         Assemble initial disk image; accepts --storage nvme|ufs"
+    echo "  build all          Do all three in order; accepts --storage nvme|ufs"
+    echo "  flash uboot        Replace SPI XBL; --restore-stock restores backup"
     echo "  flash system       Flash vamOS; accepts --storage and --without-openpilot"
     echo "  flash kernel       Flash the ESP; accepts --storage nvme|ufs"
     echo "  flash all          Flash system + kernel; accepts --storage"

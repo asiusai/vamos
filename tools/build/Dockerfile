@@ -43,8 +43,7 @@ COPY ./userspace/varwatch/varwatch.c /tmp/vamos/varwatch.c
 RUN gcc -Wall -Wextra -Werror -O2 -o /usr/bin/vamos-varwatch /tmp/vamos/varwatch.c && \
     rm /tmp/vamos/varwatch.c
 
-# QCS6490 firmware exposes a PSCI vendor reset named "edl". The helper uses
-# Linux RESTART2 so a healthy device can enter Qualcomm EDL without a button.
+# Persist a redundant one-shot request for the proven U-Boot EDL command.
 COPY ./userspace/reboot-edl/reboot-edl.c /tmp/vamos/reboot-edl.c
 RUN gcc -Wall -Wextra -Werror -O2 -o /usr/bin/reboot-edl /tmp/vamos/reboot-edl.c && \
     rm /tmp/vamos/reboot-edl.c

@@ -1,0 +1,17 @@
+diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+--- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
++++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+@@ -1848,6 +1848,13 @@
+ };
+ 
+ &tlmm {
++	panda_som_alive_hog: panda-som-alive-hog {
++		gpio-hog;
++		gpios = <27 GPIO_ACTIVE_HIGH>;
++		output-high;
++		line-name = "PANDA_SOM_GPIO";
++	};
++
+ 	cam1_mclk_default: cam1-mclk-default-state {
+ 		pins = "gpio64";
+ 		function = "cam_mclk";

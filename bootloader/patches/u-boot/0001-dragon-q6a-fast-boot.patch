@@ -1,0 +1,3315 @@
+diff --git a/arch/arm/dts/qcs6490-radxa-dragon-q6a-u-boot.dtsi b/arch/arm/dts/qcs6490-radxa-dragon-q6a-u-boot.dtsi
+new file mode 100644
+index 00000000..3e2676f8
+--- /dev/null
++++ b/arch/arm/dts/qcs6490-radxa-dragon-q6a-u-boot.dtsi
+@@ -0,0 +1,87 @@
++// SPDX-License-Identifier: GPL-2.0+
++
++/*
++ * XBL does not pass the external ABL FDT that normally fills this range.
++ * Keep U-Boot itself and its DMA allocations below 4 GiB: PCIe/NVMe runs
++ * without Linux's SMMU IOVA setup here, and the Dragon endpoint cannot
++ * complete admin-queue DMA to allocations at the top of the full 8 GiB.
++ * The kernel is booted with its separate production DT and sees all RAM.
++ */
++&{/memory@80000000} {
++	reg = <0 0x80000000 0 0x80000000>;
++};
++
++/* The product NVMe is on PCIe1. Avoid probing the unused Ethernet root port. */
++&pcie0 {
++	status = "disabled";
++};
++
++&pcie0_phy {
++	status = "disabled";
++};
++
++&pcie1 {
++	/*
++	 * The Dragon firmware routes the root port and directly attached NVMe
++	 * through the shared PCIe1 TBU stream.  Using SC7280's generic 0x1c81
++	 * endpoint SID leaves bus-master DMA disconnected on this module.
++	 */
++	iommu-map = <0x0 &apps_smmu 0x1c80 0x1>,
++		    <0x100 &apps_smmu 0x1c80 0x1>;
++
++	/* U-Boot does not model generated pipe-clock providers or their mux. */
++	clocks = <&gcc GCC_PCIE_1_PIPE_CLK>,
++		 <&rpmhcc RPMH_CXO_CLK>,
++		 <&gcc GCC_PCIE_1_AUX_CLK>,
++		 <&gcc GCC_PCIE_1_CFG_AHB_CLK>,
++		 <&gcc GCC_PCIE_1_MSTR_AXI_CLK>,
++		 <&gcc GCC_PCIE_1_SLV_AXI_CLK>,
++		 <&gcc GCC_PCIE_1_SLV_Q2A_AXI_CLK>,
++		 <&gcc GCC_AGGRE_NOC_PCIE_TBU_CLK>,
++		 <&gcc GCC_DDRSS_PCIE_SF_CLK>,
++		 <&gcc GCC_AGGRE_NOC_PCIE_CENTER_SF_AXI_CLK>,
++		 <&gcc GCC_AGGRE_NOC_PCIE_1_AXI_CLK>;
++	clock-names = "pipe", "ref", "aux", "cfg",
++		      "bus_master", "bus_slave", "slave_q2a", "tbu",
++		      "ddrss_sf_tbu", "aggre0", "aggre1";
++	bootph-all;
++};
++
++&pcie1_phy {
++	bootph-all;
++};
++
++/* QHEE leaves unmatched PCIe stream IDs faulting even though U-Boot is EL2. */
++&apps_smmu {
++	qcom,configure-at-el2;
++	bootph-all;
++};
++
++/* The production storage variants are mutually exclusive NVMe and UFS. */
++&ufs_mem_hc {
++	reset-gpios = <&tlmm 175 GPIO_ACTIVE_LOW>;
++	vcc-supply = <&vreg_l7b_2p96>;
++	vccq-supply = <&vreg_l9b_1p2>;
++	vccq2-supply = <&vreg_l9b_1p2>;
++	bootph-all;
++	status = "okay";
++};
++
++&ufs_mem_phy {
++	vdda-phy-supply = <&vreg_l10c_0p88>;
++	vdda-pll-supply = <&vreg_l6b_1p2>;
++	bootph-all;
++	status = "okay";
++};
++
++&sdhc_1 {
++	status = "disabled";
++};
++
++&sdhc_2 {
++	status = "disabled";
++};
++
++&uart5 {
++	bootph-all;
++};
+diff --git a/arch/arm/lib/bootm-fdt.c b/arch/arm/lib/bootm-fdt.c
+index a82ceeaf..e01b9533 100644
+--- a/arch/arm/lib/bootm-fdt.c
++++ b/arch/arm/lib/bootm-fdt.c
+@@ -24,6 +24,11 @@
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
++__weak bool board_preserve_fdt_memory(void *blob)
++{
++	return false;
++}
++
+ #ifdef CONFIG_FMAN_ENET
+ __weak int fdt_update_ethernet_dt(void *blob)
+ {
+@@ -50,9 +55,12 @@ int arch_fixup_fdt(void *blob)
+ 	}
+ 
+ #ifdef CONFIG_OF_LIBFDT
+-	ret = fdt_fixup_memory_banks(blob, start, size, CONFIG_NR_DRAM_BANKS);
+-	if (ret)
+-		return ret;
++	if (!board_preserve_fdt_memory(blob)) {
++		ret = fdt_fixup_memory_banks(blob, start, size,
++					     CONFIG_NR_DRAM_BANKS);
++		if (ret)
++			return ret;
++	}
+ #endif
+ 
+ #ifdef CONFIG_ARMV8_SPIN_TABLE
+diff --git a/arch/arm/mach-snapdragon/Kconfig b/arch/arm/mach-snapdragon/Kconfig
+index d3de8693..f8323428 100644
+--- a/arch/arm/mach-snapdragon/Kconfig
++++ b/arch/arm/mach-snapdragon/Kconfig
+@@ -26,6 +26,24 @@ config SYS_MALLOC_LEN
+ config LNX_KRNL_IMG_TEXT_OFFSET_BASE
+ 	default 0x80000000
+ 
++config QCOM_SECURE_LAUNCH
++	bool "Qualcomm Secure Launch EL2 handoff"
++	depends on ARM64
++	help
++	  Use Qualcomm's Secure Launch service and a Microsoft-signed TCB boot
++	  application to take over a resident Gunyah hypervisor. This lets an
++	  arm64 operating system enter with EL2 available on devices whose XBL
++	  normally starts the application bootloader at EL1.
++
++config QCOM_SECURE_LAUNCH_BLOB_ADDR
++	hex "Address of the generated Secure Launch TCB blob"
++	depends on QCOM_SECURE_LAUNCH
++	default 0x9f180000
++	help
++	  Runtime address of the private blob generated from the board's stock
++	  XBL. The blob is added to the XBL segment while flashing and is not
++	  part of the U-Boot source or build output.
++
+ config SYS_BOARD
+ 	string "Snapdragon SoCs based board"
+ 	help
+diff --git a/arch/arm/mach-snapdragon/Makefile b/arch/arm/mach-snapdragon/Makefile
+index 343e825c..e56b2bf0 100644
+--- a/arch/arm/mach-snapdragon/Makefile
++++ b/arch/arm/mach-snapdragon/Makefile
+@@ -3,5 +3,6 @@
+ # (C) Copyright 2015 Mateusz Kulikowski <mateusz.kulikowski@gmail.com>
+ 
+ obj-y += board.o
++obj-$(CONFIG_QCOM_SECURE_LAUNCH) += secure_launch.o secure_launch_transition.o
+ obj-$(CONFIG_EFI_HAVE_CAPSULE_SUPPORT) += capsule_update.o
+ obj-$(CONFIG_OF_LIVE) += of_fixup.o
+diff --git a/arch/arm/mach-snapdragon/board.c b/arch/arm/mach-snapdragon/board.c
+index 35735f15..bc8f41f8 100644
+--- a/arch/arm/mach-snapdragon/board.c
++++ b/arch/arm/mach-snapdragon/board.c
+@@ -39,6 +39,88 @@ DECLARE_GLOBAL_DATA_PTR;
+ 
+ enum qcom_boot_source qcom_boot_source __section(".data") = 0;
+ 
++/*
++ * The Panda safety SOM is kept alive by GPIO27. Assert it before the serial
++ * console, relocation, storage discovery, or Linux DT processing can add
++ * avoidable dead time to the safety MCU path.
++ *
++ * SC7280/QCM6490 TLMM uses a 4 KiB stride, GPIO OE at bit 9 of CFG and the
++ * output value at bit 1 of IN_OUT. XBL has already mapped this MMIO range.
++ */
++#define DRAGON_Q6A_TLMM_BASE		0x0f100000UL
++#define DRAGON_Q6A_TLMM_STRIDE		0x1000
++#define DRAGON_Q6A_SOM_ALIVE_GPIO	27
++#define DRAGON_Q6A_GPIO_OE		BIT(9)
++#define DRAGON_Q6A_GPIO_OUT		BIT(1)
++#define DRAGON_Q6A_GPIO_FUNC_MASK	GENMASK(5, 2)
++#define DRAGON_Q6A_GUNYAH_TAKEOVER_SMC	0x02000121
++
++static void dragon_q6a_assert_som_alive(void)
++{
++	void __iomem *cfg;
++	void __iomem *in_out;
++	u32 value;
++
++	cfg = (void __iomem *)(DRAGON_Q6A_TLMM_BASE +
++			DRAGON_Q6A_SOM_ALIVE_GPIO * DRAGON_Q6A_TLMM_STRIDE);
++	in_out = cfg + 4;
++
++	/* Select GPIO, drive the high value, then enable the output. */
++	value = readl(cfg);
++	value &= ~DRAGON_Q6A_GPIO_FUNC_MASK;
++	writel(DRAGON_Q6A_GPIO_OUT, in_out);
++	writel(value | DRAGON_Q6A_GPIO_OE, cfg);
++}
++
++/* Called from crt0 before the debug UART itself is initialized. */
++void board_debug_uart_init(void)
++{
++	dragon_q6a_assert_som_alive();
++}
++
++int board_early_init_f(void)
++{
++	if (fdt_node_check_compatible(gd->fdt_blob, 0, "radxa,dragon-q6a"))
++		return 0;
++
++	dragon_q6a_assert_som_alive();
++
++	return 0;
++}
++
++/* The OS DT contains the complete 8 GiB topology. U-Boot deliberately keeps
++ * its own allocator below 4 GiB for NVMe DMA, so the generic ARM fixup must
++ * not replace the OS memory node with U-Boot's private 2 GiB allocation pool.
++ */
++bool board_preserve_fdt_memory(void *blob)
++{
++	return !fdt_node_check_compatible(blob, 0, "radxa,dragon-q6a");
++}
++
++/* Radxa's Gunyah firmware can return its EL1 caller at EL2 during the final
++ * OS handoff. Stock EnvDxe issues this at ExitBootServices when the board DT
++ * requests KVM. Do the same immediately before U-Boot's cache teardown so
++ * Linux retains KVM and Venus support without UEFI.
++ */
++void board_cleanup_before_linux(void)
++{
++	struct arm_smccc_res res;
++
++	if (fdt_node_check_compatible(gd->fdt_blob, 0, "radxa,dragon-q6a"))
++		return;
++
++	if (current_el() == 1)
++		arm_smccc_smc(DRAGON_Q6A_GUNYAH_TAKEOVER_SMC, 0, 0, 1,
++			      0, 0, 0, 0, &res);
++
++	if (current_el() == 2)
++		printf("Dragon: Gunyah handed Linux EL2\n");
++	else
++		printf("Dragon: WARNING: Gunyah EL2 takeover failed "
++		       "(EL%u, a0=%lx a1=%lx)\n",
++		       current_el(), res.a0, res.a1);
++}
++
+ static struct mm_region rbx_mem_map[CONFIG_NR_DRAM_BANKS + 2] = { { 0 } };
+ 
+ struct mm_region *mem_map = rbx_mem_map;
+diff --git a/arch/arm/mach-snapdragon/secure_launch.c b/arch/arm/mach-snapdragon/secure_launch.c
+new file mode 100644
+index 00000000..b3f06240
+--- /dev/null
++++ b/arch/arm/mach-snapdragon/secure_launch.c
+@@ -0,0 +1,1055 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * Qualcomm Secure Launch handoff for U-Boot.
++ *
++ * Copyright (c) 2024 Nikita Travkin <nikita@trvn.ru>
++ * Copyright (c) 2026 Asius Technologies, Inc.
++ *
++ * The Secure Launch data layout and transition mechanism are derived from
++ * slbounce: https://github.com/TravMurav/slbounce
++ */
++
++#include <asm/cache.h>
++#include <asm/system.h>
++#include <asm/unaligned.h>
++#include <cpu_func.h>
++#include <errno.h>
++#include <linux/arm-smccc.h>
++#include <linux/build_bug.h>
++#include <linux/kernel.h>
++#include <linux/sizes.h>
++#include <malloc.h>
++#include <qcom_secure_launch.h>
++
++#define QCOM_SL_SMC_ID			0xc3000001UL
++#define QCOM_SL_CMD_IS_AVAILABLE	1
++#define QCOM_SL_CMD_AUTH		2
++#define QCOM_SL_CMD_LAUNCH		4
++#define QCOM_SL_SMC_INTERRUPTED		1
++#define QCOM_SL_MAX_INTERRUPTS		64
++
++#define QCOM_QSEE_OWNER			ARM_SMCCC_OWNER_TRUSTED_OS
++#define QCOM_QSEE_APP_MGR_SERVICE	1
++#define QCOM_QSEE_APP_START_COMMAND	1
++#define QCOM_QSEE_APP_LOOKUP_COMMAND	3
++#define QCOM_QSEE_APP_REGION_COMMAND	5
++#define QCOM_QSEE_LOAD_SERVICES_COMMAND	7
++#define QCOM_QSEE_SMC(command)		ARM_SMCCC_CALL_VAL(\
++	ARM_SMCCC_STD_CALL, ARM_SMCCC_SMC_64, QCOM_QSEE_OWNER, \
++	(QCOM_QSEE_APP_MGR_SERVICE << 8) | (command))
++#define QCOM_QSEE_APP_START_ID		QCOM_QSEE_SMC(QCOM_QSEE_APP_START_COMMAND)
++#define QCOM_QSEE_APP_LOOKUP_ID		QCOM_QSEE_SMC(QCOM_QSEE_APP_LOOKUP_COMMAND)
++#define QCOM_QSEE_APP_REGION_ID		QCOM_QSEE_SMC(QCOM_QSEE_APP_REGION_COMMAND)
++#define QCOM_QSEE_LOAD_SERVICES_ID	QCOM_QSEE_SMC(QCOM_QSEE_LOAD_SERVICES_COMMAND)
++#define QCOM_QSEE_ARGS_2_RW_VAL		(2 | (2 << 4))
++#define QCOM_QSEE_ARGS_3_VAL		3
++#define QCOM_QSEE_RESULT_SUCCESS	0
++#define QCOM_QSEE_RESULT_FAILURE	0xffffffffUL
++#define QCOM_QSEE_RESPONSE_APP_ID	0xee01
++#define QCOM_QSEE_TZAPPS_ADDR		0xc1800000UL
++#define QCOM_QSEE_TZAPPS_SIZE		0x02200000UL
++#define QCOM_QSEE_MSSECAPP_ADDR		0x9bd00000UL
++#define QCOM_QSEE_LEGACY_CMD_ADDR	0x9bd40000UL
++#define QCOM_QSEE_APP_NAME_ADDR		0x9bd80000UL
++#define QCOM_QSEE_MSSECAPP_NAME		"qcom.tz.mssecapp"
++#define QCOM_QSEE_LEGACY_SCHEDULER_ID	0x0003f001
++#define QCOM_QSEE_LEGACY_CMD_SIZE	0x5c
++#define QCOM_QSEE_LEGACY_REQUEST_OFF	0x10
++#define QCOM_QSEE_LEGACY_RESPONSE_OFF	0x44
++
++#define QCOM_SL_BLOB_MAGIC		"VAMOS-SL"
++#define QCOM_SL_BLOB_VERSION		3
++#define QCOM_SL_TCB_PAGES		512
++#define QCOM_SL_CRT_PAGES		24
++#define QCOM_SL_TCG_PAGES		2
++#define QCOM_SL_BOOT_PARAMS_PAGES	3
++#define QCOM_SL_BLOB_MAX_SIZE		SZ_2M
++/*
++ * Secure Launch inputs must live in an XBL AddMem region already mapped by
++ * QHEE.  HLOS6 (0xa0b00000..0xbb600000) is AddDynamicMem and faults when the
++ * launch manager reads it at EL2.  The stock DXE heap is an AddMem region and
++ * is otherwise unused after U-Boot has replaced EDK2.
++ */
++#define QCOM_SL_TCB_ADDR		0x9c000000UL
++#define QCOM_SL_BUFFER_ADDR		0x9c200000UL
++#define QCOM_SL_BOOT_PARAMS_ADDR	0x9c240000UL
++
++/*
++ * QHEE's launch manager consumes the same CSRT-backed platform description
++ * that stock AcpiPlatform registers through ScmDxe.  Linux still boots from
++ * DT; this copy only supplies the pre-launch hypervisor firmware contract.
++ */
++/* PIL creates a temporary SHM bridge for metadata, so use ordinary HLOS RAM. */
++#define QCOM_ACPI_ELF_ADDR		0xa1000000UL
++#define QCOM_ACPI_MAX_SIZE		SZ_1M
++#define QCOM_ACPI_VERSION		0x16
++#define QCOM_ACPI_SCM_SET_ELF		0x02000201UL
++#define QCOM_ACPI_SCM_SET_TABLES	0x02000202UL
++#define QCOM_ACPI_SCM_LOAD		0x02000205UL
++#define QCOM_ACPI_SCM_START		0x02000206UL
++#define QCOM_SCM_64_BIT			BIT(30)
++#define QCOM_SCM_ARGS_1			0x01
++#define QCOM_SCM_ARGS_2_RW		0x82
++#define QCOM_SCM_ARGS_3			0x03
++#define QCOM_SCM_ARGS_4			0x04
++
++#define QCOM_PAS_SVC			0x02
++#define QCOM_PAS_INIT_IMAGE		0x01
++#define QCOM_PAS_MEM_SETUP		0x02
++#define QCOM_PAS_AUTH_AND_RESET		0x05
++#define QCOM_PAS_METADATA_ADDR		0xa0f00000UL
++#define QCOM_PAS_METADATA_MAX_SIZE	SZ_64K
++#define QCOM_PAS_SMC_INTERRUPTED	1
++
++#define QCOM_MP_SVC			0x0c
++#define QCOM_MP_VIDEO_VAR		0x08
++#define QCOM_VENUS_PAS_ID		9
++#define QCOM_VENUS_CP_START		0
++#define QCOM_VENUS_CP_SIZE		0x25800000
++#define QCOM_VENUS_CP_NONPIXEL_START	0x01000000
++#define QCOM_VENUS_CP_NONPIXEL_SIZE	0x24800000
++
++#define ELF_MAGIC			0x464c457f
++#define ELFCLASS32			1
++#define ELFDATA2LSB			1
++#define ELF_ARM_MACHINE			0x28
++#define ELF_PT_NULL			0
++#define ELF_PT_LOAD			1
++#define ELF32_HEADER_SIZE		52
++#define ELF32_PROGRAM_SIZE		32
++#define QCOM_ELF_SEGMENT_TYPE_MASK	0x07000000
++#define QCOM_ELF_SEGMENT_TYPE_SHIFT	24
++#define QCOM_ELF_SEGMENT_HASH		2
++#define QCOM_ELF_RELOCATABLE		BIT(27)
++
++#define PE_DOS_MAGIC			0x5a4d
++#define PE_NT_MAGIC			0x00004550
++#define PE_AARCH64_MACHINE		0xaa64
++#define PE32_PLUS_MAGIC			0x020b
++#define PE_BOOT_APPLICATION		16
++#define PE_SECURITY_DIRECTORY		4
++#define PE_DIRECTORY_COUNT_OFF		108
++#define PE_DIRECTORY_TABLE_OFF		112
++#define PE_SIZE_OF_IMAGE_OFF		56
++#define PE_SIZE_OF_HEADERS_OFF		60
++#define PE_SUBSYSTEM_OFF		68
++#define PE_SECTION_SIZE			40
++
++struct qcom_sl_blob_header {
++	u8 magic[8];
++	u32 version;
++	u32 tcb_size;
++	u32 mssecapp_size;
++	u32 acpi_size;
++} __packed;
++
++struct qcom_qsee_response {
++	ulong result;
++	ulong type;
++	ulong data;
++};
++
++struct qcom_sl_smc_params {
++	u16 a;
++	u16 b;
++	u32 version;
++	u32 command;
++	u32 reserved;
++	u64 pe_data;
++	u64 pe_size;
++	u64 arg_data;
++	u64 arg_size;
++} __packed;
++
++struct qcom_sl_dma_range {
++	u64 a;
++	u64 b;
++	u64 c;
++} __packed;
++
++struct qcom_sl_transition_data {
++	u64 mair;
++	u64 sp;
++	u64 tcr;
++	u64 ttbr0;
++	u64 ttbr1;
++} __packed;
++
++struct qcom_sl_tz_data {
++	u32 version;
++	u32 cert_offset;
++	u32 cert_size;
++	u32 tcg_offset;
++	u32 tcg_size;
++	u32 tcg_used;
++	u32 tcg_version;
++	u32 reserved0;
++	u64 this_size;
++	u64 this_phys;
++	u32 crt_offset;
++	u32 crt_page_count;
++	u64 boot_params;
++	u32 boot_params_size;
++	u32 reserved1;
++	u64 transition_entry;
++	u64 transition_virt;
++	u64 transition_phys;
++	u64 transition_size;
++	struct qcom_sl_transition_data transition_data;
++	struct qcom_sl_dma_range dma_ranges[2];
++	u32 dma_range_count;
++	u32 reserved2;
++} __packed;
++
++struct qcom_sl_context {
++	struct qcom_sl_smc_params *params;
++	struct qcom_sl_tz_data *tz;
++	void *tcb;
++	void *buffer;
++	void *boot_params;
++	u64 tcb_size;
++	u64 arg_size;
++	size_t buffer_size;
++	const void *mssecapp;
++	size_t mssecapp_size;
++	const void *acpi;
++	size_t acpi_size;
++};
++
++extern void qcom_sl_transition_entry(void);
++extern int qcom_sl_setjmp(u64 *buffer) __attribute__((returns_twice));
++extern u64 qcom_sl_jump_buffer[21];
++
++static bool range_valid(size_t total, size_t offset, size_t size)
++{
++	return offset <= total && size <= total - offset;
++}
++
++static int qcom_pas_scm(u32 command, ulong arginfo, ulong arg0,
++			ulong arg1, ulong arg2)
++{
++	struct arm_smccc_res res;
++	struct arm_smccc_quirk quirk = {
++		.id = ARM_SMCCC_QUIRK_QCOM_A6,
++	};
++	ulong function = ARM_SMCCC_CALL_VAL(ARM_SMCCC_STD_CALL,
++					    ARM_SMCCC_SMC_64,
++					    ARM_SMCCC_OWNER_SIP,
++					    (QCOM_PAS_SVC << 8) | command);
++	unsigned int interrupts = 0;
++
++	do {
++		arm_smccc_smc_quirk(function, arginfo, arg0, arg1, arg2, 0,
++				     quirk.state.a6, 0, &res, &quirk);
++		if (res.a0 == QCOM_PAS_SMC_INTERRUPTED)
++			function = QCOM_PAS_SMC_INTERRUPTED;
++	} while (res.a0 == QCOM_PAS_SMC_INTERRUPTED &&
++		 ++interrupts < QCOM_SL_MAX_INTERRUPTS);
++
++	printf("Dragon: PAS SCM cmd=%u resumes=%u a0=%lx result=%lx\n",
++	       command, interrupts, res.a0, res.a1);
++	if (res.a0 == QCOM_PAS_SMC_INTERRUPTED)
++		return -ETIMEDOUT;
++	if (res.a0)
++		return -EIO;
++	return res.a1 ? -EACCES : 0;
++}
++
++static int qcom_venus_protect_memory(void)
++{
++	struct arm_smccc_res res;
++	struct arm_smccc_quirk quirk = {
++		.id = ARM_SMCCC_QUIRK_QCOM_A6,
++	};
++	ulong function = ARM_SMCCC_CALL_VAL(ARM_SMCCC_STD_CALL,
++					    ARM_SMCCC_SMC_64,
++					    ARM_SMCCC_OWNER_SIP,
++					    (QCOM_MP_SVC << 8) |
++					    QCOM_MP_VIDEO_VAR);
++	unsigned int interrupts = 0;
++
++	do {
++		arm_smccc_smc_quirk(function, QCOM_SCM_ARGS_4,
++				     QCOM_VENUS_CP_START, QCOM_VENUS_CP_SIZE,
++				     QCOM_VENUS_CP_NONPIXEL_START,
++				     QCOM_VENUS_CP_NONPIXEL_SIZE,
++				     quirk.state.a6, 0, &res, &quirk);
++		if (res.a0 == QCOM_PAS_SMC_INTERRUPTED)
++			function = QCOM_PAS_SMC_INTERRUPTED;
++	} while (res.a0 == QCOM_PAS_SMC_INTERRUPTED &&
++		 ++interrupts < QCOM_SL_MAX_INTERRUPTS);
++
++	printf("Dragon: Venus memory protection resumes=%u a0=%lx result=%lx\n",
++	       interrupts, res.a0, res.a1);
++	if (res.a0 == QCOM_PAS_SMC_INTERRUPTED)
++		return -ETIMEDOUT;
++	if (res.a0)
++		return -EIO;
++	return res.a1 ? -EACCES : 0;
++}
++
++/*
++ * Load a combined Qualcomm MDT/MBN image exactly as Linux's qcom_mdt_loader
++ * does. Radxa's firmware performs this for ADSP and CDSP before Secure Launch;
++ * once Gunyah has taken ownership Linux is no longer allowed to authenticate
++ * these images itself.
++ */
++int qcom_pas_boot(const void *firmware, size_t firmware_size, u32 pas_id,
++		  ulong region_addr, size_t region_size)
++{
++	const u8 *file = firmware;
++	const u8 *programs;
++	u8 *metadata = (void *)QCOM_PAS_METADATA_ADDR;
++	u32 program_offset, metadata_header_size, hash_offset = 0;
++	u32 hash_size = 0;
++	u32 min_addr = U32_MAX, max_addr = 0;
++	u16 program_size, program_count;
++	bool relocatable = false;
++	size_t metadata_size;
++	int hash_count = 0;
++	int i, ret;
++
++	if (firmware_size < ELF32_HEADER_SIZE ||
++	    get_unaligned_le32(file) != ELF_MAGIC ||
++	    file[4] != ELFCLASS32 || file[5] != ELFDATA2LSB)
++		return -EINVAL;
++
++	program_offset = get_unaligned_le32(file + 28);
++	program_size = get_unaligned_le16(file + 42);
++	program_count = get_unaligned_le16(file + 44);
++	if (program_size < ELF32_PROGRAM_SIZE || !program_count ||
++	    !range_valid(firmware_size, program_offset,
++			 program_size * (size_t)program_count))
++		return -EINVAL;
++	programs = file + program_offset;
++
++	/* Qualcomm stores the complete ELF/program-header block in segment 0. */
++	metadata_header_size = get_unaligned_le32(programs + 16);
++	if (!metadata_header_size || metadata_header_size > firmware_size)
++		return -EINVAL;
++
++	for (i = 0; i < program_count; i++) {
++		const u8 *program = programs + i * program_size;
++		u32 type = get_unaligned_le32(program);
++		u32 offset = get_unaligned_le32(program + 4);
++		u32 paddr = get_unaligned_le32(program + 12);
++		u32 file_size = get_unaligned_le32(program + 16);
++		u32 memory_size = get_unaligned_le32(program + 20);
++		u32 flags = get_unaligned_le32(program + 24);
++		u32 segment_type = (flags & QCOM_ELF_SEGMENT_TYPE_MASK) >>
++				   QCOM_ELF_SEGMENT_TYPE_SHIFT;
++
++		if ((type == ELF_PT_NULL || type == ELF_PT_LOAD) &&
++		    segment_type == QCOM_ELF_SEGMENT_HASH) {
++			if (!file_size ||
++			    !range_valid(firmware_size, offset, file_size))
++				return -EINVAL;
++			hash_offset = offset;
++			hash_size = file_size;
++			hash_count++;
++			continue;
++		}
++		if (type != ELF_PT_LOAD || !memory_size)
++			continue;
++		if (file_size > memory_size ||
++		    (file_size &&
++		     !range_valid(firmware_size, offset, file_size)) ||
++		    paddr > U32_MAX - memory_size)
++			return -EINVAL;
++		min_addr = min(min_addr, paddr);
++		max_addr = max(max_addr, ALIGN(paddr + memory_size, SZ_4K));
++		if (flags & QCOM_ELF_RELOCATABLE)
++			relocatable = true;
++	}
++	if (hash_count != 1 || min_addr >= max_addr)
++		return -EINVAL;
++	if (!relocatable || max_addr - min_addr > region_size)
++		return -EINVAL;
++
++	metadata_size = metadata_header_size + hash_size;
++	if (metadata_size > QCOM_PAS_METADATA_MAX_SIZE)
++		return -E2BIG;
++	memcpy(metadata, file, metadata_header_size);
++	memcpy(metadata + metadata_header_size, file + hash_offset, hash_size);
++	flush_dcache_range((ulong)metadata,
++			   ALIGN((ulong)metadata + metadata_size,
++				 ARCH_DMA_MINALIGN));
++
++	ret = qcom_pas_scm(QCOM_PAS_INIT_IMAGE, QCOM_SCM_ARGS_2_RW,
++			   pas_id, (ulong)metadata, 0);
++	if (ret)
++		return ret;
++	ret = qcom_pas_scm(QCOM_PAS_MEM_SETUP, QCOM_SCM_ARGS_3,
++			   pas_id, region_addr, max_addr - min_addr);
++	if (ret)
++		return ret;
++
++	memset((void *)region_addr, 0, region_size);
++	for (i = 0; i < program_count; i++) {
++		const u8 *program = programs + i * program_size;
++		u32 type = get_unaligned_le32(program);
++		u32 offset = get_unaligned_le32(program + 4);
++		u32 paddr = get_unaligned_le32(program + 12);
++		u32 file_size = get_unaligned_le32(program + 16);
++		u32 memory_size = get_unaligned_le32(program + 20);
++		u32 flags = get_unaligned_le32(program + 24);
++		u32 segment_type = (flags & QCOM_ELF_SEGMENT_TYPE_MASK) >>
++				   QCOM_ELF_SEGMENT_TYPE_SHIFT;
++		size_t destination_offset;
++
++		if (type != ELF_PT_LOAD || !memory_size ||
++		    segment_type == QCOM_ELF_SEGMENT_HASH)
++			continue;
++		destination_offset = paddr - min_addr;
++		memcpy((void *)(region_addr + destination_offset),
++		       file + offset, file_size);
++	}
++	flush_dcache_range(region_addr,
++			   ALIGN(region_addr + region_size, ARCH_DMA_MINALIGN));
++
++	ret = qcom_pas_scm(QCOM_PAS_AUTH_AND_RESET, QCOM_SCM_ARGS_1,
++			   pas_id, 0, 0);
++	if (!ret && pas_id == QCOM_VENUS_PAS_ID)
++		ret = qcom_venus_protect_memory();
++	if (!ret)
++		printf("Dragon: PAS %u started from %zu-byte image at %lx/%zx\n",
++		       pas_id, firmware_size, region_addr, region_size);
++	return ret;
++}
++
++/* Match ScmDxe's raw fast-call wrapper, including interrupted-call resumes. */
++static int qcom_acpi_scm(ulong command, ulong arginfo, ulong arg0,
++			 ulong arg1, ulong arg2)
++{
++	register ulong x0 asm("x0") = command | QCOM_SCM_64_BIT;
++	register ulong x1 asm("x1") = arginfo;
++	register ulong x2 asm("x2") = arg0;
++	register ulong x3 asm("x3") = arg1;
++	register ulong x4 asm("x4") = arg2;
++	register ulong x5 asm("x5") = 0;
++	register ulong x6 asm("x6") = 0;
++	register ulong x7 asm("x7") = 0;
++
++	/*
++	 * Keep the retry branch inside one asm block.  QHEE can return opaque
++	 * continuation state in caller-saved registers above x7; touching a C
++	 * loop counter between SMCs corrupts that state.  This is the exact loop
++	 * emitted by the stock ScmDxe wrapper.
++	 */
++	asm volatile("1: smc #0\n"
++		     "cmp w0, #0\n"
++		     "b.gt 1b\n"
++		     : "+r" (x0), "+r" (x1), "+r" (x2), "+r" (x3),
++		       "+r" (x4), "+r" (x5), "+r" (x6), "+r" (x7)
++		     : : "cc", "memory", "x8", "x9", "x10", "x11", "x12",
++			 "x13", "x14", "x15", "x16", "x17");
++
++	printf("Dragon: ACPI SCM %lx a0=%lx a1=%lx a2=%lx a3=%lx\n",
++	       command, x0, x1, x2, x3);
++	return x0 ? -EIO : 0;
++}
++
++static int qcom_acpi_register(struct qcom_sl_context *ctx)
++{
++	const u8 *source = ctx->acpi;
++	u8 *image = (void *)QCOM_ACPI_ELF_ADDR;
++	u32 program_offset, metadata_end, hash_offset = 0, hash_size = 0;
++	u32 load_offset = 0, load_size = 0;
++	u16 program_size, program_count;
++	unsigned int hash_count = 0, load_count = 0;
++	int i, ret;
++
++	if (ctx->acpi_size < ELF32_HEADER_SIZE ||
++	    get_unaligned_le32(source) != ELF_MAGIC ||
++	    source[4] != ELFCLASS32 || source[5] != ELFDATA2LSB ||
++	    get_unaligned_le16(source + 18) != ELF_ARM_MACHINE)
++		return -EINVAL;
++
++	program_offset = get_unaligned_le32(source + 28);
++	program_size = get_unaligned_le16(source + 42);
++	program_count = get_unaligned_le16(source + 44);
++	if (program_size < ELF32_PROGRAM_SIZE || !program_count ||
++	    !range_valid(ctx->acpi_size, program_offset,
++			 program_size * (size_t)program_count))
++		return -EINVAL;
++	metadata_end = program_offset + program_size * program_count;
++
++	for (i = 0; i < program_count; i++) {
++		const u8 *program = source + program_offset + i * program_size;
++		u32 type = get_unaligned_le32(program);
++		u32 flags = get_unaligned_le32(program + 24);
++		u32 segment_type = (flags & QCOM_ELF_SEGMENT_TYPE_MASK) >>
++				   QCOM_ELF_SEGMENT_TYPE_SHIFT;
++
++		if ((type == ELF_PT_NULL || type == ELF_PT_LOAD) &&
++		    segment_type == QCOM_ELF_SEGMENT_HASH) {
++			hash_offset = get_unaligned_le32(program + 4);
++			hash_size = get_unaligned_le32(program + 16);
++			if (!hash_size ||
++			    !range_valid(ctx->acpi_size, hash_offset, hash_size) ||
++			    !range_valid(ctx->acpi_size, metadata_end, hash_size))
++				return -EINVAL;
++			hash_count++;
++			continue;
++		}
++
++		if (type != ELF_PT_LOAD)
++			continue;
++		load_offset = get_unaligned_le32(program + 4);
++		load_size = get_unaligned_le32(program + 16);
++		if (!load_size ||
++		    get_unaligned_le32(program + 20) < load_size ||
++		    !range_valid(ctx->acpi_size, load_offset, load_size))
++			return -EINVAL;
++		load_count++;
++	}
++	if (hash_count != 1 || load_count != 1)
++		return -EINVAL;
++
++	/* The table payload begins with the little-endian ASCII signature ACPI. */
++	if (memcmp(source + load_offset, "ACPI", 4))
++		return -EINVAL;
++
++	memset(image, 0, ALIGN(ctx->acpi_size, SZ_4K));
++	memcpy(image, source, ctx->acpi_size);
++	/* ScmDxe's PIL_INIT metadata is ELF headers plus a contiguous hash blob. */
++	memmove(image + metadata_end, image + hash_offset, hash_size);
++	flush_dcache_range((ulong)image,
++			   ALIGN((ulong)image + ctx->acpi_size,
++				 ARCH_DMA_MINALIGN));
++
++	ret = qcom_acpi_scm(QCOM_ACPI_SCM_SET_ELF, QCOM_SCM_ARGS_2_RW,
++			    QCOM_ACPI_VERSION, (ulong)image, 0);
++	if (ret)
++		return ret;
++	ret = qcom_acpi_scm(QCOM_ACPI_SCM_SET_TABLES, QCOM_SCM_ARGS_3,
++			    QCOM_ACPI_VERSION, (ulong)image + load_offset,
++			    load_size);
++	if (ret)
++		return ret;
++	ret = qcom_acpi_scm(QCOM_ACPI_SCM_LOAD, QCOM_SCM_ARGS_1,
++			    QCOM_ACPI_VERSION, 0, 0);
++	if (ret)
++		return ret;
++	return qcom_acpi_scm(QCOM_ACPI_SCM_START, QCOM_SCM_ARGS_1,
++			     QCOM_ACPI_VERSION, 0, 0);
++}
++
++static int qcom_qsee_smc(ulong smc_id, ulong arginfo, ulong arg0,
++			 ulong arg1, ulong arg2,
++			 struct qcom_qsee_response *response)
++{
++	struct arm_smccc_res res;
++	struct arm_smccc_quirk quirk = {
++		.id = ARM_SMCCC_QUIRK_QCOM_A6,
++	};
++	ulong function = smc_id;
++	unsigned int interrupts = 0;
++
++	do {
++		arm_smccc_smc_quirk(function, arginfo, arg0, arg1, arg2, 0,
++				     quirk.state.a6, 0, &res, &quirk);
++		if (res.a0 == QCOM_SL_SMC_INTERRUPTED)
++			function = QCOM_SL_SMC_INTERRUPTED;
++	} while (res.a0 == QCOM_SL_SMC_INTERRUPTED &&
++		 ++interrupts < QCOM_SL_MAX_INTERRUPTS);
++
++	response->result = res.a1;
++	response->type = res.a2;
++	response->data = res.a3;
++	printf("Dragon: QSEE SMC %lx resumes=%u a0=%lx result=%lx type=%lx data=%lx\n",
++	       smc_id, interrupts, res.a0, res.a1, res.a2, res.a3);
++
++	if (res.a0 == QCOM_SL_SMC_INTERRUPTED)
++		return -ETIMEDOUT;
++	return res.a0 ? -EIO : 0;
++}
++
++static int qcom_qsee_lookup_mssecapp(u32 *app_id)
++{
++	struct qcom_qsee_response response;
++	const char name[] = QCOM_QSEE_MSSECAPP_NAME;
++	void *name_buffer = (void *)QCOM_QSEE_APP_NAME_ADDR;
++	int ret;
++
++	memset(name_buffer, 0, SZ_4K);
++	memcpy(name_buffer, name, sizeof(name) - 1);
++	flush_dcache_range((ulong)name_buffer, (ulong)name_buffer + SZ_4K);
++	ret = qcom_qsee_smc(QCOM_QSEE_APP_LOOKUP_ID,
++			    QCOM_QSEE_ARGS_2_RW_VAL,
++			    (ulong)name_buffer, sizeof(name) - 1, 0,
++			    &response);
++	if (ret)
++		return ret;
++	if (response.result == QCOM_QSEE_RESULT_FAILURE)
++		return -ENOENT;
++	if (response.result != QCOM_QSEE_RESULT_SUCCESS ||
++	    response.type != QCOM_QSEE_RESPONSE_APP_ID)
++		return -EIO;
++
++	*app_id = response.data;
++	return 0;
++}
++
++static int qcom_qsee_legacy_start_mssecapp(struct qcom_sl_context *ctx,
++					   struct qcom_qsee_response *response)
++{
++	struct arm_smccc_res res = { 0 };
++	struct arm_smccc_quirk quirk = {
++		.id = ARM_SMCCC_QUIRK_QCOM_A6,
++	};
++	u8 *command = (void *)QCOM_QSEE_LEGACY_CMD_ADDR;
++	ulong function = 1;
++	ulong context;
++	ulong buffer = (ulong)command;
++	unsigned int resumes = 0;
++
++	/*
++	 * Match the stock ScmDxe QSEECom protocol command-1 packet.  The final
++	 * twelve bytes of its empty 32-byte app-name field are deliberately
++	 * overlaid by the request length and legacy response header.
++	 */
++	memset(command, 0, SZ_4K);
++	put_unaligned_le32(QCOM_QSEE_LEGACY_CMD_SIZE, command + 0x00);
++	put_unaligned_le32(QCOM_QSEE_LEGACY_REQUEST_OFF, command + 0x04);
++	put_unaligned_le32(QCOM_QSEE_LEGACY_RESPONSE_OFF, command + 0x08);
++	put_unaligned_le32(QCOM_QSEE_LEGACY_SCHEDULER_ID, command + 0x0c);
++	put_unaligned_le32(1, command + 0x10);
++	put_unaligned_le64(0, command + 0x14);
++	put_unaligned_le64(ctx->mssecapp_size, command + 0x1c);
++	put_unaligned_le64(QCOM_QSEE_MSSECAPP_ADDR, command + 0x24);
++	put_unaligned_le32(0x3c, command + 0x40);
++	put_unaligned_le32(0x18, command + 0x44);
++	put_unaligned_le32(0x0c, command + 0x48);
++	flush_dcache_range((ulong)command, (ulong)command + SZ_4K);
++
++	asm volatile("mov %0, sp" : "=r" (context));
++	context = (u32)context;
++	do {
++		arm_smccc_smc_quirk(function, context, buffer, 0, 0, 0,
++				     quirk.state.a6, 0, &res, &quirk);
++		if ((long)res.a0 > 0) {
++			function = res.a0;
++			context = res.a1;
++			buffer = res.a2;
++		}
++	} while ((long)res.a0 > 0 && ++resumes < QCOM_SL_MAX_INTERRUPTS);
++	invalidate_dcache_range((ulong)command, (ulong)command + SZ_4K);
++
++	response->result = get_unaligned_le32(command + 0x50);
++	response->type = get_unaligned_le32(command + 0x54);
++	response->data = get_unaligned_le32(command + 0x58);
++	printf("Dragon: QSEE legacy start resumes=%u a0=%lx response=%x result=%lx type=%lx data=%lx\n",
++	       resumes, res.a0, get_unaligned_le32(command + 0x4c),
++	       response->result, response->type, response->data);
++
++	if ((long)res.a0 > 0)
++		return -ETIMEDOUT;
++	return res.a0 ? -EIO : 0;
++}
++
++static int qcom_qsee_load_mssecapp(struct qcom_sl_context *ctx)
++{
++	struct qcom_qsee_response response;
++	void *image = (void *)QCOM_QSEE_MSSECAPP_ADDR;
++	u32 app_id;
++	int ret;
++
++	ret = qcom_qsee_lookup_mssecapp(&app_id);
++	if (!ret) {
++		printf("Dragon: QSEE mssecapp already loaded as app %u\n", app_id);
++		return 0;
++	}
++	if (ret != -ENOENT)
++		return ret;
++
++	ret = qcom_qsee_smc(QCOM_QSEE_APP_REGION_ID,
++			    QCOM_QSEE_ARGS_2_RW_VAL,
++			    QCOM_QSEE_TZAPPS_ADDR, QCOM_QSEE_TZAPPS_SIZE, 0,
++			    &response);
++	if (ret)
++		return ret;
++	if (response.result != QCOM_QSEE_RESULT_SUCCESS) {
++		printf("Dragon: QSEE TZApps region registration failed (%lx)\n",
++		       response.result);
++		return -EACCES;
++	}
++
++	memcpy(image, ctx->mssecapp, ctx->mssecapp_size);
++	flush_dcache_range((ulong)image,
++			   ALIGN((ulong)image + ctx->mssecapp_size,
++				 ARCH_DMA_MINALIGN));
++
++	/*
++	 * ScmDxe command 11 is QSEOS_LOAD_SERV_IMAGE_COMMAND.  Stock TzDxe
++	 * always submits it before command 1 when loading mssecapp.  Its three
++	 * value arguments are MDT length (zero for this combined ELF), complete
++	 * image length, and image physical address.
++	 */
++	ret = qcom_qsee_smc(QCOM_QSEE_LOAD_SERVICES_ID,
++			    QCOM_QSEE_ARGS_3_VAL, 0,
++			    ctx->mssecapp_size, (ulong)image, &response);
++	if (ret)
++		return ret;
++	if (response.result != QCOM_QSEE_RESULT_SUCCESS) {
++		printf("Dragon: QSEE services image load failed (%lx)\n",
++		       response.result);
++		return -EACCES;
++	}
++
++	ret = qcom_qsee_smc(QCOM_QSEE_APP_START_ID, QCOM_QSEE_ARGS_3_VAL,
++			    0, ctx->mssecapp_size, (ulong)image, &response);
++	if (ret) {
++		printf("Dragon: QSEE modern app start unavailable; trying legacy ABI\n");
++		ret = qcom_qsee_legacy_start_mssecapp(ctx, &response);
++	}
++	if (ret)
++		return ret;
++	if (response.result != QCOM_QSEE_RESULT_SUCCESS ||
++	    response.type != QCOM_QSEE_RESPONSE_APP_ID) {
++		printf("Dragon: QSEE mssecapp start failed (%lx/%lx)\n",
++		       response.result, response.type);
++		return -EACCES;
++	}
++	printf("Dragon: QSEE started mssecapp as app %lu\n", response.data);
++
++	ret = qcom_qsee_lookup_mssecapp(&app_id);
++	if (ret) {
++		printf("Dragon: QSEE cannot find qcom.tz.mssecapp after start (%d)\n",
++		       ret);
++		return ret;
++	}
++	printf("Dragon: QSEE verified qcom.tz.mssecapp as app %u\n", app_id);
++	return 0;
++}
++
++static ulong qcom_sl_smc(struct qcom_sl_context *ctx, u32 command)
++{
++	struct arm_smccc_res res;
++	struct arm_smccc_quirk quirk = {
++		.id = ARM_SMCCC_QUIRK_QCOM_A6,
++	};
++	ulong function = QCOM_SL_SMC_ID;
++	ulong params = (ulong)ctx->params;
++	ulong daif;
++	ulong cntp_ctl;
++	ulong cntv_ctl;
++	unsigned int interrupts = 0;
++
++	/* Some Gunyah versions wipe this page while changing ownership. */
++	memset(ctx->params, 0, SZ_4K);
++	ctx->params->a = 1;
++	ctx->params->version = 0x10;
++	ctx->params->command = command;
++	ctx->params->pe_data = (ulong)ctx->tcb;
++	ctx->params->pe_size = ctx->tcb_size;
++	ctx->params->arg_data = (ulong)ctx->tz;
++	ctx->params->arg_size = ctx->arg_size;
++	flush_dcache_range((ulong)ctx->params, (ulong)ctx->params + SZ_4K);
++
++	/*
++	 * EDK2 invokes Secure Launch after ExitBootServices has quiesced its
++	 * timer events.  Do the equivalent here: a still-asserted architectural
++	 * timer can make Gunyah interrupt the longer AUTH operation even while
++	 * normal-world IRQ delivery is masked.
++	 */
++	asm volatile("mrs %0, cntp_ctl_el0" : "=r" (cntp_ctl));
++	asm volatile("mrs %0, cntv_ctl_el0" : "=r" (cntv_ctl));
++	asm volatile("msr cntp_ctl_el0, xzr");
++	asm volatile("msr cntv_ctl_el0, xzr");
++
++	/* No exception may return Gunyah from TrustZone into this EL1 caller. */
++	asm volatile("mrs %0, daif" : "=r" (daif));
++	asm volatile("msr daifset, #0xf" : : : "memory");
++	isb();
++	do {
++		arm_smccc_smc_quirk(function, params, command, 0, 0, 0,
++				     quirk.state.a6, 0, &res, &quirk);
++
++		/*
++		 * Qualcomm's standard-call ABI returns 1 when secure-world work
++		 * was interrupted.  AUTH can return this after Gunyah has already
++		 * removed the TCB and argument pages from EL1, so it is essential
++		 * to resume with x0=1 without touching or rebuilding those pages.
++		 * Preserve x6 as required by the Qualcomm SMCCC quirk.
++		 */
++		if (res.a0 == QCOM_SL_SMC_INTERRUPTED)
++			function = QCOM_SL_SMC_INTERRUPTED;
++	} while (res.a0 == QCOM_SL_SMC_INTERRUPTED &&
++		 ++interrupts < QCOM_SL_MAX_INTERRUPTS);
++	asm volatile("msr daif, %0" : : "r" (daif) : "memory");
++	asm volatile("msr cntp_ctl_el0, %0" : : "r" (cntp_ctl));
++	asm volatile("msr cntv_ctl_el0, %0" : : "r" (cntv_ctl));
++	isb();
++
++	if (res.a0 == QCOM_SL_SMC_INTERRUPTED)
++		printf("Dragon: Secure Launch SMC did not complete after %u resumes\n",
++		       interrupts);
++	if (command != QCOM_SL_CMD_IS_AVAILABLE || res.a0)
++		printf("Dragon: Secure Launch SMC cmd=%u resumes=%u timers=%lx/%lx a0=%lx a1=%lx a2=%lx a3=%lx a6=%lx\n",
++		       command, interrupts, cntp_ctl, cntv_ctl, res.a0, res.a1,
++		       res.a2, res.a3, quirk.state.a6);
++
++	return res.a0;
++}
++
++int qcom_secure_launch_available(void)
++{
++	struct qcom_sl_context ctx = { 0 };
++	ulong ret;
++
++	ctx.params = memalign(ARCH_DMA_MINALIGN, SZ_4K);
++	if (!ctx.params)
++		return -ENOMEM;
++
++	ret = qcom_sl_smc(&ctx, QCOM_SL_CMD_IS_AVAILABLE);
++	free(ctx.params);
++
++	return ret ? -ENOSYS : 0;
++}
++
++static int qcom_sl_parse_and_load_pe(struct qcom_sl_context *ctx,
++				     const u8 *file, size_t file_size,
++				     const u8 **cert, size_t *cert_size)
++{
++	const u8 *file_header;
++	const u8 *optional;
++	const u8 *section;
++	u32 pe_offset, header_size, image_size;
++	u32 security_offset, security_size;
++	u16 optional_size, section_count;
++	int i;
++
++	if (!range_valid(file_size, 0, 0x40) ||
++	    get_unaligned_le16(file) != PE_DOS_MAGIC)
++		return -EINVAL;
++
++	pe_offset = get_unaligned_le32(file + 0x3c);
++	if (!range_valid(file_size, pe_offset, 24) ||
++	    get_unaligned_le32(file + pe_offset) != PE_NT_MAGIC)
++		return -EINVAL;
++
++	file_header = file + pe_offset + 4;
++	if (get_unaligned_le16(file_header) != PE_AARCH64_MACHINE)
++		return -EINVAL;
++	section_count = get_unaligned_le16(file_header + 2);
++	optional_size = get_unaligned_le16(file_header + 16);
++	optional = file_header + 20;
++
++	if (optional_size < PE_DIRECTORY_TABLE_OFF + 8 * 5 ||
++	    !range_valid(file_size, optional - file, optional_size) ||
++	    get_unaligned_le16(optional) != PE32_PLUS_MAGIC ||
++	    get_unaligned_le16(optional + PE_SUBSYSTEM_OFF) !=
++			PE_BOOT_APPLICATION ||
++	    get_unaligned_le32(optional + PE_DIRECTORY_COUNT_OFF) <=
++			PE_SECURITY_DIRECTORY)
++		return -EINVAL;
++
++	header_size = get_unaligned_le32(optional + PE_SIZE_OF_HEADERS_OFF);
++	image_size = get_unaligned_le32(optional + PE_SIZE_OF_IMAGE_OFF);
++	if (!header_size || header_size > file_size ||
++	    !image_size || image_size > QCOM_SL_TCB_PAGES * SZ_4K)
++		return -E2BIG;
++
++	security_offset = get_unaligned_le32(optional + PE_DIRECTORY_TABLE_OFF +
++					      PE_SECURITY_DIRECTORY * 8);
++	security_size = get_unaligned_le32(optional + PE_DIRECTORY_TABLE_OFF +
++					    PE_SECURITY_DIRECTORY * 8 + 4);
++	if (security_size < 8 ||
++	    !range_valid(file_size, security_offset, security_size) ||
++	    get_unaligned_le16(file + security_offset + 4) != 0x200 ||
++	    get_unaligned_le16(file + security_offset + 6) != 2)
++		return -EINVAL;
++
++	ctx->tcb = (void *)QCOM_SL_TCB_ADDR;
++	memset(ctx->tcb, 0, QCOM_SL_TCB_PAGES * SZ_4K);
++	memcpy(ctx->tcb, file, header_size);
++
++	section = optional + optional_size;
++	if (!range_valid(file_size, section - file,
++			 section_count * PE_SECTION_SIZE))
++		return -EINVAL;
++
++	for (i = 0; i < section_count; i++, section += PE_SECTION_SIZE) {
++		u32 virtual_address = get_unaligned_le32(section + 12);
++		u32 raw_size = get_unaligned_le32(section + 16);
++		u32 raw_offset = get_unaligned_le32(section + 20);
++
++		if (!range_valid(file_size, raw_offset, raw_size) ||
++		    !range_valid(QCOM_SL_TCB_PAGES * SZ_4K,
++				 virtual_address, raw_size))
++			return -EINVAL;
++		memcpy(ctx->tcb + virtual_address, file + raw_offset, raw_size);
++	}
++
++	ctx->tcb_size = QCOM_SL_TCB_PAGES * SZ_4K;
++	*cert = file + security_offset;
++	*cert_size = security_size;
++	return 0;
++}
++
++static int qcom_sl_prepare(struct qcom_sl_context *ctx)
++{
++	const struct qcom_sl_blob_header *blob;
++	const u8 *file, *cert;
++	size_t file_size, cert_size, cert_pages, buffer_pages;
++	ulong transition;
++	int ret;
++
++	BUILD_BUG_ON(sizeof(struct qcom_sl_tz_data) != 0xc8);
++
++	blob = (const void *)CONFIG_QCOM_SECURE_LAUNCH_BLOB_ADDR;
++	if (memcmp(blob->magic, QCOM_SL_BLOB_MAGIC, sizeof(blob->magic)) ||
++	    blob->version != QCOM_SL_BLOB_VERSION ||
++	    !blob->tcb_size || !blob->mssecapp_size || !blob->acpi_size ||
++	    blob->tcb_size > QCOM_SL_BLOB_MAX_SIZE ||
++	    blob->mssecapp_size > QCOM_SL_BLOB_MAX_SIZE ||
++	    blob->acpi_size > QCOM_ACPI_MAX_SIZE ||
++	    blob->tcb_size > QCOM_SL_BLOB_MAX_SIZE - blob->mssecapp_size ||
++	    blob->tcb_size + blob->mssecapp_size >
++		QCOM_SL_BLOB_MAX_SIZE - blob->acpi_size)
++		return -ENOENT;
++
++	file = (const u8 *)(blob + 1);
++	file_size = blob->tcb_size;
++	ret = qcom_sl_parse_and_load_pe(ctx, file, file_size,
++					&cert, &cert_size);
++	if (ret)
++		return ret;
++	ctx->mssecapp = file + file_size;
++	ctx->mssecapp_size = blob->mssecapp_size;
++	if (ctx->mssecapp_size < 64 ||
++	    get_unaligned_le32(ctx->mssecapp) != 0x464c457f ||
++	    get_unaligned_le16(ctx->mssecapp + 18) != 0xb7)
++		return -EINVAL;
++	ctx->acpi = ctx->mssecapp + ctx->mssecapp_size;
++	ctx->acpi_size = blob->acpi_size;
++
++	cert_pages = cert_size / SZ_4K + 1;
++	buffer_pages = 27 + cert_pages + 3;
++	ctx->buffer_size = buffer_pages * SZ_4K;
++	ctx->buffer = (void *)QCOM_SL_BUFFER_ADDR;
++	ctx->boot_params = (void *)QCOM_SL_BOOT_PARAMS_ADDR;
++
++	memset(ctx->buffer, 0, ctx->buffer_size);
++	memset(ctx->boot_params, 0xff,
++	       QCOM_SL_BOOT_PARAMS_PAGES * SZ_4K);
++	ctx->params = ctx->buffer + SZ_4K;
++	ctx->tz = ctx->buffer + 2 * SZ_4K;
++
++	ctx->tz->version = 1;
++	ctx->tz->cert_offset = 25 * SZ_4K;
++	ctx->tz->cert_size = cert_size;
++	memcpy((u8 *)ctx->tz + ctx->tz->cert_offset, cert, cert_size);
++	ctx->tz->tcg_offset = ctx->tz->cert_offset + cert_size;
++	ctx->tz->tcg_size = QCOM_SL_TCG_PAGES * SZ_4K;
++	ctx->tz->tcg_version = 2;
++	ctx->tz->this_size = (buffer_pages - 3) * SZ_4K;
++	ctx->tz->this_phys = (ulong)ctx->tz;
++	ctx->tz->crt_offset = SZ_4K;
++	ctx->tz->crt_page_count = QCOM_SL_CRT_PAGES;
++	ctx->tz->boot_params = (ulong)ctx->boot_params;
++	ctx->tz->boot_params_size = QCOM_SL_BOOT_PARAMS_PAGES * SZ_4K;
++
++	transition = (ulong)qcom_sl_transition_entry;
++	ctx->tz->transition_entry = transition;
++	ctx->tz->transition_virt = ALIGN_DOWN(transition, SZ_4K);
++	ctx->tz->transition_phys = ctx->tz->transition_virt;
++	ctx->tz->transition_size = 2 * SZ_4K;
++	ctx->tz->transition_data.mair = (ulong)qcom_sl_jump_buffer;
++	ctx->arg_size = ctx->tz->this_size;
++
++	if (ctx->tz->tcg_offset + ctx->tz->tcg_size > ctx->arg_size)
++		return -E2BIG;
++
++	flush_dcache_range((ulong)ctx->tcb,
++			   (ulong)ctx->tcb + ctx->tcb_size);
++	flush_dcache_range((ulong)ctx->buffer,
++			   (ulong)ctx->buffer + ctx->buffer_size);
++	flush_dcache_range((ulong)ctx->boot_params,
++			   (ulong)ctx->boot_params +
++			   QCOM_SL_BOOT_PARAMS_PAGES * SZ_4K);
++	return 0;
++}
++
++int qcom_secure_launch_prepare_platform(void)
++{
++	struct qcom_sl_context ctx = { 0 };
++	int ret;
++
++	ret = qcom_sl_prepare(&ctx);
++	if (ret)
++		return ret;
++
++	return qcom_acpi_register(&ctx);
++}
++
++int qcom_secure_launch(void)
++{
++	struct qcom_sl_context ctx = { 0 };
++	ulong ret;
++	int err;
++
++	if (current_el() == 2)
++		return 0;
++	if (current_el() != 1)
++		return -EPERM;
++
++	err = qcom_sl_prepare(&ctx);
++	if (err) {
++		printf("Dragon: cannot prepare Secure Launch (%d)\n", err);
++		return err;
++	}
++
++	err = qcom_acpi_register(&ctx);
++	if (err) {
++		printf("Dragon: cannot register Secure Launch ACPI data (%d)\n",
++		       err);
++		return err;
++	}
++
++	ret = qcom_sl_smc(&ctx, QCOM_SL_CMD_IS_AVAILABLE);
++	if (ret) {
++		printf("Dragon: Secure Launch unavailable (a0=%lx)\n", ret);
++		return -ENOSYS;
++	}
++	printf("Dragon: Secure Launch buffers params=%lx tcb=%lx/%llx args=%lx/%llx transition=%lx\n",
++	       (ulong)ctx.params, (ulong)ctx.tcb,
++	       (unsigned long long)ctx.tcb_size,
++	       (ulong)ctx.tz, (unsigned long long)ctx.arg_size,
++	       (ulong)qcom_sl_transition_entry);
++
++	err = qcom_qsee_load_mssecapp(&ctx);
++	if (err) {
++		printf("Dragon: cannot load Secure Launch trusted app (%d)\n", err);
++		return err;
++	}
++
++	/* AUTH may transfer RAM ownership, so clean every U-Boot cache first. */
++	flush_dcache_all();
++	ret = qcom_sl_smc(&ctx, QCOM_SL_CMD_AUTH);
++	if (ret) {
++		printf("Dragon: Secure Launch authentication failed (a0=%lx)\n",
++		       ret);
++		return -EACCES;
++	}
++
++	if (!qcom_sl_setjmp(qcom_sl_jump_buffer)) {
++		flush_dcache_range((ulong)qcom_sl_jump_buffer,
++				   (ulong)qcom_sl_jump_buffer +
++				   sizeof(qcom_sl_jump_buffer));
++		ret = qcom_sl_smc(&ctx, QCOM_SL_CMD_LAUNCH);
++		printf("Dragon: Secure Launch returned unexpectedly (a0=%lx)\n",
++		       ret);
++		return -EIO;
++	}
++
++	if (current_el() != 2) {
++		printf("Dragon: Secure Launch transition returned at EL%u\n",
++		       current_el());
++		return -EIO;
++	}
++
++	puts("Dragon: Secure Launch handed U-Boot EL2\n");
++	return 0;
++}
+diff --git a/arch/arm/mach-snapdragon/secure_launch_transition.S b/arch/arm/mach-snapdragon/secure_launch_transition.S
+new file mode 100644
+index 00000000..102c1244
+--- /dev/null
++++ b/arch/arm/mach-snapdragon/secure_launch_transition.S
+@@ -0,0 +1,135 @@
++/* SPDX-License-Identifier: BSD-3-Clause */
++/*
++ * Copyright (c) 2024 Nikita Travkin <nikita@trvn.ru>
++ * Copyright (c) 2026 Asius Technologies, Inc.
++ *
++ * EL1-to-EL2 return trampoline derived from slbounce.
++ */
++
++#include <config.h>
++#include <linux/linkage.h>
++
++#define HCR_EL2_TGE		(1 << 27)
++#define HCR_EL2_E2H		(1ULL << 34)
++#define CNTHCTL_EL2_EL1PCTEN	(1 << 0)
++#define CNTHCTL_EL2_EL1PCEN	(1 << 1)
++
++.macro movq reg, value
++	movz	\reg, (\value >> 0) & 0xffff
++	movk	\reg, (\value >> 16) & 0xffff, lsl 16
++	movk	\reg, (\value >> 32) & 0xffff, lsl 32
++	movk	\reg, (\value >> 48) & 0xffff, lsl 48
++.endm
++
++.pushsection .text.qcom_sl_transition_entry, "ax"
++ENTRY(qcom_sl_transition_entry)
++	mov	x9, x0
++	hvc	#1
++
++	/* TCB returns from the HVC in EL2; temporarily use physical addresses. */
++	mrs	x0, sctlr_el2
++	bic	x0, x0, #1
++	msr	sctlr_el2, x0
++	isb
++	msr	daifset, #0xf
++
++	/* transition_data.mair carries the saved U-Boot jump-buffer address. */
++	ldr	x0, [x9]
++	mov	x1, #1
++	bl	qcom_sl_longjmp
++
++	/* No valid path returns here. */
++	movz	x0, #8
++	movk	x0, #0xc400, lsl #16
++	smc	#0
++1:	wfe
++	b	1b
++ENDPROC(qcom_sl_transition_entry)
++.popsection
++
++.pushsection .text.qcom_sl_setjmp, "ax"
++ENTRY(qcom_sl_setjmp)
++	.macro save_sysreg reg, offset
++		mrs	x2, \reg
++		str	x2, [x0, \offset]
++	.endm
++
++	save_sysreg vbar_el1,  #104
++	save_sysreg tpidr_el0, #112
++	save_sysreg cpacr_el1, #120
++	save_sysreg ttbr0_el1, #128
++	save_sysreg tcr_el1,   #136
++	save_sysreg mair_el1,  #144
++	save_sysreg sctlr_el1, #152
++	save_sysreg daif,      #160
++
++	stp	x19, x20, [x0, #0]
++	stp	x21, x22, [x0, #16]
++	stp	x23, x24, [x0, #32]
++	stp	x25, x26, [x0, #48]
++	stp	x27, x28, [x0, #64]
++	stp	x29, x30, [x0, #80]
++	mov	x2, sp
++	str	x2, [x0, #96]
++	mov	x0, #0
++	ret
++ENDPROC(qcom_sl_setjmp)
++.popsection
++
++.pushsection .text.qcom_sl_longjmp, "ax"
++ENTRY(qcom_sl_longjmp)
++	.macro load_sysreg reg, offset
++		ldr	x2, [x0, \offset]
++		msr	\reg, x2
++		isb
++	.endm
++
++	tlbi	alle2
++	dsb	ish
++	tlbi	alle2
++
++	load_sysreg vbar_el2,  #104
++	load_sysreg tpidr_el0, #112
++
++	movq	x2, (HCR_EL2_TGE | HCR_EL2_E2H)
++	msr	hcr_el2, x2
++	isb
++	mov	x2, #(CNTHCTL_EL2_EL1PCTEN | CNTHCTL_EL2_EL1PCEN)
++	msr	cnthctl_el2, x2
++
++	load_sysreg cpacr_el1, #120
++	load_sysreg ttbr0_el2, #128
++	load_sysreg tcr_el2,   #136
++	load_sysreg mair_el2,  #144
++	dsb	ish
++	isb
++
++	ldr	x2, [x0, #152]
++	movq	x3, 0x00001000faef387f
++	and	x2, x2, x3
++	movq	x3, 0x0000000030c50830
++	orr	x2, x2, x3
++	msr	sctlr_el2, x2
++	isb
++
++	ldp	x19, x20, [x0, #0]
++	ldp	x21, x22, [x0, #16]
++	ldp	x23, x24, [x0, #32]
++	ldp	x25, x26, [x0, #48]
++	ldp	x27, x28, [x0, #64]
++	ldp	x29, x30, [x0, #80]
++	ldr	x2, [x0, #96]
++	mov	sp, x2
++	load_sysreg daif, #160
++
++	cmp	w1, #0
++	csinc	w0, w1, wzr, ne
++	br	x30
++ENDPROC(qcom_sl_longjmp)
++.popsection
++
++.data
++.align 3
++.global qcom_sl_jump_buffer
++qcom_sl_jump_buffer:
++	.zero 8 * 21
+diff --git a/board/qualcomm/asius-dragon-q6a.env b/board/qualcomm/asius-dragon-q6a.env
+new file mode 100644
+index 00000000..f0bc4053
+--- /dev/null
++++ b/board/qualcomm/asius-dragon-q6a.env
+@@ -0,0 +1,43 @@
++stdin=serial
++stdout=serial
++stderr=serial
++
++kernel_addr_r=a1000000
++fdt_addr_r=a5000000
++qupfw_addr_r=a6000000
++dspfw_addr_r=a7000000
++fdt_high=ffffffffffffffff
++bootargs_base=console=ttyMSM0,115200n8 earlycon rootwait rw fw_devlink=permissive quiet loglevel=3 msm.separate_gpu_kms=1
++vamos_dtb=qcs6490-radxa-dragon-q6a.dtb
++vamos_load=
++	if ext4load ${vamos_interface} ${vamos_device}:${vamos_rootpart} ${dspfw_addr_r} lib/firmware/qcom/qcs6490/radxa/dragon-q6a/adsp.mbn &&
++	   dspboot ${dspfw_addr_r} ${filesize} 1 8b800000 2800000 &&
++	   ext4load ${vamos_interface} ${vamos_device}:${vamos_rootpart} ${dspfw_addr_r} lib/firmware/qcom/qcs6490/radxa/dragon-q6a/cdsp.mbn &&
++	   dspboot ${dspfw_addr_r} ${filesize} 12 8e000000 1e00000 &&
++	   sllaunch &&
++	   fatload ${vamos_interface} ${vamos_device}:${vamos_esp} ${qupfw_addr_r} EFI/vamos/qupv3fw.elf &&
++	   genifw ${qupfw_addr_r} ${filesize} &&
++	   fatload ${vamos_interface} ${vamos_device}:${vamos_esp} ${kernel_addr_r} EFI/vamos/Image &&
++	   fatload ${vamos_interface} ${vamos_device}:${vamos_esp} ${fdt_addr_r} ${vamos_dtb}; then
++		fdt addr ${fdt_addr_r};
++		fdt resize 1000;
++		fdt memory 80000000 200000000;
++		setenv bootargs ${bootargs_base} root=${vamos_root} vamos.slot=${vamos_slot} ${vamos_state_arg};
++		booti ${kernel_addr_r} - ${fdt_addr_r};
++	fi
++vamos_nvme=
++	setenv vamos_interface nvme;
++	setenv vamos_device 0;
++	pci enum && nvme scan && vamosboot nvme 0 &&
++	if test "${vamos_edl}" = "1"; then edl; else run vamos_load; fi;
++	vamosboot nvme 0 fail && run vamos_load
++vamos_ufs=
++	setenv vamos_interface scsi;
++	setenv vamos_device 0;
++	ufs init && scsi scan && vamosboot scsi 0 &&
++	if test "${vamos_edl}" = "1"; then edl; else run vamos_load; fi;
++	vamosboot scsi 0 fail && run vamos_load
++bootcmd=
++	run vamos_nvme;
++	run vamos_ufs;
++	echo vamOS: no bootable NVMe or UFS slot found
+diff --git a/boot/Kconfig b/boot/Kconfig
+index c67dc0ba..9c1908b9 100644
+--- a/boot/Kconfig
++++ b/boot/Kconfig
+@@ -1612,6 +1612,16 @@ config BOOTDELAY
+ 
+ 	  See doc/README.autoboot for details.
+ 
++config AUTOBOOT_ZERO_DELAY_RESCUE_MS
++	int "zero-delay serial rescue window in milliseconds"
++	default 0
++	range 0 1000
++	help
++	  Poll the console for this many milliseconds when BOOTDELAY is zero.
++	  This retains fast unattended boot while giving automated recovery tools
++	  a bounded chance to stop autoboot. A value of zero keeps the standard
++	  single instantaneous input check.
++
+ config AUTOBOOT_KEYED
+ 	bool "Stop autobooting via specific input key / string"
+ 	help
+diff --git a/cmd/Kconfig b/cmd/Kconfig
+index ff90a870..52082deb 100644
+--- a/cmd/Kconfig
++++ b/cmd/Kconfig
+@@ -539,6 +539,20 @@ config CMD_ABOOTIMG
+ 
+ 	  See doc/android/boot-image.rst for details.
+ 
++config CMD_VAMOSBOOT
++	bool "vamosboot"
++	depends on ARCH_SNAPDRAGON && FAT_WRITE
++	help
++	  Select, persist, and roll back a vamOS A/B slot using redundant
++	  EFI/vamos/grubenv records on the two boot ESPs.
++
++config CMD_QCOM_EDL
++	bool "edl"
++	depends on ARCH_SNAPDRAGON && ARM64
++	help
++	  Request Qualcomm emergency download mode through the PSCI 1.1 vendor
++	  SYSTEM_RESET2 interface. This provides software recovery without UEFI.
++
+ config CMD_CEDIT
+ 	bool "cedit - Configuration editor"
+ 	depends on CEDIT
+diff --git a/cmd/Makefile b/cmd/Makefile
+index ce772e55..89472e1c 100644
+--- a/cmd/Makefile
++++ b/cmd/Makefile
+@@ -200,6 +200,8 @@ obj-$(CONFIG_CMD_UNLZ4) += unlz4.o
+ obj-$(CONFIG_CMD_UNZIP) += unzip.o
+ obj-$(CONFIG_CMD_UPL) += upl.o
+ obj-$(CONFIG_CMD_VIRTIO) += virtio.o
++obj-$(CONFIG_CMD_VAMOSBOOT) += vamosboot.o
++obj-$(CONFIG_CMD_QCOM_EDL) += qcom_edl.o
+ obj-$(CONFIG_CMD_WDT) += wdt.o
+ obj-$(CONFIG_CMD_LZMADEC) += lzmadec.o
+ obj-$(CONFIG_CMD_UFS) += ufs.o
+diff --git a/cmd/qcom_edl.c b/cmd/qcom_edl.c
+new file mode 100644
+index 00000000..8aad8a64
+--- /dev/null
++++ b/cmd/qcom_edl.c
+@@ -0,0 +1,151 @@
++// SPDX-License-Identifier: GPL-2.0+
++/* Qualcomm software-only emergency download reset. */
++
++#include <command.h>
++#include <asm/system.h>
++#include <linux/arm-smccc.h>
++#include <linux/kernel.h>
++#include <qcom_secure_launch.h>
++#include <vsprintf.h>
++
++/*
++ * Keep the two SMCs adjacent and register-exact.  The same sequence, loaded
++ * as a standalone RAM stub, is proven to enumerate the Dragon as 05c6:9008.
++ * Inserting a C call (including console output) between the cookie write and
++ * SDI-disable/reset makes this firmware's secure monitor wedge instead.
++ */
++extern long qcom_enter_edl_exact(void);
++
++asm(
++".pushsection .text.qcom_enter_edl_exact, \"ax\"\n"
++".align 4\n"
++".global qcom_enter_edl_exact\n"
++".type qcom_enter_edl_exact, %function\n"
++"qcom_enter_edl_exact:\n"
++"	movz	x0, #0x0502\n"
++"	movk	x0, #0x8200, lsl #16\n"
++"	mov	x1, #2\n"
++"	movz	x2, #0x3000\n"
++"	movk	x2, #0x01fd, lsl #16\n"
++"	mov	x3, #1\n"
++"	mov	x4, #0\n"
++"	mov	x5, #0\n"
++"	mov	x6, #0\n"
++"	mov	x7, #0\n"
++"	smc	#0\n"
++"	cbnz	x0, 1f\n"
++"	movz	x0, #0x0108\n"
++"	movk	x0, #0x8200, lsl #16\n"
++"	mov	x1, #1\n"
++"	mov	x2, #1\n"
++"	mov	x3, #0\n"
++"	mov	x4, #0\n"
++"	mov	x5, #0\n"
++"	mov	x6, #0\n"
++"	mov	x7, #0\n"
++"	smc	#0\n"
++"1:	ret\n"
++".size qcom_enter_edl_exact, . - qcom_enter_edl_exact\n"
++".popsection\n"
++);
++
++static int do_qcom_edl(struct cmd_tbl *cmdtp, int flag, int argc,
++		       char *const argv[])
++{
++	long ret;
++
++	puts("Entering Qualcomm EDL through the exact stock SMC sequence...\n");
++	ret = qcom_enter_edl_exact();
++	printf("Qualcomm EDL sequence returned unexpectedly: %ld\n", ret);
++	return CMD_RET_FAILURE;
++}
++
++U_BOOT_CMD(
++	edl, 1, 0, do_qcom_edl,
++	"enter Qualcomm emergency download mode",
++	"- set the Dragon EDL cookie and reset through Qualcomm SCM"
++);
++
++static int do_qcom_el2(struct cmd_tbl *cmdtp, int flag, int argc,
++		       char *const argv[])
++{
++	struct arm_smccc_res res;
++	int ret;
++
++	printf("Dragon: requesting Gunyah takeover from EL%u\n", current_el());
++	ret = qcom_secure_launch_prepare_platform();
++	if (ret) {
++		printf("Dragon: cannot register Gunyah platform data (%d)\n", ret);
++		return CMD_RET_FAILURE;
++	}
++	arm_smccc_smc(0x02000121, 0, 0, 1, 0, 0, 0, 0, &res);
++	printf("Dragon: takeover returned at EL%u (a0=%lx a1=%lx a2=%lx a3=%lx)\n",
++	       current_el(), res.a0, res.a1, res.a2, res.a3);
++
++	return current_el() == 2 ? CMD_RET_SUCCESS : CMD_RET_FAILURE;
++}
++
++U_BOOT_CMD(
++	el2, 1, 0, do_qcom_el2,
++	"request the Dragon Gunyah EL2 takeover",
++	"- diagnostic command used before storage and SMMU initialization"
++);
++
++static int do_qcom_sl_available(struct cmd_tbl *cmdtp, int flag, int argc,
++				char *const argv[])
++{
++	int ret = qcom_secure_launch_available();
++
++	printf("Dragon: Secure Launch availability at EL%u: %s (%d)\n",
++	       current_el(), ret ? "unavailable" : "available", ret);
++	return ret ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(
++	slavail, 1, 0, do_qcom_sl_available,
++	"probe the Qualcomm Secure Launch service",
++	"- non-destructive TrustZone ABI availability test"
++);
++
++static int do_qcom_sl_launch(struct cmd_tbl *cmdtp, int flag, int argc,
++			     char *const argv[])
++{
++	int ret = qcom_secure_launch();
++
++	printf("Dragon: Secure Launch command completed at EL%u (%d)\n",
++	       current_el(), ret);
++	return ret ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(
++	sllaunch, 1, 0, do_qcom_sl_launch,
++	"take over Gunyah and return U-Boot at EL2",
++	"- authenticate the stock signed TCB and perform Secure Launch"
++);
++
++static int do_qcom_pas_boot(struct cmd_tbl *cmdtp, int flag, int argc,
++			    char *const argv[])
++{
++	ulong firmware_addr, firmware_size, pas_id, region_addr, region_size;
++	int ret;
++
++	if (argc != 6)
++		return CMD_RET_USAGE;
++	firmware_addr = hextoul(argv[1], NULL);
++	firmware_size = hextoul(argv[2], NULL);
++	pas_id = hextoul(argv[3], NULL);
++	region_addr = hextoul(argv[4], NULL);
++	region_size = hextoul(argv[5], NULL);
++
++	ret = qcom_pas_boot((void *)firmware_addr, firmware_size, pas_id,
++			    region_addr, region_size);
++	if (ret)
++		printf("Dragon: PAS %lu boot failed (%d)\n", pas_id, ret);
++	return ret ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(
++	dspboot, 6, 0, do_qcom_pas_boot,
++	"authenticate and start a Qualcomm PAS firmware image",
++	"<firmware_addr> <firmware_size> <pas_id> <region_addr> <region_size>"
++);
+diff --git a/cmd/vamosboot.c b/cmd/vamosboot.c
+new file mode 100644
+index 00000000..37a43060
+--- /dev/null
++++ b/cmd/vamosboot.c
+@@ -0,0 +1,305 @@
++// SPDX-License-Identifier: GPL-2.0+
++/* Redundant vamOS A/B selector compatible with the existing GRUB records. */
++
++#include <blk.h>
++#include <command.h>
++#include <env.h>
++#include <fs.h>
++#include <linux/errno.h>
++#include <linux/string.h>
++#include <malloc.h>
++#include <vsprintf.h>
++
++#define VAMOS_ENV_PATH "EFI/vamos/grubenv"
++#define VAMOS_ENV_SIZE 1024
++
++enum vamos_phase {
++	VAMOS_PHASE_INVALID,
++	VAMOS_PHASE_ARMED,
++	VAMOS_PHASE_ATTEMPTED,
++	VAMOS_PHASE_STABLE,
++};
++
++struct vamos_state {
++	unsigned long generation;
++	char active;
++	char pending;
++	enum vamos_phase phase;
++	bool edl_request;
++	char root_a[64];
++	char root_b[64];
++	int partition;
++};
++
++static bool vamos_value(const char *buf, const char *name, char *out, size_t size)
++{
++	const char *line = buf;
++	size_t name_len = strlen(name);
++
++	while (line && *line) {
++		const char *end = strchr(line, '\n');
++		size_t line_len = end ? end - line : strlen(line);
++
++		if (line_len > name_len && !memcmp(line, name, name_len) &&
++		    line[name_len] == '=') {
++			size_t value_len = line_len - name_len - 1;
++
++			if (!value_len || value_len >= size)
++				return false;
++			memcpy(out, line + name_len + 1, value_len);
++			out[value_len] = '\0';
++			return true;
++		}
++		line = end ? end + 1 : NULL;
++	}
++
++	return false;
++}
++
++static int vamos_rank(enum vamos_phase phase)
++{
++	switch (phase) {
++	case VAMOS_PHASE_STABLE:
++		return 3;
++	case VAMOS_PHASE_ATTEMPTED:
++		return 2;
++	case VAMOS_PHASE_ARMED:
++		return 1;
++	default:
++		return 0;
++	}
++}
++
++static int vamos_set_device(const char *interface, const char *device, int part)
++{
++	char devpart[24];
++
++	snprintf(devpart, sizeof(devpart), "%s:%d", device, part);
++	return fs_set_blk_dev(interface, devpart, FS_TYPE_FAT);
++}
++
++static int vamos_read_state(const char *interface, const char *device, int part,
++			    struct vamos_state *state)
++{
++	char generation[24], active[4], pending[4], phase[16], edl_request[4];
++	loff_t read = 0;
++	char *buf;
++	int ret;
++
++	buf = malloc(VAMOS_ENV_SIZE + 1);
++	if (!buf)
++		return -ENOMEM;
++
++	ret = vamos_set_device(interface, device, part);
++	if (ret)
++		goto out;
++	ret = fs_read(VAMOS_ENV_PATH, (ulong)buf, 0, VAMOS_ENV_SIZE, &read);
++	if (ret || read != VAMOS_ENV_SIZE) {
++		ret = ret ?: -EINVAL;
++		goto out;
++	}
++	buf[VAMOS_ENV_SIZE] = '\0';
++
++	if (!vamos_value(buf, "generation", generation, sizeof(generation)) ||
++	    !vamos_value(buf, "active", active, sizeof(active)) ||
++	    !vamos_value(buf, "phase", phase, sizeof(phase)) ||
++	    !vamos_value(buf, "root_a", state->root_a, sizeof(state->root_a)) ||
++	    !vamos_value(buf, "root_b", state->root_b, sizeof(state->root_b))) {
++		ret = -EINVAL;
++		goto out;
++	}
++
++	state->generation = simple_strtoul(generation, NULL, 10);
++	state->active = active[0];
++	state->pending = 0;
++	state->edl_request = false;
++	if (vamos_value(buf, "pending", pending, sizeof(pending)))
++		state->pending = pending[0];
++	if (vamos_value(buf, "edl_request", edl_request,
++			sizeof(edl_request)) && !strcmp(edl_request, "1"))
++		state->edl_request = true;
++	if (!strcmp(phase, "stable"))
++		state->phase = VAMOS_PHASE_STABLE;
++	else if (!strcmp(phase, "armed"))
++		state->phase = VAMOS_PHASE_ARMED;
++	else if (!strcmp(phase, "attempted"))
++		state->phase = VAMOS_PHASE_ATTEMPTED;
++	else
++		state->phase = VAMOS_PHASE_INVALID;
++	state->partition = part;
++
++	if ((state->active != 'a' && state->active != 'b') ||
++	    !vamos_rank(state->phase) || strncmp(state->root_a, "PART", 4) ||
++	    strncmp(state->root_b, "PART", 4) ||
++	    (state->phase != VAMOS_PHASE_STABLE &&
++	     ((state->pending != 'a' && state->pending != 'b') ||
++	      state->pending == state->active)))
++		ret = -EINVAL;
++	else
++		ret = 0;
++out:
++	free(buf);
++	return ret;
++}
++
++static int vamos_write_one(const char *interface, const char *device, int part,
++			   const struct vamos_state *state)
++{
++	const char *phase = state->phase == VAMOS_PHASE_STABLE ? "stable" :
++		state->phase == VAMOS_PHASE_ATTEMPTED ? "attempted" : "armed";
++	char pending[2] = { state->pending, '\0' };
++	loff_t written = 0;
++	char *buf;
++	int len, ret;
++
++	buf = malloc(VAMOS_ENV_SIZE);
++	if (!buf)
++		return -ENOMEM;
++	memset(buf, '#', VAMOS_ENV_SIZE);
++	len = snprintf(buf, VAMOS_ENV_SIZE,
++		"# GRUB Environment Block\n"
++		"# WARNING: Do not edit this file by tools other than grub-editenv!!!\n"
++		"generation=%lu\nactive=%c\npending=%s\nphase=%s\n"
++		"root_a=%s\nroot_b=%s\nedl_request=%u\n",
++		state->generation, state->active, pending, phase,
++		state->root_a, state->root_b, state->edl_request);
++	if (len <= 0 || len >= VAMOS_ENV_SIZE) {
++		ret = -E2BIG;
++		goto out;
++	}
++	/* Replace snprintf's terminator with GRUB environment padding. */
++	memset(buf + len, '#', VAMOS_ENV_SIZE - len);
++
++	ret = vamos_set_device(interface, device, part);
++	if (ret)
++		goto out;
++	ret = fs_write(VAMOS_ENV_PATH, (ulong)buf, 0, VAMOS_ENV_SIZE, &written);
++	if (!ret && written != VAMOS_ENV_SIZE)
++		ret = -EIO;
++out:
++	free(buf);
++	return ret;
++}
++
++static int vamos_persist(const char *interface, const char *device,
++			 const struct vamos_state *state)
++{
++	int ret_b, ret_a;
++
++	/* Backup first: a reset between writes leaves at least one valid record. */
++	ret_b = vamos_write_one(interface, device, 3, state);
++	ret_a = vamos_write_one(interface, device, 1, state);
++	return ret_a && ret_b ? ret_a : 0;
++}
++
++static void vamos_export_choice(const struct vamos_state *state, char slot,
++				const char *boot_state_arg)
++{
++	char esp[4] = { slot == 'a' ? '1' : '3', '\0' };
++	char rootpart[4] = { slot == 'a' ? '2' : '4', '\0' };
++	char slot_string[2] = { slot, '\0' };
++
++	env_set("vamos_slot", slot_string);
++	env_set("vamos_esp", esp);
++	env_set("vamos_rootpart", rootpart);
++	env_set("vamos_root", slot == 'a' ? state->root_a : state->root_b);
++	env_set("vamos_state_arg", boot_state_arg);
++}
++
++static int do_vamosboot(struct cmd_tbl *cmdtp, int flag, int argc,
++			char *const argv[])
++{
++	struct vamos_state states[2], *chosen = NULL;
++	const char *interface, *device;
++	char slot;
++	int valid = 0, i;
++	const char *boot_state_arg = "";
++
++	if (argc < 3 || argc > 4)
++		return CMD_RET_USAGE;
++	interface = argv[1];
++	device = argv[2];
++	env_set("vamos_edl", "0");
++
++	for (i = 0; i < 2; i++) {
++		int part = i ? 3 : 1;
++
++		if (vamos_read_state(interface, device, part, &states[valid]))
++			continue;
++		if (!chosen || states[valid].generation > chosen->generation ||
++		    (states[valid].generation == chosen->generation &&
++		     vamos_rank(states[valid].phase) > vamos_rank(chosen->phase)))
++			chosen = &states[valid];
++		valid++;
++	}
++	if (!chosen) {
++		printf("vamOS: no valid A/B state on %s %s\n", interface, device);
++		return CMD_RET_FAILURE;
++	}
++
++	if (argc == 3 && chosen->edl_request) {
++		/*
++		 * Advance the generation before clearing the redundant request.  If
++		 * only one ESP is writable, its cleared record must outrank the stale
++		 * request on the other ESP on the next boot.
++		 */
++		chosen->generation++;
++		chosen->edl_request = false;
++		if (vamos_persist(interface, device, chosen)) {
++			printf("vamOS: could not consume software EDL request\n");
++		} else {
++			printf("vamOS: entering one-shot software EDL recovery\n");
++			env_set("vamos_edl", "1");
++			return CMD_RET_SUCCESS;
++		}
++	}
++
++	if (argc == 4 && !strcmp(argv[3], "fail")) {
++		if (chosen->phase == VAMOS_PHASE_ATTEMPTED) {
++			/* The pending trial failed: return to the known-good slot. */
++			slot = chosen->active;
++			printf("vamOS: trial slot %c failed; returning to %c\n",
++			       chosen->pending, slot);
++		} else {
++			/* The stable slot failed: promote its peer as recovery. */
++			chosen->active = chosen->active == 'a' ? 'b' : 'a';
++			slot = chosen->active;
++			boot_state_arg = "vamos.recovery=1";
++			printf("vamOS: stable slot failed; trying recovery slot %c\n",
++			       slot);
++		}
++		chosen->pending = 0;
++		chosen->phase = VAMOS_PHASE_STABLE;
++		vamos_persist(interface, device, chosen);
++	} else if (chosen->phase == VAMOS_PHASE_ARMED) {
++		slot = chosen->pending;
++		chosen->phase = VAMOS_PHASE_ATTEMPTED;
++		if (vamos_persist(interface, device, chosen)) {
++			printf("vamOS: could not persist trial; keeping slot %c\n",
++			       chosen->active);
++			slot = chosen->active;
++		} else {
++			boot_state_arg = "vamos.trial=1";
++		}
++	} else if (chosen->phase == VAMOS_PHASE_ATTEMPTED) {
++		printf("vamOS: rolling back uncommitted slot %c\n", chosen->pending);
++		chosen->pending = 0;
++		chosen->phase = VAMOS_PHASE_STABLE;
++		vamos_persist(interface, device, chosen);
++		slot = chosen->active;
++	} else {
++		slot = chosen->active;
++	}
++
++	vamos_export_choice(chosen, slot, boot_state_arg);
++	printf("vamOS: booting slot %c%s\n", slot,
++	       *boot_state_arg ? " (non-stable path)" : "");
++	return CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(
++	vamosboot, 4, 0, do_vamosboot,
++	"select and persist the vamOS A/B slot",
++	"<interface> <device> [fail]\n"
++	"    - read redundant EFI/vamos/grubenv records and export vamos_*"
++);
+diff --git a/common/autoboot.c b/common/autoboot.c
+index 4b80ddb5..1a220a1a 100644
+--- a/common/autoboot.c
++++ b/common/autoboot.c
+@@ -389,6 +389,23 @@ static int abortboot_single_key(int bootdelay)
+ 		abort = 1;	/* don't auto boot	*/
+ 	}
+ 
++	/* A zero-second boot normally samples the UART only once. Give remote
++	 * recovery tooling a short, explicitly bounded rescue window without
++	 * paying a full one-second CONFIG_BOOTDELAY penalty.
++	 */
++	if (!bootdelay && !abort && CONFIG_AUTOBOOT_ZERO_DELAY_RESCUE_MS) {
++		ts = get_timer(0);
++		do {
++			if (tstc()) {
++				getchar();
++				print_boot_delay(0);
++				abort = 1;
++				break;
++			}
++			udelay(1000);
++		} while (get_timer(ts) < CONFIG_AUTOBOOT_ZERO_DELAY_RESCUE_MS);
++	}
++
+ 	while ((bootdelay > 0) && (!abort)) {
+ 		--bootdelay;
+ 		/* delay 1000 ms */
+diff --git a/drivers/clk/qcom/clock-sc7280.c b/drivers/clk/qcom/clock-sc7280.c
+index 91e3fcc2..dbe4d8ed 100644
+--- a/drivers/clk/qcom/clock-sc7280.c
++++ b/drivers/clk/qcom/clock-sc7280.c
+@@ -109,6 +109,26 @@ static ulong sc7280_set_rate(struct clk *clk, ulong rate)
+ 		clk_rcg_set_rate_mnd(priv->base, 0x17860,
+ 				     freq->pre_div, freq->m, freq->n, freq->src, 16);
+ 		return freq->freq;
++	case GCC_QUPV3_WRAP1_S2_CLK:
++		freq = qcom_find_freq(ftbl_gcc_qupv3_wrap0_s2_clk_src, rate);
++		clk_rcg_set_rate_mnd(priv->base, 0x18270,
++				     freq->pre_div, freq->m, freq->n, freq->src, 16);
++		return freq->freq;
++	case GCC_QUPV3_WRAP1_S4_CLK:
++		freq = qcom_find_freq(ftbl_gcc_qupv3_wrap0_s2_clk_src, rate);
++		clk_rcg_set_rate_mnd(priv->base, 0x184d0,
++				     freq->pre_div, freq->m, freq->n, freq->src, 16);
++		return freq->freq;
++	case GCC_QUPV3_WRAP1_S5_CLK:
++		freq = qcom_find_freq(ftbl_gcc_qupv3_wrap0_s2_clk_src, rate);
++		clk_rcg_set_rate_mnd(priv->base, 0x18600,
++				     freq->pre_div, freq->m, freq->n, freq->src, 16);
++		return freq->freq;
++	case GCC_QUPV3_WRAP1_S6_CLK:
++		freq = qcom_find_freq(ftbl_gcc_qupv3_wrap0_s2_clk_src, rate);
++		clk_rcg_set_rate_mnd(priv->base, 0x18730,
++				     freq->pre_div, freq->m, freq->n, freq->src, 16);
++		return freq->freq;
+ 	case GCC_USB30_PRIM_MASTER_CLK:
+ 		freq = qcom_find_freq(ftbl_gcc_usb30_prim_master_clk_src, rate);
+ 		clk_rcg_set_rate_mnd(priv->base, USB30_PRIM_MASTER_CLK_CMD_RCGR,
+@@ -196,6 +216,10 @@ static const struct gate_clk sc7280_clks[] = {
+ 	GATE_CLK(GCC_QUPV3_WRAP0_S6_CLK, 0x52008, BIT(16)),
+ 	GATE_CLK(GCC_QUPV3_WRAP0_S7_CLK, 0x52008, BIT(17)),
+ 	GATE_CLK(GCC_QUPV3_WRAP1_S1_CLK, 0x52008, BIT(23)),
++	GATE_CLK(GCC_QUPV3_WRAP1_S2_CLK, 0x52008, BIT(24)),
++	GATE_CLK(GCC_QUPV3_WRAP1_S4_CLK, 0x52008, BIT(26)),
++	GATE_CLK(GCC_QUPV3_WRAP1_S5_CLK, 0x52008, BIT(27)),
++	GATE_CLK(GCC_QUPV3_WRAP1_S6_CLK, 0x52000, BIT(13)),
+ 	GATE_CLK(GCC_UFS_PHY_AXI_CLK, 0x77010, BIT(0)),
+ 	GATE_CLK(GCC_AGGRE_UFS_PHY_AXI_CLK, 0x770cc, BIT(0)),
+ 	GATE_CLK(GCC_UFS_PHY_AHB_CLK, 0x77018, BIT(0)),
+@@ -257,6 +281,18 @@ static int sc7280_enable(struct clk *clk)
+ 	case GCC_QUPV3_WRAP1_S1_CLK:
+ 		clk_rcg_set_rate_mnd(priv->base, 0x18140, 1, 0, 0, CFG_CLK_SRC_CXO, 16);
+ 		break;
++	case GCC_QUPV3_WRAP1_S2_CLK:
++		clk_rcg_set_rate_mnd(priv->base, 0x18270, 1, 0, 0, CFG_CLK_SRC_CXO, 16);
++		break;
++	case GCC_QUPV3_WRAP1_S4_CLK:
++		clk_rcg_set_rate_mnd(priv->base, 0x184d0, 1, 0, 0, CFG_CLK_SRC_CXO, 16);
++		break;
++	case GCC_QUPV3_WRAP1_S5_CLK:
++		clk_rcg_set_rate_mnd(priv->base, 0x18600, 1, 0, 0, CFG_CLK_SRC_CXO, 16);
++		break;
++	case GCC_QUPV3_WRAP1_S6_CLK:
++		clk_rcg_set_rate_mnd(priv->base, 0x18730, 1, 0, 0, CFG_CLK_SRC_CXO, 16);
++		break;
+ 	}
+ 
+ 	return qcom_gate_clk_en(priv, clk->id);
+diff --git a/drivers/iommu/iommu-uclass.c b/drivers/iommu/iommu-uclass.c
+index 31b40e57..fbde4363 100644
+--- a/drivers/iommu/iommu-uclass.c
++++ b/drivers/iommu/iommu-uclass.c
+@@ -18,6 +18,7 @@ static int dev_pci_iommu_enable(struct udevice *dev)
+ {
+ 	struct udevice *parent = dev->parent;
+ 	struct udevice *dev_iommu;
++	const struct iommu_ops *ops;
+ 	u32 *iommu_map;
+ 	u32 iommu_map_mask, length, phandle, rid, rid_base;
+ 	int i, count, len, ret;
+@@ -64,6 +65,16 @@ static int dev_pci_iommu_enable(struct udevice *dev)
+ 			return ret;
+ 		}
+ 		dev->iommu = dev_iommu;
++		ops = device_get_ops(dev->iommu);
++		if (ops && ops->connect) {
++			ret = ops->connect(dev);
++			if (ret) {
++				log_err("%s: Failed to connect PCI device '%s' to IOMMU '%s': %d\n",
++					__func__, dev->name, dev->iommu->name, ret);
++				free(iommu_map);
++				return ret;
++			}
++		}
+ 		break;
+ 	}
+ 
+@@ -79,8 +90,13 @@ int dev_iommu_enable(struct udevice *dev)
+ 	const struct iommu_ops *ops;
+ 	int i, count, ret = 0;
+ 
+-	if (!dev_has_ofnode(dev))
++	if (!dev_has_ofnode(dev)) {
++#if CONFIG_IS_ENABLED(PCI)
++		if (device_is_on_pci_bus(dev))
++			return dev_pci_iommu_enable(dev);
++#endif
+ 		return 0;
++	}
+ 
+ 	count = dev_count_phandle_with_args(dev, "iommus",
+ 					    "#iommu-cells", 0);
+diff --git a/drivers/iommu/qcom-hyp-smmu.c b/drivers/iommu/qcom-hyp-smmu.c
+index 5b37c21f..0c7c29e3 100644
+--- a/drivers/iommu/qcom-hyp-smmu.c
++++ b/drivers/iommu/qcom-hyp-smmu.c
+@@ -10,10 +10,12 @@
+ #include <cpu_func.h>
+ #include <dm.h>
+ #include <iommu.h>
++#include <pci.h>
+ #include <linux/bitfield.h>
+ #include <linux/bug.h>
+ #include <linux/list.h>
+ #include <linux/err.h>
++#include <linux/sizes.h>
+ #include <lmb.h>
+ #include <memalign.h>
+ #include <asm/io.h>
+@@ -32,6 +34,10 @@
+ 
+ #define ARM_SMMU_GR1_CBAR(n) (0x0 + ((n) << 2))
+ #define ARM_SMMU_CBAR_TYPE GENMASK(17, 16)
++#define ARM_SMMU_CBAR_S1_MEMATTR GENMASK(15, 12)
++#define ARM_SMMU_CBAR_S1_MEMATTR_WB 0xf
++#define ARM_SMMU_CBAR_S1_BPSHCFG GENMASK(9, 8)
++#define ARM_SMMU_CBAR_S1_BPSHCFG_NSH 3
+ #define ARM_SMMU_CBAR_VMID GENMASK(7, 0)
+ enum arm_smmu_cbar_type {
+ 	CBAR_TYPE_S2_TRANS,
+@@ -45,20 +51,57 @@ enum arm_smmu_cbar_type {
+ 
+ /* Per-CB system control register */
+ #define ARM_SMMU_CB_SCTLR 0x0
++#define ARM_SMMU_SCTLR_S1_ASIDPNE BIT(12)
+ #define ARM_SMMU_SCTLR_CFCFG BIT(7) /* Stall on context fault */
+ #define ARM_SMMU_SCTLR_CFIE BIT(6) /* Context fault interrupt enable */
+ #define ARM_SMMU_SCTLR_CFRE BIT(5) /* Abort on context fault */
++#define ARM_SMMU_SCTLR_AFE BIT(2)
++#define ARM_SMMU_SCTLR_TRE BIT(1)
++#define ARM_SMMU_SCTLR_M BIT(0)
++
++#define ARM_SMMU_CB_TCR2 0x10
++#define ARM_SMMU_TCR2_SEP GENMASK(17, 15)
++#define ARM_SMMU_TCR2_SEP_UPSTREAM 0x7
++#define ARM_SMMU_TCR2_AS BIT(4)
++#define ARM_SMMU_TCR2_PASIZE GENMASK(3, 0)
+ 
+ /* Translation Table Base, holds address of translation table in memory to be used
+  * for this context bank. Or 0 for bypass
+  */
+ #define ARM_SMMU_CB_TTBR0 0x20
+ #define ARM_SMMU_CB_TTBR1 0x28
++#define ARM_SMMU_TTBR_ASID GENMASK_ULL(63, 48)
+ /* Translation Control Register, configured TTBR/TLB behaviour (0 for bypass) */
+ #define ARM_SMMU_CB_TCR 0x30
++#define ARM_SMMU_TCR_EPD1 BIT(23)
++#define ARM_SMMU_TCR_SH0 GENMASK(13, 12)
++#define ARM_SMMU_TCR_ORGN0 GENMASK(11, 10)
++#define ARM_SMMU_TCR_IRGN0 GENMASK(9, 8)
++#define ARM_SMMU_TCR_T0SZ GENMASK(5, 0)
+ /* Memory Attribute Indirection, also 0 for bypass */
+ #define ARM_SMMU_CB_S1_MAIR0 0x38
+ #define ARM_SMMU_CB_S1_MAIR1 0x3c
++#define ARM_SMMU_CB_FSR 0x58
++#define ARM_SMMU_CB_FSR_FAULT 0xc00001fe
++
++#define ARM_SMMU_GR0_TLBIALLNSNH 0x68
++
++/* AArch64 LPAE stage-1, 4 KiB granule, 32-bit IOVA aperture. */
++#define ARM_SMMU_IDMAP_BLOCK_SIZE SZ_1G
++#define ARM_SMMU_IDMAP_BLOCKS 4
++#define ARM_SMMU_IDMAP_PTE (BIT_ULL(11) | BIT_ULL(10) | \
++			    GENMASK_ULL(9, 8) | BIT_ULL(6) | \
++			    BIT_ULL(2) | BIT_ULL(0))
++#define ARM_SMMU_IDMAP_TCR (ARM_SMMU_TCR_EPD1 | \
++			    FIELD_PREP(ARM_SMMU_TCR_SH0, 3) | \
++			    FIELD_PREP(ARM_SMMU_TCR_ORGN0, 1) | \
++			    FIELD_PREP(ARM_SMMU_TCR_IRGN0, 1) | \
++			    FIELD_PREP(ARM_SMMU_TCR_T0SZ, 32))
++#define ARM_SMMU_IDMAP_TCR2 (FIELD_PREP(ARM_SMMU_TCR2_SEP, \
++					       ARM_SMMU_TCR2_SEP_UPSTREAM) | \
++			     ARM_SMMU_TCR2_AS | \
++			     FIELD_PREP(ARM_SMMU_TCR2_PASIZE, 0))
++#define ARM_SMMU_IDMAP_MAIR0 0xf404ff44
+ 
+ #define ARM_SMMU_GR0_SMR(n) (0x800 + ((n) << 2))
+ #define ARM_SMMU_SMR_VALID BIT(31)
+@@ -100,6 +143,8 @@ struct qcom_smmu_priv {
+ 	int num_smr;
+ 	u32 pgshift;
+ 	u32 cb_pg_offset;
++	u64 *identity_l1;
++	phys_addr_t identity_l1_phys;
+ };
+ 
+ struct mmu_dev {
+@@ -127,13 +172,83 @@ struct mmu_dev {
+ #define cbx_writel(priv, cbx, offset, value) \
+ 	smmu_writel(priv, (priv->cb_pg_offset) + cbx, offset, value)
+ 
++static inline void cbx_writeq(struct qcom_smmu_priv *priv, u16 cbx,
++			      u32 offset, u64 value)
++{
++	cbx_writel(priv, cbx, offset, value);
++	cbx_writel(priv, cbx, offset + 4, value >> 32);
++}
++
+ #define gr1_setbits(priv, offset, value) \
+ 	gr1_writel(priv, offset, gr1_readl(priv, offset) | (value))
+ 
++static void qcom_smmu_read_config(struct qcom_smmu_priv *priv)
++{
++	u32 val;
++
++	val = gr0_readl(priv, ARM_SMMU_GR0_ID0);
++	priv->num_smr = FIELD_GET(ARM_SMMU_ID0_NUMSMRG, val);
++
++	val = gr0_readl(priv, ARM_SMMU_GR0_ID1);
++	priv->num_cb = FIELD_GET(ARM_SMMU_ID1_NUMCB, val);
++	priv->pgshift = FIELD_GET(ARM_SMMU_ID1_PAGESIZE, val) ? 16 : 12;
++	priv->cb_pg_offset = 1
++			     << (FIELD_GET(ARM_SMMU_ID1_NUMPAGENDXB, val) + 1);
++}
++
++static int get_pci_stream_id(struct udevice *dev)
++{
++	struct udevice *parent = dev->parent;
++	u32 *iommu_map;
++	u32 iommu_map_mask, rid, rid_base, sid, length;
++	int count, len, ret;
++
++	while (parent) {
++		len = dev_read_size(parent, "iommu-map");
++		if (len > 0)
++			break;
++		parent = parent->parent;
++	}
++	if (len <= 0)
++		return -ENOENT;
++
++	iommu_map = malloc(len);
++	if (!iommu_map)
++		return -ENOMEM;
++
++	count = len / sizeof(u32);
++	ret = dev_read_u32_array(parent, "iommu-map", iommu_map, count);
++	if (ret) {
++		free(iommu_map);
++		return ret;
++	}
++
++	iommu_map_mask = dev_read_u32_default(parent, "iommu-map-mask", ~0);
++	rid = (dm_pci_get_bdf(dev) >> 8) & iommu_map_mask;
++	ret = -ENOENT;
++	for (int i = 0; i < count; i += 4) {
++		rid_base = iommu_map[i];
++		length = iommu_map[i + 3];
++		if (rid < rid_base || rid >= rid_base + length)
++			continue;
++
++		sid = iommu_map[i + 2] + rid - rid_base;
++		ret = sid;
++		break;
++	}
++
++	free(iommu_map);
++	return ret;
++}
++
+ static int get_stream_id(struct udevice *dev)
+ {
+ 	ofnode node = dev_ofnode(dev);
+ 	struct ofnode_phandle_args args;
++
++	if (device_is_on_pci_bus(dev))
++		return get_pci_stream_id(dev);
++
+ 	int count = ofnode_parse_phandle_with_args(node, "iommus",
+ 						   "#iommu-cells", 0, 0, &args);
+ 
+@@ -177,6 +292,34 @@ static struct mmu_dev *alloc_dev(struct udevice *dev)
+ 	return mmu_dev;
+ }
+ 
++static int init_identity_l1(struct qcom_smmu_priv *priv)
++{
++	int i;
++
++	if (priv->identity_l1)
++		return 0;
++
++	priv->identity_l1 = memalign(SZ_4K, SZ_4K);
++	if (!priv->identity_l1)
++		return -ENOMEM;
++
++	memset(priv->identity_l1, 0, SZ_4K);
++	for (i = 0; i < ARM_SMMU_IDMAP_BLOCKS; i++)
++		priv->identity_l1[i] = (u64)i * ARM_SMMU_IDMAP_BLOCK_SIZE |
++					       ARM_SMMU_IDMAP_PTE;
++
++	flush_dcache_range((ulong)priv->identity_l1,
++			   (ulong)priv->identity_l1 + SZ_4K);
++	priv->identity_l1_phys = virt_to_phys(priv->identity_l1);
++	if (priv->identity_l1_phys >= SZ_4G) {
++		printf("SMMU: identity table is above the 32-bit DMA aperture: %pa\n",
++		       &priv->identity_l1_phys);
++		return -ERANGE;
++	}
++
++	return 0;
++}
++
+ /* Find and init the first free context bank */
+ static int alloc_cb(struct qcom_smmu_priv *priv)
+ {
+@@ -199,13 +342,16 @@ static int alloc_cb(struct qcom_smmu_priv *priv)
+ 		      priv->dev->name, i, cbar);
+ 		type = CBAR_TYPE_S1_TRANS_S2_BYPASS;
+ 		vmid = 0;
+-		cbar &= ~ARM_SMMU_CBAR_TYPE & ~ARM_SMMU_CBAR_VMID;
+-		cbar |= FIELD_PREP(ARM_SMMU_CBAR_TYPE, type) |
+-			FIELD_PREP(ARM_SMMU_CBAR_VMID, vmid);
++		cbar = FIELD_PREP(ARM_SMMU_CBAR_TYPE, type) |
++		       FIELD_PREP(ARM_SMMU_CBAR_S1_MEMATTR,
++				  ARM_SMMU_CBAR_S1_MEMATTR_WB) |
++		       FIELD_PREP(ARM_SMMU_CBAR_S1_BPSHCFG,
++				  ARM_SMMU_CBAR_S1_BPSHCFG_NSH) |
++		       FIELD_PREP(ARM_SMMU_CBAR_VMID, vmid);
+ 		gr1_writel(priv, ARM_SMMU_GR1_CBAR(i), cbar);
+ 
+ 		val = IS_ENABLED(CONFIG_ARM64) == 1 ? ARM_SMMU_CBA2R_VA64 : 0;
+-		gr1_setbits(priv, ARM_SMMU_GR1_CBA2R(i), val);
++		gr1_writel(priv, ARM_SMMU_GR1_CBA2R(i), val);
+ 		return i;
+ 	}
+ 
+@@ -283,6 +429,14 @@ static int qcom_smmu_connect(struct udevice *dev)
+ 	if (priv->disable)
+ 		return 0;
+ 
++	/*
++	 * Qualcomm Secure Launch changes the non-secure SMMU view when it
++	 * returns U-Boot at EL2.  The device can be probed earlier at EL1,
++	 * where QHEE exposes fewer context banks, so never use those cached
++	 * limits to configure a device after the exception-level transition.
++	 */
++	qcom_smmu_read_config(priv);
++
+ 	mdev = alloc_dev(dev);
+ 	if (IS_ERR(mdev) && PTR_ERR(mdev) != -EEXIST) {
+ 		printf("%s: %s Couldn't create mmu context\n", __func__,
+@@ -298,23 +452,42 @@ static int qcom_smmu_connect(struct udevice *dev)
+ 		return 0;
+ 	}
+ 
++	ret = init_identity_l1(priv);
++	if (ret)
++		return ret;
++
+ 	ret = alloc_cb(priv);
+ 	if (ret < 0 || ret > 0xff) {
+ 		printf("Error: %s: failed to allocate context bank for %s\n",
+ 		       __func__, dev->name);
+-		return 0;
++		return -ENOSPC;
+ 	}
+ 	mdev->cbx = ret;
+ 
+-	/* Configure context bank registers */
+-	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_TTBR0, 0x0);
+-	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_TTBR1, 0x0);
+-	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_S1_MAIR0, 0x0);
+-	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_S1_MAIR1, 0x0);
++	/*
++	 * Program a complete AArch64 stage-1 identity context.  The previous
++	 * code wrote only the low 32 bits of TTBR0 and left translation
++	 * disabled, so stale firmware state decided whether DMA happened to
++	 * work.  U-Boot allocates DMA below 2 GiB; four L1 block descriptors
++	 * deliberately cover the full 32-bit aperture.
++	 */
++	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_SCTLR, 0);
++	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_FSR, ARM_SMMU_CB_FSR_FAULT);
++	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_TCR2, ARM_SMMU_IDMAP_TCR2);
++	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_TCR, ARM_SMMU_IDMAP_TCR);
++	cbx_writeq(priv, mdev->cbx, ARM_SMMU_CB_TTBR0,
++		   priv->identity_l1_phys |
++		   FIELD_PREP(ARM_SMMU_TTBR_ASID, mdev->cbx));
++	cbx_writeq(priv, mdev->cbx, ARM_SMMU_CB_TTBR1, 0);
++	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_S1_MAIR0,
++		   ARM_SMMU_IDMAP_MAIR0);
++	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_S1_MAIR1, 0);
+ 	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_SCTLR,
+-		   ARM_SMMU_SCTLR_CFIE | ARM_SMMU_SCTLR_CFRE |
+-			   ARM_SMMU_SCTLR_CFCFG);
+-	cbx_writel(priv, mdev->cbx, ARM_SMMU_CB_TCR, 0x0);
++		   ARM_SMMU_SCTLR_S1_ASIDPNE | ARM_SMMU_SCTLR_CFIE |
++		   ARM_SMMU_SCTLR_CFRE | ARM_SMMU_SCTLR_AFE |
++		   ARM_SMMU_SCTLR_TRE | ARM_SMMU_SCTLR_M |
++		   ARM_SMMU_SCTLR_CFCFG);
++	gr0_writel(priv, ARM_SMMU_GR0_TLBIALLNSNH, 0);
+ 
+ 	/* Ensure that our writes went through */
+ 	mb();
+@@ -347,24 +520,16 @@ static inline void dump_boot_mappings(struct qcom_smmu_priv *priv)
+ static int qcom_smmu_probe(struct udevice *dev)
+ {
+ 	struct qcom_smmu_priv *priv;
+-	u32 val;
+ 
+ 	priv = dev_get_priv(dev);
+ 	priv->dev = dev;
+ 	priv->base = dev_read_addr(dev);
+ 	INIT_LIST_HEAD(&priv->devices);
+ 
+-	priv->disable = current_el() > 1;
+-
+-	/* Read SMMU config */
+-	val = gr0_readl(priv, ARM_SMMU_GR0_ID0);
+-	priv->num_smr = FIELD_GET(ARM_SMMU_ID0_NUMSMRG, val);
++	priv->disable = current_el() > 1 &&
++			!dev_read_bool(dev, "qcom,configure-at-el2");
+ 
+-	val = gr0_readl(priv, ARM_SMMU_GR0_ID1);
+-	priv->num_cb = FIELD_GET(ARM_SMMU_ID1_NUMCB, val);
+-	priv->pgshift = FIELD_GET(ARM_SMMU_ID1_PAGESIZE, val) ? 16 : 12;
+-	priv->cb_pg_offset = 1
+-			     << (FIELD_GET(ARM_SMMU_ID1_NUMPAGENDXB, val) + 1);
++	qcom_smmu_read_config(priv);
+ 
+ 	dump_boot_mappings(priv);
+ 
+diff --git a/drivers/misc/qcom_geni.c b/drivers/misc/qcom_geni.c
+index a62ae6a2..896be795 100644
+--- a/drivers/misc/qcom_geni.c
++++ b/drivers/misc/qcom_geni.c
+@@ -7,6 +7,8 @@
+ #define pr_fmt(fmt) "GENI-SE: " fmt
+ 
+ #include <blk.h>
++#include <clk.h>
++#include <command.h>
+ #include <part.h>
+ #include <dm/device.h>
+ #include <dm/read.h>
+@@ -360,17 +362,13 @@ int qcom_geni_load_firmware(phys_addr_t qup_base,
+ 	/* FIXME: GSI DMA mode if device has property qcom,gsi-dma-allowed */
+ 	rsc.mode = GENI_SE_FIFO;
+ 
+-	switch (device_get_uclass_id(dev)) {
+-	case UCLASS_I2C:
++	if (device_is_compatible(dev, "qcom,geni-i2c")) {
+ 		rsc.protocol = GENI_SE_I2C;
+-		break;
+-	case UCLASS_SPI:
++	} else if (device_is_compatible(dev, "qcom,geni-spi")) {
+ 		rsc.protocol = GENI_SE_SPI;
+-		break;
+-	case UCLASS_SERIAL:
++	} else if (device_is_compatible(dev, "qcom,geni-uart")) {
+ 		rsc.protocol = GENI_SE_UART;
+-		break;
+-	default:
++	} else {
+ 		return -EINVAL;
+ 	}
+ 
+@@ -488,6 +486,66 @@ static int probe_children_load_firmware(struct udevice *dev)
+ 
+ #define MAX_FW_BUF_SIZE (128 * 1024)
+ 
++static int qcom_geni_load_firmware_blob(void *fw_buf, size_t fw_size)
++{
++	struct udevice *geni_wrapper;
++	struct geni_se_plat *plat;
++	int wrappers = 0;
++
++	if (!fw_buf || fw_size < sizeof(Elf32_Ehdr) ||
++	    fw_size > MAX_FW_BUF_SIZE)
++		return -EINVAL;
++
++	for (uclass_first_device(UCLASS_MISC, &geni_wrapper);
++	     geni_wrapper;
++	     uclass_next_device(&geni_wrapper)) {
++		if (device_get_uclass_id(geni_wrapper) != UCLASS_MISC ||
++		    strcmp(geni_wrapper->driver->name, "geni-se-qup"))
++			continue;
++
++		plat = dev_get_plat(geni_wrapper);
++		if (!plat->need_firmware_load)
++			continue;
++
++		dev_set_priv(geni_wrapper, fw_buf);
++		probe_children_load_firmware(geni_wrapper);
++		plat->need_firmware_load = false;
++		wrappers++;
++	}
++
++	if (!wrappers) {
++		printf("GENI-SE: all enabled serial engines already have firmware\n");
++		return 0;
++	}
++
++	printf("GENI-SE: initialized %d wrapper%s from %zu-byte firmware\n",
++	       wrappers, wrappers == 1 ? "" : "s", fw_size);
++	return 0;
++}
++
++static int do_genifw(struct cmd_tbl *cmdtp, int flag, int argc,
++		     char *const argv[])
++{
++	ulong addr, size;
++
++	if (argc != 3)
++		return CMD_RET_USAGE;
++
++	addr = hextoul(argv[1], NULL);
++	size = hextoul(argv[2], NULL);
++	if (qcom_geni_load_firmware_blob((void *)addr, size))
++		return CMD_RET_FAILURE;
++
++	return CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(
++	genifw, 3, 0, do_genifw,
++	"load Qualcomm GENI protocol firmware from memory",
++	"<addr> <size>\n"
++	"    - initialize enabled QUP serial engines from a trusted ELF blob"
++);
++
+ /*
+  * Load firmware for QCOM GENI peripherals from the dedicated partition on storage and bind/probe
+  * all the peripheral devices that need firmware to be loaded.
+@@ -544,23 +602,7 @@ static int qcom_geni_fw_initialise(void)
+ 		return 0;
+ 	}
+ 
+-	/*
+-	 * OK! Firmware is loaded, now bind and probe remaining children. They will attempt to load
+-	 * firmware during probe. Do this for each GENI SE wrapper that needs firmware loading.
+-	 */
+-	for (; geni_wrapper;
+-	     uclass_next_device(&geni_wrapper)) {
+-		if (device_get_uclass_id(geni_wrapper) == UCLASS_MISC &&
+-		    !strcmp(geni_wrapper->driver->name, "geni-se-qup")) {
+-			plat = dev_get_plat(geni_wrapper);
+-			if (plat->need_firmware_load) {
+-				dev_set_priv(geni_wrapper, fw_buf);
+-				probe_children_load_firmware(geni_wrapper);
+-			}
+-		}
+-	}
+-
+-	return 0;
++	return qcom_geni_load_firmware_blob(fw_buf, fw_size);
+ }
+ 
+ EVENT_SPY_SIMPLE(EVT_LAST_STAGE_INIT, qcom_geni_fw_initialise);
+@@ -578,3 +620,41 @@ U_BOOT_DRIVER(geni_se_qup) = {
+ 	.plat_auto = sizeof(struct geni_se_plat),
+ 	.flags = DM_FLAG_DEFAULT_PD_CTRL_OFF,
+ };
++
++/*
++ * U-Boot does not otherwise need a full GENI SPI controller driver, but Linux
++ * needs the protocol IRAM populated before handoff. Binding this tiny child
++ * driver lets driver model turn on the child's RPMh power domain and clock,
++ * then reuses the common firmware loader without carrying an SPI stack in XBL.
++ */
++static int geni_se_fw_only_probe(struct udevice *dev)
++{
++	struct resource res;
++	struct clk se_clk;
++	int ret;
++
++	ret = dev_read_resource(dev, 0, &res);
++	if (ret)
++		return ret;
++
++	ret = clk_get_by_name(dev, "se", &se_clk);
++	if (ret)
++		return ret;
++	ret = clk_enable(&se_clk);
++	if (ret)
++		return ret;
++
++	return qcom_geni_load_firmware(res.start, dev);
++}
++
++static const struct udevice_id geni_fw_only_ids[] = {
++	{ .compatible = "qcom,geni-spi" },
++	{}
++};
++
++U_BOOT_DRIVER(geni_se_fw_only) = {
++	.name = "geni-se-fw-only",
++	.id = UCLASS_MISC,
++	.of_match = geni_fw_only_ids,
++	.probe = geni_se_fw_only_probe,
++};
+diff --git a/drivers/nvme/nvme_pci.c b/drivers/nvme/nvme_pci.c
+index c24f8cf1..cc60bd77 100644
+--- a/drivers/nvme/nvme_pci.c
++++ b/drivers/nvme/nvme_pci.c
+@@ -37,12 +37,26 @@ static int nvme_probe(struct udevice *udev)
+ 	return nvme_init(udev);
+ }
+ 
++static int nvme_remove(struct udevice *udev)
++{
++	int ret;
++
++	ret = nvme_shutdown(udev);
++	/* The OS must never inherit an endpoint that can DMA into U-Boot queues. */
++	dm_pci_clrset_config16(udev, PCI_COMMAND,
++			       PCI_COMMAND_MASTER | PCI_COMMAND_MEMORY, 0);
++
++	return ret;
++}
++
+ U_BOOT_DRIVER(nvme) = {
+ 	.name	= "nvme",
+ 	.id	= UCLASS_NVME,
+ 	.bind	= nvme_bind,
+ 	.probe	= nvme_probe,
++	.remove	= nvme_remove,
+ 	.priv_auto	= sizeof(struct nvme_dev),
++	.flags	= DM_FLAG_OS_PREPARE,
+ };
+ 
+ struct pci_device_id nvme_supported[] = {
+diff --git a/drivers/pci/pcie_dw_qcom.c b/drivers/pci/pcie_dw_qcom.c
+index ce6b4d97..592c6bff 100644
+--- a/drivers/pci/pcie_dw_qcom.c
++++ b/drivers/pci/pcie_dw_qcom.c
+@@ -22,7 +22,7 @@
+ 
+ struct qcom_pcie;
+ 
+-static const struct qcom_pcie_ops {
++struct qcom_pcie_ops {
+ 	int (*config_sid)(struct qcom_pcie *priv);
+ };
+ 
+@@ -48,7 +48,8 @@ struct qcom_pcie {
+ #define PARF_PHY_CTRL				0x40
+ #define PARF_PHY_REFCLK				0x4c
+ #define PARF_CONFIG_BITS			0x50
+-#define PARF_DBI_BASE_ADDR			0x168
++#define PARF_DBI_BASE_ADDR_V2			0x350
++#define PARF_DBI_BASE_ADDR_V2_HI		0x354
+ #define PARF_MHI_CLOCK_RESET_CTRL		0x174
+ #define PARF_AXI_MSTR_WR_ADDR_HALT		0x178
+ #define PARF_AXI_MSTR_WR_ADDR_HALT_V2		0x1a8
+@@ -56,9 +57,16 @@ struct qcom_pcie {
+ #define PARF_LTSSM				0x1b0
+ #define PARF_SID_OFFSET				0x234
+ #define PARF_BDF_TRANSLATE_CFG			0x24c
+-#define PARF_SLV_ADDR_SPACE_SIZE		0x358
++#define PARF_SLV_ADDR_SPACE_SIZE_V2		0x358
++#define PARF_SLV_ADDR_SPACE_SIZE_V2_HI		0x35c
++#define PARF_ATU_BASE_ADDR			0x634
++#define PARF_ATU_BASE_ADDR_HI			0x638
+ #define PARF_DEVICE_TYPE			0x1000
+ #define PARF_BDF_TO_SID_TABLE_N			0x2000
++#define PARF_BDF_TO_SID_CFG			0x2c00
++
++/* PARF_BDF_TO_SID_CFG fields */
++#define BDF_TO_SID_BYPASS			BIT(0)
+ 
+ /* ELBI registers */
+ #define ELBI_SYS_CTRL				0x04
+@@ -111,7 +119,7 @@ struct qcom_pcie {
+ #define PHY_RX0_EQ(x)				FIELD_PREP(GENMASK(26, 24), x)
+ 
+ /* PARF_SLV_ADDR_SPACE_SIZE register value */
+-#define SLV_ADDR_SPACE_SZ			0x10000000
++#define SLV_ADDR_SPACE_SZ			0x80000000
+ 
+ /* PARF_MHI_CLOCK_RESET_CTRL register fields */
+ #define AHB_CLK_EN				BIT(0)
+@@ -156,8 +164,8 @@ struct qcom_pcie {
+ 
+ #define PERST_DELAY_US				1000
+ 
+-#define LINK_WAIT_MAX_RETRIES			10
+-#define LINK_WAIT_USLEEP			100000
++#define LINK_WAIT_MAX_RETRIES			1000
++#define LINK_WAIT_USLEEP			1000
+ 
+ #define QCOM_PCIE_CRC8_POLYNOMIAL		(BIT(2) | BIT(1) | BIT(0))
+ 
+@@ -222,11 +230,20 @@ static int qcom_pcie_config_sid_1_9_0(struct qcom_pcie *priv)
+ 	void *bdf_to_sid_base = priv->parf + PARF_BDF_TO_SID_TABLE_N;
+ 	int i, nr_map, size = 0;
+ 	u32 smmu_sid_base;
++	u32 cfg;
+ 
+ 	dev_read_prop(priv->dw.dev, "iommu-map", &size);
+ 	if (!size)
+ 		return 0;
+ 
++	/*
++	 * The table is ignored while bypass is set.  Firmware commonly leaves
++	 * this clear, but do not depend on its state across cold boots.
++	 */
++	cfg = readl(priv->parf + PARF_BDF_TO_SID_CFG);
++	cfg &= ~BDF_TO_SID_BYPASS;
++	writel(cfg, priv->parf + PARF_BDF_TO_SID_CFG);
++
+ 	map = malloc(size);
+ 	if (!map)
+ 		return -ENOMEM;
+@@ -235,8 +252,13 @@ static int qcom_pcie_config_sid_1_9_0(struct qcom_pcie *priv)
+ 
+ 	nr_map = size / (sizeof(*map));
+ 
+-	/* Registers need to be zero out first */
+-	memset_io(bdf_to_sid_base, 0, CRC8_TABLE_SIZE * sizeof(u32));
++	/*
++	 * These are 32-bit registers, not ordinary MMIO RAM.  ARM64 U-Boot's
++	 * memset_io() uses 64-bit stores, which this PARF block does not accept
++	 * reliably and leaves corrupt hash buckets behind.
++	 */
++	for (i = 0; i < CRC8_TABLE_SIZE; i++)
++		writel(0, bdf_to_sid_base + i * sizeof(u32));
+ 
+ 	/* Extract the SMMU SID base from the first entry of iommu-map */
+ 	smmu_sid_base = map[0].smmu_sid;
+@@ -247,7 +269,11 @@ static int qcom_pcie_config_sid_1_9_0(struct qcom_pcie *priv)
+ 		u32 val;
+ 		u8 hash;
+ 
+-		hash = crc8(QCOM_PCIE_CRC8_POLYNOMIAL, (u8 *)&bdf_be, sizeof(bdf_be));
++		/* crc8() has the Qualcomm polynomial built in; its first argument is
++		 * the initial CRC, not the polynomial.  Linux and the hardware start
++		 * this BDF hash at zero.
++		 */
++		hash = crc8(0, (u8 *)&bdf_be, sizeof(bdf_be));
+ 
+ 		val = readl(bdf_to_sid_base + hash * sizeof(u32));
+ 
+@@ -310,6 +336,8 @@ static int qcom_pcie_init_port(struct udevice *dev)
+ 	udelay(PERST_DELAY_US);
+ 
+ 	for (vreg = 0; vreg < NUM_SUPPLIES; ++vreg) {
++		if (!priv->vregs[vreg])
++			continue;
+ 		ret = regulator_set_enable(priv->vregs[vreg], true);
+ 		if (ret && ret != -ENOSYS)
+ 			dev_warn(dev, "failed to enable regulator %d (%d)\n", vreg, ret);
+@@ -345,8 +373,18 @@ static int qcom_pcie_init_port(struct udevice *dev)
+ 	val &= ~PHY_TEST_PWR_DOWN;
+ 	writel(val, priv->parf + PARF_PHY_CTRL);
+ 
+-	/* change DBI base address */
+-	writel(0, priv->parf + PARF_DBI_BASE_ADDR);
++	/* Program the v2 DBI/ATU windows used by SC7280 PCIe 1.9.0. */
++	writel(lower_32_bits((uintptr_t)priv->dw.dbi_base),
++	       priv->parf + PARF_DBI_BASE_ADDR_V2);
++	writel(upper_32_bits((uintptr_t)priv->dw.dbi_base),
++	       priv->parf + PARF_DBI_BASE_ADDR_V2_HI);
++	writel(lower_32_bits((uintptr_t)priv->dw.atu_base),
++	       priv->parf + PARF_ATU_BASE_ADDR);
++	writel(upper_32_bits((uintptr_t)priv->dw.atu_base),
++	       priv->parf + PARF_ATU_BASE_ADDR_HI);
++	writel(0, priv->parf + PARF_SLV_ADDR_SPACE_SIZE_V2);
++	writel(SLV_ADDR_SPACE_SZ,
++	       priv->parf + PARF_SLV_ADDR_SPACE_SIZE_V2_HI);
+ 
+ 	/* MAC PHY_POWERDOWN MUX DISABLE  */
+ 	val = readl(priv->parf + PARF_SYS_CTRL);
+@@ -488,6 +526,7 @@ static int qcom_pcie_probe(struct udevice *dev)
+ 
+ 	priv->dw.first_busno = dev_seq(dev);
+ 	priv->dw.dev = dev;
++	priv->ops = (struct qcom_pcie_ops *)dev_get_driver_data(dev);
+ 
+ 	ret = qcom_pcie_parse_dt(dev);
+ 	if (ret)
+@@ -515,6 +554,23 @@ static int qcom_pcie_probe(struct udevice *dev)
+ 						priv->dw.mem.size);
+ }
+ 
++static int qcom_pcie_remove(struct udevice *dev)
++{
++	/*
++	 * The NVMe child has already shut down its queues and disabled bus-master
++	 * DMA.  Leave the firmware-trained root link active, matching the UEFI
++	 * ExitBootServices contract used by Linux on this board.  Linux starts its
++	 * host init by asserting endpoint PERST and then performs the complete PHY
++	 * and controller reset itself.  Stopping LTSSM while the QMP PHY remains
++	 * powered leaves this controller in a state from which its block reset can
++	 * hang until the watchdog fires.
++	 *
++	 * LEAVE_PD_ON is equally important: collapsing the PCIe GDSC underneath
++	 * the active firmware state also makes the first Linux access hang.
++	 */
++	return 0;
++}
++
+ static const struct dm_pci_ops qcom_pcie_ops = {
+ 	.read_config	= pcie_dw_read_config,
+ 	.write_config	= pcie_dw_write_config,
+@@ -547,5 +603,7 @@ U_BOOT_DRIVER(qcom_dw_pcie) = {
+ 	.of_match		= qcom_pcie_ids,
+ 	.ops			= &qcom_pcie_ops,
+ 	.probe			= qcom_pcie_probe,
++	.remove			= qcom_pcie_remove,
+ 	.priv_auto		= sizeof(struct qcom_pcie),
++	.flags			= DM_FLAG_OS_PREPARE | DM_FLAG_LEAVE_PD_ON,
+ };
+diff --git a/drivers/phy/qcom/phy-qcom-qmp-pcie.c b/drivers/phy/qcom/phy-qcom-qmp-pcie.c
+index 2f6ff259..d8e912a1 100644
+--- a/drivers/phy/qcom/phy-qcom-qmp-pcie.c
++++ b/drivers/phy/qcom/phy-qcom-qmp-pcie.c
+@@ -23,14 +23,18 @@
+ #include <linux/ioport.h>
+ 
+ #include "phy-qcom-qmp.h"
++#include "phy-qcom-qmp-pcs-v4.h"
+ #include "phy-qcom-qmp-pcs-misc-v3.h"
+ #include "phy-qcom-qmp-pcs-v5.h"
+ #include "phy-qcom-qmp-pcs-v6.h"
+ #include "phy-qcom-qmp-pcs-v6_20.h"
+ #include "phy-qcom-qmp-pcs-pcie-v6.h"
+ #include "phy-qcom-qmp-pcs-pcie-v6_20.h"
++#include "phy-qcom-qmp-pcs-pcie-v4.h"
+ #include "phy-qcom-qmp-pcie-qhp.h"
++#include "phy-qcom-qmp-qserdes-com-v4.h"
+ #include "phy-qcom-qmp-qserdes-com-v6.h"
++#include "phy-qcom-qmp-qserdes-txrx-v4.h"
+ #include "phy-qcom-qmp-qserdes-txrx-v6.h"
+ #include "phy-qcom-qmp-qserdes-txrx-v6_20.h"
+ #include "phy-qcom-qmp-qserdes-ln-shrd-v6.h"
+@@ -96,6 +100,13 @@ static const unsigned int pciephy_v5_regs_layout[QPHY_LAYOUT_SIZE] = {
+ 	[QPHY_PCS_POWER_DOWN_CONTROL]	= QPHY_V5_PCS_POWER_DOWN_CONTROL,
+ };
+ 
++static const unsigned int pciephy_v4_regs_layout[QPHY_LAYOUT_SIZE] = {
++	[QPHY_SW_RESET]			= QPHY_V4_PCS_SW_RESET,
++	[QPHY_START_CTRL]		= QPHY_V4_PCS_START_CONTROL,
++	[QPHY_PCS_STATUS]		= QPHY_V4_PCS_PCS_STATUS1,
++	[QPHY_PCS_POWER_DOWN_CONTROL]	= QPHY_V4_PCS_POWER_DOWN_CONTROL,
++};
++
+ static const unsigned int pciephy_v6_regs_layout[QPHY_LAYOUT_SIZE] = {
+ 	[QPHY_SW_RESET]			= QPHY_V6_PCS_SW_RESET,
+ 	[QPHY_START_CTRL]		= QPHY_V6_PCS_START_CONTROL,
+@@ -514,6 +525,127 @@ static const struct qmp_pcie_init_tbl x1e80100_qmp_gen4x2_pcie_pcs_misc_tbl[] =
+ 	QMP_PHY_INIT_CFG(QPHY_PCIE_V6_20_PCS_G4_FOM_EQ_CONFIG5, 0x8a),
+ };
+ 
++/* QCM6490 uses the SM8250 generation-3 x2 PCIe PHY for its NVMe port. */
++static const struct qmp_pcie_init_tbl sm8250_qmp_pcie_serdes_tbl[] = {
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_SYSCLK_EN_SEL, 0x08),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_CLK_SELECT, 0x34),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_CORECLK_DIV_MODE1, 0x08),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_PLL_IVCO, 0x0f),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_LOCK_CMP_EN, 0x42),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_VCO_TUNE1_MODE0, 0x24),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_VCO_TUNE2_MODE1, 0x03),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_VCO_TUNE1_MODE1, 0xb4),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_VCO_TUNE_MAP, 0x02),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_BIN_VCOCAL_HSCLK_SEL, 0x11),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_DEC_START_MODE0, 0x82),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_DIV_FRAC_START3_MODE0, 0x03),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_DIV_FRAC_START2_MODE0, 0x55),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_DIV_FRAC_START1_MODE0, 0x55),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_LOCK_CMP2_MODE0, 0x1a),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_LOCK_CMP1_MODE0, 0x0a),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_DEC_START_MODE1, 0x68),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_DIV_FRAC_START3_MODE1, 0x02),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_DIV_FRAC_START2_MODE1, 0xaa),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_DIV_FRAC_START1_MODE1, 0xab),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_LOCK_CMP2_MODE1, 0x34),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_LOCK_CMP1_MODE1, 0x14),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_HSCLK_SEL, 0x01),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_CP_CTRL_MODE0, 0x06),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_PLL_RCTRL_MODE0, 0x16),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_PLL_CCTRL_MODE0, 0x36),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_CP_CTRL_MODE1, 0x06),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_PLL_RCTRL_MODE1, 0x16),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_PLL_CCTRL_MODE1, 0x36),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_BIN_VCOCAL_CMP_CODE2_MODE0, 0x1e),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_BIN_VCOCAL_CMP_CODE1_MODE0, 0xca),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_BIN_VCOCAL_CMP_CODE2_MODE1, 0x18),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_BIN_VCOCAL_CMP_CODE1_MODE1, 0xa2),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_SSC_EN_CENTER, 0x01),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_SSC_PER1, 0x31),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_SSC_PER2, 0x01),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_SSC_STEP_SIZE1_MODE0, 0xde),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_SSC_STEP_SIZE2_MODE0, 0x07),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_SSC_STEP_SIZE1_MODE1, 0x4c),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_SSC_STEP_SIZE2_MODE1, 0x06),
++	QMP_PHY_INIT_CFG(QSERDES_V4_COM_CLK_ENABLE1, 0x90),
++};
++
++static const struct qmp_pcie_init_tbl sm8250_qmp_pcie_tx_tbl[] = {
++	QMP_PHY_INIT_CFG(QSERDES_V4_TX_RCV_DETECT_LVL_2, 0x12),
++	QMP_PHY_INIT_CFG(QSERDES_V4_TX_LANE_MODE_1, 0x35),
++	QMP_PHY_INIT_CFG(QSERDES_V4_TX_RES_CODE_LANE_OFFSET_TX, 0x11),
++};
++
++static const struct qmp_pcie_init_tbl sm8250_qmp_pcie_rx_tbl[] = {
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_UCDR_FO_GAIN, 0x0c),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_UCDR_SO_GAIN, 0x03),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_GM_CAL, 0x1b),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_IDAC_TSETTLE_HIGH, 0x00),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_IDAC_TSETTLE_LOW, 0xc0),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_AUX_DATA_TCOARSE_TFINE, 0x30),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_VGA_CAL_CNTRL1, 0x04),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_VGA_CAL_CNTRL2, 0x07),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_UCDR_SO_SATURATION_AND_ENABLE, 0x7f),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_UCDR_PI_CONTROLS, 0x70),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_EQU_ADAPTOR_CNTRL2, 0x0e),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_EQU_ADAPTOR_CNTRL3, 0x4a),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_EQU_ADAPTOR_CNTRL4, 0x0f),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_SIGDET_CNTRL, 0x03),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_SIGDET_ENABLES, 0x1c),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_SIGDET_DEGLITCH_CNTRL, 0x1e),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_EQ_OFFSET_ADAPTOR_CNTRL1, 0x17),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_10_LOW, 0xd4),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_10_HIGH, 0x54),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_10_HIGH2, 0xdb),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_10_HIGH3, 0x3b),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_10_HIGH4, 0x31),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_01_LOW, 0x24),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH2, 0xff),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH3, 0x7f),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_DCC_CTRL1, 0x0c),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_01_HIGH, 0xe4),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_01_HIGH2, 0xec),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_01_HIGH3, 0x3b),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_01_HIGH4, 0x36),
++};
++
++static const struct qmp_pcie_init_tbl sm8250_qmp_pcie_pcs_tbl[] = {
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_P2U3_WAKEUP_DLY_TIME_AUXCLK_L, 0x01),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_RX_SIGDET_LVL, 0x77),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_RATE_SLEW_CNTRL1, 0x0b),
++};
++
++static const struct qmp_pcie_init_tbl sm8250_qmp_pcie_pcs_misc_tbl[] = {
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_PCIE_OSC_DTCT_ACTIONS, 0x00),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_PCIE_L1P1_WAKEUP_DLY_TIME_AUXCLK_L, 0x01),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_PCIE_L1P2_WAKEUP_DLY_TIME_AUXCLK_L, 0x01),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_PCIE_PRESET_P6_P7_PRE, 0x33),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_PCIE_PRESET_P10_PRE, 0x00),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_PCIE_PRESET_P10_POST, 0x58),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_PCIE_ENDPOINT_REFCLK_DRIVE, 0xc1),
++};
++
++static const struct qmp_pcie_init_tbl sm8250_qmp_gen3x2_pcie_tx_tbl[] = {
++	QMP_PHY_INIT_CFG(QSERDES_V4_TX_PI_QEC_CTRL, 0x20),
++};
++
++static const struct qmp_pcie_init_tbl sm8250_qmp_gen3x2_pcie_rx_tbl[] = {
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_EQU_ADAPTOR_CNTRL1, 0x04),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_LOW, 0xbf),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH4, 0x15),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_DFE_CTLE_POST_CAL_OFFSET, 0x38),
++};
++
++static const struct qmp_pcie_init_tbl sm8250_qmp_gen3x2_pcie_pcs_tbl[] = {
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_REFGEN_REQ_CONFIG1, 0x05),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_EQ_CONFIG2, 0x0f),
++};
++
++static const struct qmp_pcie_init_tbl sm8250_qmp_gen3x2_pcie_pcs_misc_tbl[] = {
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_PCIE_POWER_STATE_CONFIG2, 0x0d),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_PCIE_POWER_STATE_CONFIG4, 0x07),
++};
++
+ struct qmp_pcie_offsets {
+ 	u16 serdes;
+ 	u16 pcs;
+@@ -549,6 +681,8 @@ struct qmp_pcie_cfg {
+ 
+ 	/* Main init sequence for PHY blocks - serdes, tx, rx, pcs */
+ 	const struct qmp_pcie_cfg_tbls tbls;
++	/* Root-complex mode and lane-count overrides applied after tbls. */
++	const struct qmp_pcie_cfg_tbls *tbls_rc;
+ 
+ 	/* regulators to be requested */
+ 	const char * const *vreg_list;
+@@ -649,6 +783,16 @@ static const struct qmp_pcie_offsets qmp_pcie_offsets_v5 = {
+ 	.rx2		= 0x1800,
+ };
+ 
++static const struct qmp_pcie_offsets qmp_pcie_offsets_v4x2 = {
++	.serdes		= 0,
++	.pcs		= 0x0a00,
++	.pcs_misc	= 0x0e00,
++	.tx		= 0x0200,
++	.rx		= 0x0400,
++	.tx2		= 0x0600,
++	.rx2		= 0x0800,
++};
++
+ static const struct qmp_pcie_offsets qmp_pcie_offsets_v6_20 = {
+ 	.serdes		= 0x1000,
+ 	.pcs		= 0x1200,
+@@ -687,6 +831,40 @@ static const struct qmp_pcie_cfg sm8550_qmp_gen3x2_pciephy_cfg = {
+ 	.phy_status		= PHYSTATUS,
+ };
+ 
++static const struct qmp_pcie_cfg sm8250_qmp_gen3x2_pciephy_cfg = {
++	.lanes			= 2,
++	.offsets		= &qmp_pcie_offsets_v4x2,
++	.tbls = {
++		.serdes		= sm8250_qmp_pcie_serdes_tbl,
++		.serdes_num	= ARRAY_SIZE(sm8250_qmp_pcie_serdes_tbl),
++		.tx		= sm8250_qmp_pcie_tx_tbl,
++		.tx_num		= ARRAY_SIZE(sm8250_qmp_pcie_tx_tbl),
++		.rx		= sm8250_qmp_pcie_rx_tbl,
++		.rx_num		= ARRAY_SIZE(sm8250_qmp_pcie_rx_tbl),
++		.pcs		= sm8250_qmp_pcie_pcs_tbl,
++		.pcs_num	= ARRAY_SIZE(sm8250_qmp_pcie_pcs_tbl),
++		.pcs_misc	= sm8250_qmp_pcie_pcs_misc_tbl,
++		.pcs_misc_num	= ARRAY_SIZE(sm8250_qmp_pcie_pcs_misc_tbl),
++	},
++	.tbls_rc = &(const struct qmp_pcie_cfg_tbls) {
++		.tx		= sm8250_qmp_gen3x2_pcie_tx_tbl,
++		.tx_num		= ARRAY_SIZE(sm8250_qmp_gen3x2_pcie_tx_tbl),
++		.rx		= sm8250_qmp_gen3x2_pcie_rx_tbl,
++		.rx_num		= ARRAY_SIZE(sm8250_qmp_gen3x2_pcie_rx_tbl),
++		.pcs		= sm8250_qmp_gen3x2_pcie_pcs_tbl,
++		.pcs_num	= ARRAY_SIZE(sm8250_qmp_gen3x2_pcie_pcs_tbl),
++		.pcs_misc	= sm8250_qmp_gen3x2_pcie_pcs_misc_tbl,
++		.pcs_misc_num	= ARRAY_SIZE(sm8250_qmp_gen3x2_pcie_pcs_misc_tbl),
++	},
++	.reset_list		= sdm845_pciephy_reset_l,
++	.num_resets		= ARRAY_SIZE(sdm845_pciephy_reset_l),
++	.vreg_list		= qmp_phy_vreg_l,
++	.num_vregs		= ARRAY_SIZE(qmp_phy_vreg_l),
++	.regs			= pciephy_v4_regs_layout,
++	.pwrdn_ctrl		= SW_PWRDN | REFCLK_DRV_DSBL,
++	.phy_status		= PHYSTATUS,
++};
++
+ static const struct qmp_pcie_cfg sm8550_qmp_gen4x2_pciephy_cfg = {
+ 	.lanes = 2,
+ 
+@@ -802,9 +980,10 @@ static void qmp_pcie_configure(void __iomem *base,
+ 	qmp_pcie_configure_lane(base, tbl, num, 0xff);
+ }
+ 
+-static void qmp_pcie_init_registers(struct qmp_pcie_priv *qmp, const struct qmp_pcie_cfg *cfg)
++static void qmp_pcie_init_tbls(struct qmp_pcie_priv *qmp,
++			       const struct qmp_pcie_cfg_tbls *tbls)
+ {
+-	const struct qmp_pcie_cfg_tbls *tbls = &cfg->tbls;
++	const struct qmp_pcie_cfg *cfg = qmp->cfg;
+ 	void __iomem *serdes = qmp->serdes;
+ 	void __iomem *tx = qmp->tx;
+ 	void __iomem *rx = qmp->rx;
+@@ -830,6 +1009,14 @@ static void qmp_pcie_init_registers(struct qmp_pcie_priv *qmp, const struct qmp_
+ 	qmp_pcie_configure(ln_shrd, tbls->ln_shrd, tbls->ln_shrd_num);
+ }
+ 
++static void qmp_pcie_init_registers(struct qmp_pcie_priv *qmp,
++				    const struct qmp_pcie_cfg *cfg)
++{
++	qmp_pcie_init_tbls(qmp, &cfg->tbls);
++	if (cfg->tbls_rc)
++		qmp_pcie_init_tbls(qmp, cfg->tbls_rc);
++}
++
+ static int qmp_pcie_do_reset(struct qmp_pcie_priv *qmp)
+ {
+ 	const struct qmp_pcie_cfg *cfg = qmp->cfg;
+@@ -867,6 +1054,8 @@ static int qmp_pcie_power_on(struct phy *phy)
+ 	int ret, i;
+ 
+ 	for (i = 0; i < qmp->vreg_count; i++) {
++		if (!qmp->vregs[i])
++			continue;
+ 		ret = regulator_set_enable(qmp->vregs[i], true);
+ 		if (ret && ret != -ENOSYS)
+ 			dev_err(phy->dev, "failed to enable regulator %d (%d)\n", i, ret);
+@@ -945,7 +1134,8 @@ static int qmp_pcie_vreg_init(struct udevice *dev, struct qmp_pcie_priv *qmp)
+ 		if (ret)
+ 			dev_warn(dev, "failed to get regulator %d (%d)\n", vreg, ret);
+ 
+-		regulator_set_enable(qmp->vregs[vreg], true);
++		if (qmp->vregs[vreg])
++			regulator_set_enable(qmp->vregs[vreg], true);
+ 	}
+ 
+ 	return 0;
+@@ -998,6 +1188,9 @@ static int qmp_pcie_clk_init(struct udevice *dev, struct qmp_pcie_priv *qmp)
+ 
+ 	for (i = 0; i < num; i++) {
+ 		ret = clk_get_by_name(dev, qmp_pciephy_clk_l[i], &qmp->clks[i]);
++		/* V4 bindings called the PHY rate-change clock "refgen". */
++		if (ret && !strcmp(qmp_pciephy_clk_l[i], "rchng"))
++			ret = clk_get_by_name(dev, "refgen", &qmp->clks[i]);
+ 		/* Ignore failure to get ref clock */
+ 		if (ret && strcmp(qmp_pciephy_clk_l[i], "ref") != 0) {
+ 			dev_err(dev, "failed to get clock %d\n", i);
+@@ -1097,6 +1290,9 @@ static struct phy_ops qmp_pcie_ops = {
+ 
+ static const struct udevice_id qmp_pcie_ids[] = {
+ 	{
++		.compatible = "qcom,sm8250-qmp-gen3x2-pcie-phy",
++		.data = (ulong)&sm8250_qmp_gen3x2_pciephy_cfg,
++	}, {
+ 		.compatible = "qcom,sm8550-qmp-gen3x2-pcie-phy",
+ 		.data = (ulong)&sm8550_qmp_gen3x2_pciephy_cfg,
+ 	}, {
+diff --git a/drivers/power/domain/qcom-rpmhpd.c b/drivers/power/domain/qcom-rpmhpd.c
+index f51bc9a4..46711298 100644
+--- a/drivers/power/domain/qcom-rpmhpd.c
++++ b/drivers/power/domain/qcom-rpmhpd.c
+@@ -50,6 +50,42 @@ struct rpmhpd_desc {
+ };
+ 
+ /* RPMH powerdomains */
++static struct rpmhpd cx = {
++	.res_name = "cx.lvl",
++};
++
++static struct rpmhpd cx_ao = {
++	.res_name = "cx.lvl",
++};
++
++static struct rpmhpd ebi = {
++	.res_name = "ebi.lvl",
++};
++
++static struct rpmhpd gfx = {
++	.res_name = "gfx.lvl",
++};
++
++static struct rpmhpd lcx = {
++	.res_name = "lcx.lvl",
++};
++
++static struct rpmhpd lmx = {
++	.res_name = "lmx.lvl",
++};
++
++static struct rpmhpd mss = {
++	.res_name = "mss.lvl",
++};
++
++static struct rpmhpd mx = {
++	.res_name = "mx.lvl",
++};
++
++static struct rpmhpd mx_ao = {
++	.res_name = "mx.lvl",
++};
++
+ static struct rpmhpd mmcx_ao;
+ static struct rpmhpd mmcx = {
+ 	.res_name = "mmcx.lvl",
+@@ -70,6 +106,24 @@ static const struct rpmhpd_desc sa8775p_desc = {
+ 	.num_pds = ARRAY_SIZE(sa8775p_rpmhpds),
+ };
+ 
++/* SC7280 / QCS6490 RPMH power domains used by GCC, SMMU, PCIe and UFS. */
++static struct rpmhpd *sc7280_rpmhpds[] = {
++	[SC7280_CX] = &cx,
++	[SC7280_CX_AO] = &cx_ao,
++	[SC7280_EBI] = &ebi,
++	[SC7280_GFX] = &gfx,
++	[SC7280_MX] = &mx,
++	[SC7280_MX_AO] = &mx_ao,
++	[SC7280_LMX] = &lmx,
++	[SC7280_LCX] = &lcx,
++	[SC7280_MSS] = &mss,
++};
++
++static const struct rpmhpd_desc sc7280_desc = {
++	.rpmhpds = sc7280_rpmhpds,
++	.num_pds = ARRAY_SIZE(sc7280_rpmhpds),
++};
++
+ /* stub RPMH power domains mapped for unsupported platforms */
+ static struct rpmhpd *stub_rpmhpds[] = {};
+ 
+@@ -87,7 +141,7 @@ static const struct udevice_id rpmhpd_match_table[] = {
+ 	{ .compatible = "qcom,sa8540p-rpmhpd", .data = (ulong)&stub_desc },
+ 	{ .compatible = "qcom,sar2130p-rpmhpd", .data = (ulong)&stub_desc},
+ 	{ .compatible = "qcom,sc7180-rpmhpd", .data = (ulong)&stub_desc },
+-	{ .compatible = "qcom,sc7280-rpmhpd", .data = (ulong)&stub_desc },
++	{ .compatible = "qcom,sc7280-rpmhpd", .data = (ulong)&sc7280_desc },
+ 	{ .compatible = "qcom,sc8180x-rpmhpd", .data = (ulong)&stub_desc },
+ 	{ .compatible = "qcom,sc8280xp-rpmhpd", .data = (ulong)&stub_desc },
+ 	{ .compatible = "qcom,sdm670-rpmhpd", .data = (ulong)&stub_desc },
+diff --git a/drivers/serial/Kconfig b/drivers/serial/Kconfig
+index ffc58d66..9afd0cc4 100644
+--- a/drivers/serial/Kconfig
++++ b/drivers/serial/Kconfig
+@@ -343,6 +343,13 @@ config DEBUG_UART_MSM_GENI
+ 	  will need to provide parameters to make this work. The driver will
+ 	  be available until the real driver-model serial is running.
+ 
++config DEBUG_UART_MSM_GENI_16X
++	bool "Qualcomm GENI debug UART uses 16x oversampling"
++	depends on DEBUG_UART_MSM_GENI
++	help
++	  Select this on GENI SE 2.5 and newer, which uses 16 rather than 32
++	  source-clock ticks per UART bit.
++
+ config DEBUG_UART_MESON
+ 	bool "Amlogic Meson"
+ 	depends on MESON_SERIAL
+diff --git a/drivers/serial/serial_msm_geni.c b/drivers/serial/serial_msm_geni.c
+index ff91e001..687e615a 100644
+--- a/drivers/serial/serial_msm_geni.c
++++ b/drivers/serial/serial_msm_geni.c
+@@ -609,9 +609,11 @@ static struct udevice init_dev = {
+ 
+ #include <debug_uart.h>
+ 
++#define DEBUG_UART_OVERSAMPLING \
++	(CONFIG_IS_ENABLED(DEBUG_UART_MSM_GENI_16X) ? 16 : UART_OVERSAMPLING)
+ #define CLK_DIV (CONFIG_DEBUG_UART_CLOCK / \
+-					(CONFIG_BAUDRATE * UART_OVERSAMPLING))
+-#if (CONFIG_DEBUG_UART_CLOCK % (CONFIG_BAUDRATE * UART_OVERSAMPLING) > 0)
++				(CONFIG_BAUDRATE * DEBUG_UART_OVERSAMPLING))
++#if (CONFIG_DEBUG_UART_CLOCK % (CONFIG_BAUDRATE * DEBUG_UART_OVERSAMPLING) > 0)
+ #error Clocks cannot be set at early debug. Change CONFIG_BAUDRATE
+ #endif
+ 
+diff --git a/include/qcom_secure_launch.h b/include/qcom_secure_launch.h
+new file mode 100644
+index 00000000..475fdd95
+--- /dev/null
++++ b/include/qcom_secure_launch.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++#ifndef __QCOM_SECURE_LAUNCH_H
++#define __QCOM_SECURE_LAUNCH_H
++
++#include <linux/types.h>
++
++int qcom_secure_launch_available(void);
++int qcom_secure_launch_prepare_platform(void);
++int qcom_secure_launch(void);
++int qcom_pas_boot(const void *firmware, size_t firmware_size, u32 pas_id,
++		  ulong region_addr, size_t region_size);
++
++#endif

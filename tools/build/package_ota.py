@@ -69,6 +69,24 @@ def package_image(name: str, source: Path, base_url: str) -> dict:
   }
 
 
+def sign_manifest(manifest_path: Path, signing_key: Path) -> Path:
+  if not signing_key.is_file():
+    raise FileNotFoundError(f"missing OTA signing key: {signing_key}")
+  signature_path = Path(f"{manifest_path}.sig")
+  temporary = signature_path.with_suffix(signature_path.suffix + ".tmp")
+  try:
+    subprocess.run([
+      "openssl", "pkeyutl", "-sign", "-inkey", str(signing_key), "-rawin",
+      "-in", str(manifest_path), "-out", str(temporary),
+    ], check=True)
+    if temporary.stat().st_size != 64:
+      raise ValueError(f"OTA signing key did not produce a 64-byte Ed25519 signature")
+    os.replace(temporary, signature_path)
+  finally:
+    temporary.unlink(missing_ok=True)
+  return signature_path
+
+
 def main() -> None:
   parser = argparse.ArgumentParser(description="Package a full vamOS A/B update")
   parser.add_argument(
@@ -79,6 +97,12 @@ def main() -> None:
   parser.add_argument(
     "--version",
     default=(ROOT / "userspace/root/VERSION").read_text(encoding="utf-8").strip(),
+  )
+  parser.add_argument(
+    "--signing-key",
+    type=Path,
+    default=Path(os.environ["VAMOS_OTA_SIGNING_KEY"]) if os.environ.get("VAMOS_OTA_SIGNING_KEY") else None,
+    help="Ed25519 private PEM key (or set VAMOS_OTA_SIGNING_KEY)",
   )
   args = parser.parse_args()
 
@@ -98,6 +122,13 @@ def main() -> None:
   manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
   (OUTPUT_DIR / "VERSION").write_text(args.version + "\n", encoding="utf-8")
   print(f"Wrote {manifest_path}")
+  if args.signing_key is not None:
+    signature_path = sign_manifest(manifest_path, args.signing_key)
+    print(f"Signed {manifest_path.name} -> {signature_path.name}")
+  else:
+    # Never leave an old signature beside a newly generated manifest.
+    Path(f"{manifest_path}.sig").unlink(missing_ok=True)
+    print("OTA manifest is unsigned (remote installs require --signing-key)")
 
 
 if __name__ == "__main__":

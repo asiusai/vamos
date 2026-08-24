@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 #include <errno.h>
-#include <linux/reboot.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 
 static void usage(FILE *stream, const char *program)
@@ -29,15 +27,17 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	/* Persist buffered writes before handing control to Qualcomm firmware. */
+	/* Persist application writes before arming the redundant boot metadata. */
 	sync();
 
-	if (syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
-		    LINUX_REBOOT_CMD_RESTART2, "edl") == -1) {
-		fprintf(stderr, "%s: failed to reboot into EDL: %s\n", argv[0],
-			strerror(errno));
-		return 1;
-	}
+	/*
+	 * Linux runs at EL1 on the Dragon, where the stock secure monitor ignores
+	 * the EDL cookie during reset.  Persist a one-shot request and let the
+	 * proven U-Boot EL2 recovery command consume it on the next boot.
+	 */
+	execl("/usr/bin/vamos-update", "vamos-update", "request-edl", NULL);
 
-	return 0;
+	fprintf(stderr, "%s: failed to execute vamos-update request-edl: %s\n",
+		argv[0], strerror(errno));
+	return 1;
 }

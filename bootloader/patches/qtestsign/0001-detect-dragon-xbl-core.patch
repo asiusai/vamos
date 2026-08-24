@@ -1,0 +1,22 @@
+diff --git a/patchxbl.py b/patchxbl.py
+index 587d8e7..010cb3e 100755
+--- a/patchxbl.py
++++ b/patchxbl.py
+@@ -10,7 +10,7 @@
+ from mbn.elf import Elf
+ 
+ 
+-XBL_CORE_ADDR_OFFSET = 0xfc00000
++XBL_CORE_ADDR_OFFSETS = (0xfc00000, 0xf000000)
+ XBL_CORE_ADDR_MASK = 0xfffffff
+ 
+ 
+@@ -21,7 +21,7 @@ def _patch_xbl_elf(elf: Elf, out: Path, args):
+ 	if args.core:
+ 		# Find xbl_core segment using heuristic
+ 		core_phdr = next(phdr for phdr in elf.phdrs
+-						 if (phdr.p_paddr & XBL_CORE_ADDR_MASK) == XBL_CORE_ADDR_OFFSET)
++						 if (phdr.p_paddr & XBL_CORE_ADDR_MASK) in XBL_CORE_ADDR_OFFSETS)
+ 		print(f"Found xbl_core phdr: {core_phdr}")
+ 
+ 		# Replace with new data
