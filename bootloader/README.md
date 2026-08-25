@@ -45,7 +45,10 @@ Restore it with:
 ./vamos flash uboot --restore-stock
 ```
 
-The fast path probes PCIe/NVMe first, reads the existing redundant
+The fast path samples the UFS connector's active-low card-detect GPIO and
+initializes that product variant's storage first. UFS devices therefore avoid
+the absent PCIe link timeout, while NVMe devices avoid probing UFS. The other
+backend remains a recovery fallback. U-Boot then reads the existing redundant
 `EFI/vamos/grubenv` records, persists a trial attempt before Linux, and boots a
 raw arm64 `Image` plus the slot DTB. This deliberately keeps the current OTA
 state format readable by both U-Boot and the old GRUB/UEFI path during rollout.

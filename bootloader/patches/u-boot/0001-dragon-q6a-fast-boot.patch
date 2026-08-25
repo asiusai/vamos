@@ -167,7 +167,14 @@ diff --git a/arch/arm/mach-snapdragon/board.c b/arch/arm/mach-snapdragon/board.c
 index 35735f15..bc8f41f8 100644
 --- a/arch/arm/mach-snapdragon/board.c
 +++ b/arch/arm/mach-snapdragon/board.c
-@@ -39,6 +39,88 @@ DECLARE_GLOBAL_DATA_PTR;
+@@ -25,5 +25,6 @@
+ #include <linux/arm-smccc.h>
+ #include <linux/bug.h>
++#include <linux/delay.h>
+ #include <linux/psci.h>
+ #include <linux/sizes.h>
+ #include <lmb.h>
+@@ -39,6 +40,114 @@ DECLARE_GLOBAL_DATA_PTR;
  
  enum qcom_boot_source qcom_boot_source __section(".data") = 0;
  
@@ -182,8 +189,12 @@ index 35735f15..bc8f41f8 100644
 +#define DRAGON_Q6A_TLMM_BASE		0x0f100000UL
 +#define DRAGON_Q6A_TLMM_STRIDE		0x1000
 +#define DRAGON_Q6A_SOM_ALIVE_GPIO	27
++#define DRAGON_Q6A_UFS_CD_GPIO		7
 +#define DRAGON_Q6A_GPIO_OE		BIT(9)
++#define DRAGON_Q6A_GPIO_IN		BIT(0)
 +#define DRAGON_Q6A_GPIO_OUT		BIT(1)
++#define DRAGON_Q6A_GPIO_PULL_MASK	GENMASK(1, 0)
++#define DRAGON_Q6A_GPIO_PULL_UP		3
 +#define DRAGON_Q6A_GPIO_FUNC_MASK	GENMASK(5, 2)
 +#define DRAGON_Q6A_GUNYAH_TAKEOVER_SMC	0x02000121
 +
@@ -202,6 +213,28 @@ index 35735f15..bc8f41f8 100644
 +	value &= ~DRAGON_Q6A_GPIO_FUNC_MASK;
 +	writel(DRAGON_Q6A_GPIO_OUT, in_out);
 +	writel(value | DRAGON_Q6A_GPIO_OE, cfg);
++}
++
++/*
++ * GPIO7 is the UFS connector's active-low card-detect signal.  Sampling it
++ * before bootcmd lets mutually exclusive product variants initialize their
++ * real boot medium first, without paying an absent PCIe link timeout on UFS.
++ * A pull-up makes the no-UFS/NVMe case deterministic.
++ */
++static bool dragon_q6a_ufs_present(void)
++{
++	void __iomem *cfg;
++	u32 value;
++
++	cfg = (void __iomem *)(DRAGON_Q6A_TLMM_BASE +
++			DRAGON_Q6A_UFS_CD_GPIO * DRAGON_Q6A_TLMM_STRIDE);
++	value = readl(cfg);
++	value &= ~(DRAGON_Q6A_GPIO_FUNC_MASK | DRAGON_Q6A_GPIO_OE |
++		   DRAGON_Q6A_GPIO_PULL_MASK);
++	writel(value | DRAGON_Q6A_GPIO_PULL_UP, cfg);
++	udelay(10);
++
++	return !(readl(cfg + 4) & DRAGON_Q6A_GPIO_IN);
 +}
 +
 +/* Called from crt0 before the debug UART itself is initialized. */
@@ -256,6 +289,25 @@ index 35735f15..bc8f41f8 100644
  static struct mm_region rbx_mem_map[CONFIG_NR_DRAM_BANKS + 2] = { { 0 } };
  
  struct mm_region *mem_map = rbx_mem_map;
+@@ -509,5 +618,14 @@
+-void __weak qcom_late_init(void)
+-{
+-}
+-
++void __weak qcom_late_init(void)
++{
++	bool ufs_present;
++
++	if (fdt_node_check_compatible(gd->fdt_blob, 0, "radxa,dragon-q6a"))
++		return;
++
++	ufs_present = dragon_q6a_ufs_present();
++	env_set("vamos_storage", ufs_present ? "ufs" : "nvme");
++	printf("vamOS: %s selected by UFS card detect\n",
++	       ufs_present ? "UFS" : "NVMe");
++}
++
+ #define KERNEL_COMP_SIZE	SZ_64M
 diff --git a/arch/arm/mach-snapdragon/secure_launch.c b/arch/arm/mach-snapdragon/secure_launch.c
 new file mode 100644
 index 00000000..b3f06240
@@ -1463,7 +1515,7 @@ new file mode 100644
 index 00000000..f0bc4053
 --- /dev/null
 +++ b/board/qualcomm/asius-dragon-q6a.env
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,48 @@
 +stdin=serial
 +stdout=serial
 +stderr=serial
@@ -1504,8 +1556,13 @@ index 00000000..f0bc4053
 +	if test "${vamos_edl}" = "1"; then edl; else run vamos_load; fi;
 +	vamosboot scsi 0 fail && run vamos_load
 +bootcmd=
-+	run vamos_nvme;
-+	run vamos_ufs;
++	if test "${vamos_storage}" = "ufs"; then
++		run vamos_ufs;
++		run vamos_nvme;
++	else
++		run vamos_nvme;
++		run vamos_ufs;
++	fi;
 +	echo vamOS: no bootable NVMe or UFS slot found
 diff --git a/boot/Kconfig b/boot/Kconfig
 index c67dc0ba..9c1908b9 100644

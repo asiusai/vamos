@@ -93,10 +93,6 @@ if [ -x /usr/bin/udevd ]; then
         # firmware-backed drivers after Secure Launch and cause a PSHOLD reset.
         # Class/bus events still apply all device permissions and symlinks.
         udevadm trigger --action=add --type=devices --subsystem-nomatch=platform
-        # socinfo is modular and openpilot reads its serial-number interface.
-        # Trigger this one known-safe platform device deterministically.
-        udevadm trigger --action=add --type=devices \
-            --subsystem-match=platform --sysname-match=qcom-socinfo
         echo "=> Continuing while Dragon udev probes finish asynchronously"
     else
         udevadm trigger --action=add --type=devices
