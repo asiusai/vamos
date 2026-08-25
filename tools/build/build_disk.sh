@@ -133,6 +133,15 @@ partition_sectors() {
   fi | sed -n 's/^Partition size: \([0-9][0-9]*\) sectors.*/\1/p'
 }
 
+partition_guid() {
+  local number="$1"
+  if [ -n "$GPT_LOOP" ]; then
+    sudo sgdisk --info="$number" "$GPT_DEVICE"
+  else
+    sgdisk --info="$number" "$GPT_DEVICE"
+  fi | sed -n 's/^Partition unique GUID: \([A-Fa-f0-9-][A-Fa-f0-9-]*\).*/\1/p'
+}
+
 write_partition() {
   local image="$1"
   local start_sector="$2"
@@ -190,6 +199,12 @@ cp --reflink=auto --sparse=always "$ESP_IMG" "$ESP_A_IMG"
 cp --reflink=auto --sparse=always "$ESP_IMG" "$ESP_B_IMG"
 mlabel -i "$ESP_A_IMG" ::VAMOS-A
 mlabel -i "$ESP_B_IMG" ::VAMOS-B
+ROOT_A_GUID="$(partition_guid 2)"
+ROOT_B_GUID="$(partition_guid 4)"
+if [ -z "$ROOT_A_GUID" ] || [ -z "$ROOT_B_GUID" ]; then
+  echo "ERROR: failed to determine factory rootfs PARTUUIDs" >&2
+  exit 1
+fi
 for slot in a b; do
   slot_upper="${slot^^}"
   env_path="$GRUBENV_A"
@@ -198,7 +213,7 @@ for slot in a b; do
   grub-editenv "$env_path" create
   grub-editenv "$env_path" set \
     generation=1 active=a pending= phase=stable \
-    root_a=PARTLABEL=rootfs_a root_b=PARTLABEL=rootfs_b
+    root_a="PARTUUID=$ROOT_A_GUID" root_b="PARTUUID=$ROOT_B_GUID"
   mcopy -o -i "$esp_path" "$env_path" ::/EFI/vamos/grubenv
   echo "  prepared VAMOS-$slot_upper"
 done

@@ -346,6 +346,17 @@ def request_uboot_edl(timeout=10):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+        else:
+            # NCM may be unplugged or unavailable on a broken userspace image.
+            # A controlled 12 V cycle still reaches the known U-Boot UART path
+            # and does not require asserting the hardware EDL input.
+            print("[edl] NCM unavailable; power-cycling into the U-Boot UART rescue window")
+            try:
+                power(0)
+                time.sleep(OFF_SETTLE_SECS)
+                power(255)
+            except SystemExit:
+                return False
 
         # U-Boot has a zero-delay autoboot check.  A long blocking read makes
         # the nominal 5 ms poke interval miss that single tstc() window.
@@ -412,13 +423,16 @@ def cmd_edl(args):
         # which enters Qualcomm's 05c6:900e ramdump transport on this platform.
         # Only use the command after proving the installed updater supports the
         # redundant ESP request consumed by U-Boot.
-        capability = subprocess.run(
-            ["ssh", *SSH_OPTS, "-o", "BatchMode=yes",
-             "-o", "ConnectTimeout=4", f"comma@{NCM_IP}",
-             "vamos-update request-edl --help"],
-            capture_output=True, text=True, timeout=6,
-        )
-        if capability.returncode == 0:
+        try:
+            capability = subprocess.run(
+                ["ssh", *SSH_OPTS, "-o", "BatchMode=yes",
+                 "-o", "ConnectTimeout=4", f"comma@{NCM_IP}",
+                 "vamos-update request-edl --help"],
+                capture_output=True, text=True, timeout=6,
+            )
+        except subprocess.TimeoutExpired:
+            capability = None
+        if capability is not None and capability.returncode == 0:
             print("[edl] requesting one-shot U-Boot EDL reset over NCM")
             try:
                 subprocess.run(
@@ -789,10 +803,11 @@ def main():
     ssh_p.add_argument("ssh_args", nargs="*")
 
     edl_p = sub.add_parser("edl", help="Enter EDL mode over NCM, with BIOS fallback")
-    edl_p.add_argument("--bios", action="store_true",
-                       help="Force the legacy BIOS navigation method")
-    edl_p.add_argument("--software-only", action="store_true",
-                       help="Do not fall back to BIOS if reboot-edl fails")
+    edl_method = edl_p.add_mutually_exclusive_group()
+    edl_method.add_argument("--bios", action="store_true",
+                            help="Force the legacy BIOS navigation method")
+    edl_method.add_argument("--software-only", action="store_true",
+                            help="Do not fall back to BIOS if reboot-edl fails")
     edl_p.add_argument("--no-cycle", action="store_true",
                        help="Skip power cycle (assume BIOS already at main menu)")
     edl_p.add_argument("--f2-wait", type=float, default=10.0,

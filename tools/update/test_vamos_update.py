@@ -160,6 +160,19 @@ class DiskPathTest(unittest.TestCase):
         self.assertEqual(update.partition_path("b", "esp"), Path(f"{disk}3"))
         self.assertEqual(update.partition_path("b", "system"), Path(f"{disk}4"))
 
+  def test_slot_fallback_does_not_require_the_other_root_partition(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      disk = Path(temporary) / "sda"
+      root_b = Path(f"{disk}4")
+      root_b.touch()
+      with (
+        mock.patch.object(update, "DISK", disk),
+        mock.patch.object(update, "_supported_system_disk", return_value=True),
+        mock.patch.object(update, "cmdline", return_value="rootwait"),
+        mock.patch.object(update, "run", return_value=subprocess.CompletedProcess([], 0, f"{root_b}\n", "")),
+      ):
+        self.assertEqual(update.current_slot(), "b")
+
   def test_layout_rejects_userdata_mounted_from_another_disk(self) -> None:
     def fake_run(command, **kwargs):
       if command[0] == "blockdev":
@@ -177,10 +190,24 @@ class DiskPathTest(unittest.TestCase):
         mock.patch.object(update, "_supported_system_disk", return_value=True),
         mock.patch.object(update, "ESP_SIZE", 1),
         mock.patch.object(update, "SYSTEM_SIZE", 1),
+        mock.patch.object(update, "partition_label", side_effect=["esp_a", "rootfs_a", "esp_b", "rootfs_b", "userdata"]),
         mock.patch.object(update, "run", side_effect=fake_run),
         mock.patch.object(update.os.path, "ismount", return_value=True),
       ):
         with self.assertRaisesRegex(update.UpdateError, "expected"):
+          update.verify_layout()
+
+  def test_layout_rejects_wrong_partition_numbering(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      disk = Path(temporary) / "sda"
+      for number in range(1, 6):
+        Path(f"{disk}{number}").touch()
+      with (
+        mock.patch.object(update, "DISK", disk),
+        mock.patch.object(update, "_supported_system_disk", return_value=True),
+        mock.patch.object(update, "partition_label", return_value="rootfs_a"),
+      ):
+        with self.assertRaisesRegex(update.UpdateError, "PARTLABEL"):
           update.verify_layout()
 
 

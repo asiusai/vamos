@@ -111,6 +111,10 @@ PARTITION_NUMBER = {
   ("b", "esp"): 3,
   ("b", "system"): 4,
 }
+PARTITION_LABEL = {
+  (slot, image_name): ESP_LABEL[slot] if image_name == "esp" else ROOT_LABEL[slot]
+  for slot, image_name in PARTITION_NUMBER
+}
 GRUB_ENV_SIZE = 1024
 GRUB_ENV_HEADER = (
   b"# GRUB Environment Block\n"
@@ -423,9 +427,9 @@ def current_slot() -> str:
   if match:
     return match.group(1)
 
-  result = run(["findmnt", "-n", "-o", "SOURCE", "/"]).stdout.strip()
-  for slot in ("a", "b"):
-    if Path(result).resolve() == partition_path(slot, "system").resolve():
+  root = Path(run(["findmnt", "-n", "-o", "SOURCE", "/"]).stdout.strip()).resolve()
+  for slot, number in (("a", 2), ("b", 4)):
+    if root == disk_partition(number).resolve():
       return slot
   raise UpdateError("cannot determine active vamOS slot")
 
@@ -437,13 +441,17 @@ def partition_path(slot: str, image_name: str) -> Path:
     raise UpdateError(f"invalid slot or image name: {slot}/{image_name}") from exc
   path = disk_partition(number)
   if not path.exists():
-    label = ESP_LABEL[slot] if image_name == "esp" else ROOT_LABEL[slot]
+    label = PARTITION_LABEL[(slot, image_name)]
     raise UpdateError(f"required partition {label} does not exist on system disk {DISK}")
   return path
 
 
 def block_size(path: Path) -> int:
   return int(run(["blockdev", "--getsize64", str(path)]).stdout.strip())
+
+
+def partition_label(path: Path) -> str:
+  return run(["blkid", "-s", "PARTLABEL", "-o", "value", str(path)]).stdout.strip()
 
 
 def write_image(spec: ImageSpec, destination: Path,
@@ -808,15 +816,20 @@ def rollback_boot(current: str, failed: str) -> int:
 
 def verify_layout() -> None:
   for slot in ("a", "b"):
-    esp = partition_path(slot, "esp")
-    system = partition_path(slot, "system")
-    if block_size(esp) != ESP_SIZE:
-      raise UpdateError(f"{esp} is not exactly {ESP_SIZE} bytes")
-    if block_size(system) != SYSTEM_SIZE:
-      raise UpdateError(f"{system} is not exactly {SYSTEM_SIZE} bytes")
+    for image_name, expected_size in (("esp", ESP_SIZE), ("system", SYSTEM_SIZE)):
+      path = partition_path(slot, image_name)
+      expected_label = PARTITION_LABEL[(slot, image_name)]
+      actual_label = partition_label(path)
+      if actual_label != expected_label:
+        raise UpdateError(f"{path} has PARTLABEL {actual_label!r}, expected {expected_label!r}")
+      if block_size(path) != expected_size:
+        raise UpdateError(f"{path} is not exactly {expected_size} bytes")
   userdata = disk_partition(5)
   if not userdata.exists():
     raise UpdateError(f"userdata partition does not exist on system disk {DISK}")
+  actual_label = partition_label(userdata)
+  if actual_label != "userdata":
+    raise UpdateError(f"{userdata} has PARTLABEL {actual_label!r}, expected 'userdata'")
   if not os.path.ismount("/data"):
     raise UpdateError("/data is not mounted from persistent userdata")
   data_source = run(["findmnt", "-n", "-o", "SOURCE", "/data"]).stdout.strip()

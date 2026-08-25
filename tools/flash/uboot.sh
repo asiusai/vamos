@@ -14,6 +14,7 @@ STOCK="$DIR/build/xbl-stock-dragon-q6a.bin"
 TZAPPS="$DIR/build/tzapps-stock-dragon-q6a.bin"
 PLAT="$DIR/build/plat-stock-dragon-q6a.bin"
 UNSIGNED="$DIR/build/u-boot-dragon-q6a-xbl.elf"
+SIGNED="$DIR/build/u-boot-dragon-q6a-xbl.signed.mbn"
 UBOOT="$DIR/build/u-boot-dragon-q6a-xbl.mbn"
 VERIFY="$DIR/build/xbl-verify-dragon-q6a.bin"
 XBL_SIZE=$((6 * 1024 * 1024))
@@ -79,11 +80,27 @@ else
 
   echo "== Replacing the Dragon EDK2 XBL segment with U-Boot =="
   python3 "$PATCHXBL" -c "$CORE_WITH_SL" -o "$UNSIGNED" "$STOCK"
-  python3 "$QTESTSIGN" -v6 sbl1 "$UNSIGNED" -o "$UBOOT"
+  python3 "$QTESTSIGN" -v6 sbl1 "$UNSIGNED" -o "$SIGNED"
+  if [ "$(stat -c%s "$SIGNED")" -gt "$XBL_SIZE" ]; then
+    echo "ERROR: signed XBL is larger than 6 MiB: $SIGNED" >&2
+    exit 1
+  fi
+  # qtestsign emits through the final ELF segment, while the SPI partition
+  # also contains device-specific trailing bytes. Produce one deterministic,
+  # full-partition payload so verification covers every programmed byte.
+  cp "$STOCK" "$UBOOT"
+  dd if="$SIGNED" of="$UBOOT" conv=notrunc status=none
+
+  # Firehose rounds writes up to the target's 4 KiB logical block size. Match
+  # that behavior so stock bytes cannot leak into the signed ELF's padding.
+  signed_size=$(stat -c%s "$SIGNED")
+  aligned_size=$(( (signed_size + 4095) / 4096 * 4096 ))
+  dd if=/dev/zero of="$UBOOT" bs=1 seek="$signed_size" \
+    count=$((aligned_size - signed_size)) conv=notrunc status=none
   payload="$UBOOT"
 fi
-if [ "$(stat -c%s "$payload")" -gt "$XBL_SIZE" ]; then
-  echo "ERROR: XBL payload is larger than 6 MiB: $payload" >&2
+if [ "$(stat -c%s "$payload")" -ne "$XBL_SIZE" ]; then
+  echo "ERROR: XBL payload is not exactly 6 MiB: $payload" >&2
   exit 1
 fi
 
@@ -91,7 +108,7 @@ echo "== Writing XBL: $(basename "$payload") =="
 "${EDL[@]}" write-part XBL "$payload"
 "${EDL[@]}" read-part XBL "$VERIFY"
 
-payload_hash="$(head -c "$(stat -c%s "$payload")" "$VERIFY" | sha256sum | cut -d' ' -f1)"
+payload_hash="$(sha256sum "$VERIFY" | cut -d' ' -f1)"
 expected_hash="$(sha256sum "$payload" | cut -d' ' -f1)"
 if [ "$payload_hash" != "$expected_hash" ]; then
   echo "ERROR: XBL readback does not match payload" >&2

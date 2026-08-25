@@ -119,38 +119,6 @@ if [ -f /ASIUS ]; then
     [ -e "$touch_path" ] || [ -L "$touch_path" ] || ln -s /dev/null "$touch_path"
 fi
 
-# Wait for a device to appear (up to timeout seconds)
-wait_for_dev() {
-    dev="$1"
-    timeout="${2:-60}"
-    n=0
-    while [ ! -e "$dev" ] && [ "$n" -lt "$timeout" ]; do
-        sleep 1
-        n=$((n + 1))
-        [ $((n % 10)) -eq 0 ] && echo "=> Still waiting for $dev... (${n}s)"
-    done
-    [ -e "$dev" ]
-}
-
-# Mount a partition by partlabel
-# Usage: mount_part <partlabel> <mountpoint> <options>
-mount_part() {
-    label="$1"
-    mnt="$2"
-    opts="${3:-ro}"
-    dev="/dev/disk/by-partlabel/$label"
-
-    if wait_for_dev "$dev" 60; then
-        if mount -o "$opts" "$dev" "$mnt"; then
-            echo "=> $mnt mounted ($label)"
-        else
-            echo "WARN: $mnt mount failed"
-        fi
-    else
-        echo "WARN: $label partition not found"
-    fi
-}
-
 storage_root="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
 storage_disk_name="$(lsblk -n -o PKNAME "$storage_root" 2>/dev/null | head -n 1)"
 if [ -z "$storage_disk_name" ]; then
@@ -185,16 +153,8 @@ if [ -f /ASIUS ] && [ -x /usr/bin/vamos-update ]; then
 fi
 
 if [ "$ab_init_failed" -eq 0 ] && [ -b "$userdata_candidate" ]; then
-    # The Dragon continues general udev probing asynchronously for fast boot.
-    # Settle this one partition so the updater can rely on its persistent link.
-    if [ -b "$userdata_candidate" ] && [ ! -e /dev/disk/by-partlabel/userdata ]; then
-        udevadm trigger --action=add "/sys/class/block/${userdata_candidate##*/}"
-        udevadm settle --timeout=2 ||
-            echo "WARN: userdata udev event did not settle"
-    fi
     echo "=> Mounting persistent userdata"
-    userdata_dev="$userdata_candidate"
-    mount -o "rw,discard,noatime,nodiratime,nosuid,nodev" "$userdata_dev" /data ||
+    mount -o "rw,discard,noatime,nodiratime,nosuid,nodev" "$userdata_candidate" /data ||
         echo "WARN: /data mount failed"
     if ! mountpoint -q /data; then
         echo "ERROR: persistent userdata exists but could not be mounted"

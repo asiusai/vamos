@@ -1529,10 +1529,10 @@ index c67dc0ba..9c1908b9 100644
  	bool "Stop autobooting via specific input key / string"
  	help
 diff --git a/cmd/Kconfig b/cmd/Kconfig
-index ff90a870..52082deb 100644
+index ff90a870..2a6cc700 100644
 --- a/cmd/Kconfig
 +++ b/cmd/Kconfig
-@@ -539,6 +539,20 @@ config CMD_ABOOTIMG
+@@ -539,6 +539,21 @@ config CMD_ABOOTIMG
  
  	  See doc/android/boot-image.rst for details.
  
@@ -1547,8 +1547,9 @@ index ff90a870..52082deb 100644
 +	bool "edl"
 +	depends on ARCH_SNAPDRAGON && ARM64
 +	help
-+	  Request Qualcomm emergency download mode through the PSCI 1.1 vendor
-+	  SYSTEM_RESET2 interface. This provides software recovery without UEFI.
++	  Request Qualcomm emergency download mode through the platform's stock
++	  secure-monitor cookie-and-reset sequence. This provides software recovery
++	  without UEFI.
 +
  config CMD_CEDIT
  	bool "cedit - Configuration editor"
@@ -1725,15 +1726,16 @@ index 00000000..8aad8a64
 +);
 diff --git a/cmd/vamosboot.c b/cmd/vamosboot.c
 new file mode 100644
-index 00000000..37a43060
+index 00000000..a1c4eee5
 --- /dev/null
 +++ b/cmd/vamosboot.c
-@@ -0,0 +1,305 @@
+@@ -0,0 +1,358 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/* Redundant vamOS A/B selector compatible with the existing GRUB records. */
 +
 +#include <blk.h>
 +#include <command.h>
++#include <ctype.h>
 +#include <env.h>
 +#include <fs.h>
 +#include <linux/errno.h>
@@ -1759,7 +1761,6 @@ index 00000000..37a43060
 +	bool edl_request;
 +	char root_a[64];
 +	char root_b[64];
-+	int partition;
 +};
 +
 +static bool vamos_value(const char *buf, const char *name, char *out, size_t size)
@@ -1801,6 +1802,26 @@ index 00000000..37a43060
 +	}
 +}
 +
++static bool vamos_root_valid(const char *root)
++{
++	const char *value;
++
++	if (!strncmp(root, "PARTUUID=", 9))
++		value = root + 9;
++	else if (!strncmp(root, "PARTLABEL=", 10))
++		value = root + 10;
++	else
++		return false;
++	if (!*value)
++		return false;
++	for (; *value; value++) {
++		if (!isalnum((unsigned char)*value) && *value != '.' && *value != '_' &&
++		    *value != '-')
++			return false;
++	}
++	return true;
++}
++
 +static int vamos_set_device(const char *interface, const char *device, int part)
 +{
 +	char devpart[24];
@@ -1840,15 +1861,28 @@ index 00000000..37a43060
 +		goto out;
 +	}
 +
-+	state->generation = simple_strtoul(generation, NULL, 10);
++	if (strict_strtoul(generation, 10, &state->generation)) {
++		ret = -EINVAL;
++		goto out;
++	}
 +	state->active = active[0];
 +	state->pending = 0;
 +	state->edl_request = false;
-+	if (vamos_value(buf, "pending", pending, sizeof(pending)))
++	if (vamos_value(buf, "pending", pending, sizeof(pending))) {
++		if (pending[1]) {
++			ret = -EINVAL;
++			goto out;
++		}
 +		state->pending = pending[0];
++	}
 +	if (vamos_value(buf, "edl_request", edl_request,
-+			sizeof(edl_request)) && !strcmp(edl_request, "1"))
-+		state->edl_request = true;
++				sizeof(edl_request))) {
++		if (strcmp(edl_request, "0") && strcmp(edl_request, "1")) {
++			ret = -EINVAL;
++			goto out;
++		}
++		state->edl_request = !strcmp(edl_request, "1");
++	}
 +	if (!strcmp(phase, "stable"))
 +		state->phase = VAMOS_PHASE_STABLE;
 +	else if (!strcmp(phase, "armed"))
@@ -1857,11 +1891,9 @@ index 00000000..37a43060
 +		state->phase = VAMOS_PHASE_ATTEMPTED;
 +	else
 +		state->phase = VAMOS_PHASE_INVALID;
-+	state->partition = part;
-+
-+	if ((state->active != 'a' && state->active != 'b') ||
-+	    !vamos_rank(state->phase) || strncmp(state->root_a, "PART", 4) ||
-+	    strncmp(state->root_b, "PART", 4) ||
++	if (active[1] || (state->active != 'a' && state->active != 'b') ||
++	    !vamos_rank(state->phase) || !vamos_root_valid(state->root_a) ||
++	    !vamos_root_valid(state->root_b) ||
 +	    (state->phase != VAMOS_PHASE_STABLE &&
 +	     ((state->pending != 'a' && state->pending != 'b') ||
 +	      state->pending == state->active)))
@@ -1923,17 +1955,38 @@ index 00000000..37a43060
 +	return ret_a && ret_b ? ret_a : 0;
 +}
 +
-+static void vamos_export_choice(const struct vamos_state *state, char slot,
-+				const char *boot_state_arg)
++static void vamos_export_choice(const struct vamos_state *state,
++				const char *interface, const char *device,
++				char slot, const char *boot_state_arg)
 +{
 +	char esp[4] = { slot == 'a' ? '1' : '3', '\0' };
 +	char rootpart[4] = { slot == 'a' ? '2' : '4', '\0' };
 +	char slot_string[2] = { slot, '\0' };
++	const char *root = slot == 'a' ? state->root_a : state->root_b;
++	char legacy_root[24];
++
++	/*
++	 * Factory and older recovery ESPs used PARTLABEL references. If both
++	 * supported media are attached on a bench, those labels are duplicated.
++	 * Keep their metadata readable but bind Linux to the storage U-Boot just
++	 * selected. New factory images and OTA state use a persistent PARTUUID.
++	 */
++	if (!strncmp(root, "PARTLABEL=", 10) && !strcmp(device, "0")) {
++		if (!strcmp(interface, "nvme")) {
++			snprintf(legacy_root, sizeof(legacy_root),
++				 "/dev/nvme0n1p%s", rootpart);
++			root = legacy_root;
++		} else if (!strcmp(interface, "scsi")) {
++			snprintf(legacy_root, sizeof(legacy_root),
++				 "/dev/sda%s", rootpart);
++			root = legacy_root;
++		}
++	}
 +
 +	env_set("vamos_slot", slot_string);
 +	env_set("vamos_esp", esp);
 +	env_set("vamos_rootpart", rootpart);
-+	env_set("vamos_root", slot == 'a' ? state->root_a : state->root_b);
++	env_set("vamos_root", root);
 +	env_set("vamos_state_arg", boot_state_arg);
 +}
 +
@@ -1993,6 +2046,7 @@ index 00000000..37a43060
 +			       chosen->pending, slot);
 +		} else {
 +			/* The stable slot failed: promote its peer as recovery. */
++			chosen->generation++;
 +			chosen->active = chosen->active == 'a' ? 'b' : 'a';
 +			slot = chosen->active;
 +			boot_state_arg = "vamos.recovery=1";
@@ -2022,7 +2076,7 @@ index 00000000..37a43060
 +		slot = chosen->active;
 +	}
 +
-+	vamos_export_choice(chosen, slot, boot_state_arg);
++	vamos_export_choice(chosen, interface, device, slot, boot_state_arg);
 +	printf("vamOS: booting slot %c%s\n", slot,
 +	       *boot_state_arg ? " (non-stable path)" : "");
 +	return CMD_RET_SUCCESS;

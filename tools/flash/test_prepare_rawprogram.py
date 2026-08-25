@@ -37,6 +37,15 @@ class PrepareRawprogramTest(unittest.TestCase):
     }
     self.assertIs(operations_for_payload(manifest, "base"), operations)
 
+  def test_rejects_unaligned_ufs_operation(self) -> None:
+    manifest = {
+      "manifest_version": 2,
+      "sector_size": 4096,
+      "base": {"operations": [{"operation": "program", "offset": 512, "size": 4096}]},
+    }
+    with self.assertRaisesRegex(ValueError, "aligned"):
+      operations_for_payload(manifest, "base")
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -21,17 +21,33 @@ def sha256(data: bytes) -> str:
 
 
 def operations_for_payload(manifest: dict, payload: str) -> list[dict]:
-  if manifest.get("sector_size") not in SUPPORTED_SECTOR_SIZES:
+  sector_size = manifest.get("sector_size")
+  if sector_size not in SUPPORTED_SECTOR_SIZES:
     raise ValueError("unsupported local flash sector size")
   if manifest.get("manifest_version") == 1:
     if payload != "base":
       raise ValueError("legacy flash manifests contain one bundled payload")
-    return manifest["chunks"]
-  if manifest.get("manifest_version") == 2:
+    operations = manifest["chunks"]
+  elif manifest.get("manifest_version") == 2:
     if payload == "base":
-      return manifest["base"]["operations"]
-    return manifest["optional_payloads"]["openpilot"]["operations"]
-  raise ValueError("unsupported local flash manifest")
+      operations = manifest["base"]["operations"]
+    else:
+      operations = manifest["optional_payloads"]["openpilot"]["operations"]
+  else:
+    raise ValueError("unsupported local flash manifest")
+
+  if not isinstance(operations, list):
+    raise ValueError("flash payload operations must be a list")
+  for operation in operations:
+    if not isinstance(operation, dict) or operation.get("operation") not in ("erase", "program"):
+      raise ValueError("flash payload contains an invalid operation")
+    offset = operation.get("offset")
+    size = operation.get("size")
+    if not isinstance(offset, int) or not isinstance(size, int) or offset < 0 or size <= 0:
+      raise ValueError("flash operation has an invalid byte range")
+    if offset % sector_size or size % sector_size:
+      raise ValueError(f"flash operation is not aligned to {sector_size}-byte sectors")
+  return operations
 
 
 def main() -> None:
