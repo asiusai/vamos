@@ -1,0 +1,36 @@
+diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+--- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
++++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+@@ -247,9 +247,17 @@
+ 	gpio-keys {
+ 		compatible = "gpio-keys";
+ 
+-		pinctrl-0 = <&kypd_vol_up_n>;
++		pinctrl-0 = <&kypd_vol_up_n>, <&panda_button_n>;
+ 		pinctrl-names = "default";
+ 
++		key-panda-button {
++			label = "Panda v5 Button";
++			gpios = <&tlmm 29 GPIO_ACTIVE_LOW>;
++			linux,code = <KEY_PROG1>;
++			debounce-interval = <20>;
++			linux,can-disable;
++		};
++
+ 		key-volume-up {
+ 			label = "Volume Up";
+ 			gpios = <&pm7325_gpios 6 GPIO_ACTIVE_LOW>;
+@@ -1599,5 +1607,13 @@
+ 		"", "", "", "";
+ 
++	panda_button_n: panda-button-n-state {
++		pins = "gpio29";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++		input-enable;
++	};
++
+ 	cam0_default: cam0-default-state {
+ 		pins = "gpio64";
+ 		function = "cam_mclk";
