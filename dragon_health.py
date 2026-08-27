@@ -14,16 +14,16 @@ import sys
 import time
 from pathlib import Path
 
-CAMERA_SERVICES = ('roadCameraState', 'wideRoadCameraState', 'driverCameraState')
+CAMERA_SERVICES = ('narrowRoadCameraState', 'wideRoadCameraState', 'cabinCameraState')
 LIVESTREAM_SERVICES = (
-    'livestreamRoadEncodeData',
+    'livestreamNarrowRoadEncodeData',
     'livestreamWideRoadEncodeData',
-    'livestreamDriverEncodeData',
+    'livestreamCabinEncodeData',
 )
 CAMERA_SERVICE_INFO = (
-    ('roadCameraState', 'livestreamRoadEncodeData', 'road', 'VISION_STREAM_ROAD'),
+    ('narrowRoadCameraState', 'livestreamNarrowRoadEncodeData', 'road', 'VISION_STREAM_NARROW_ROAD'),
     ('wideRoadCameraState', 'livestreamWideRoadEncodeData', 'wide_road', 'VISION_STREAM_WIDE_ROAD'),
-    ('driverCameraState', 'livestreamDriverEncodeData', 'driver', 'VISION_STREAM_DRIVER'),
+    ('cabinCameraState', 'livestreamCabinEncodeData', 'driver', 'VISION_STREAM_CABIN'),
 )
 EXPECTED_FRAME_INTERVAL_MS = 50.0
 FRAME_INTERVAL_TOLERANCE_MS = 1.0
@@ -80,7 +80,8 @@ def import_messaging():
 
 def available_camera_info():
     try:
-        from msgq.visionipc import VisionIpcClient, VisionStreamType
+        from msgq.visionipc import VisionIpcClient
+        from openpilot.cereal.visionipc import VisionStreamType
         available = set(VisionIpcClient.available_streams("camerad", block=False))
         return tuple(info for info in CAMERA_SERVICE_INFO
                      if getattr(VisionStreamType, info[3]).value in available)
@@ -605,7 +606,8 @@ def image_has_color(img):
 def capture_snapshots_worker():
     try:
         from PIL import Image
-        from msgq.visionipc import VisionIpcClient, VisionStreamType
+        from msgq.visionipc import VisionIpcClient
+        from openpilot.cereal.visionipc import VisionStreamType
         from openpilot.system.camerad.snapshot import extract_image
     except ImportError as e:
         fail(f"Cannot import snapshot deps: {e}")
