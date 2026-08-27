@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Asius <dev@asius.ai>
+Date: Thu, 27 Aug 2026 13:00:00 +0000
+Subject: [PATCH] usb: dwc3: map xHCI registers with correct attributes
+
+Preserve non-posted MMIO attributes while DWC3 temporarily maps the xHCI
+registers. This matches the implementation in Radxa's 6.18.2 kernel.
+---
+ drivers/usb/dwc3/host.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/usb/dwc3/host.c b/drivers/usb/dwc3/host.c
+index 1f0b773..fd1e668 100644
+--- a/drivers/usb/dwc3/host.c
++++ b/drivers/usb/dwc3/host.c
+@@ -37,7 +37,10 @@ static void dwc3_host_get_irq(struct dwc3 *dwc)
+ 
+ 	/* xhci regs are not mapped yet, do it temporarily here */
+ 	if (dwc->xhci_resources[0].start) {
+-		xhci_regs = ioremap(dwc->xhci_resources[0].start, DWC3_XHCI_REGS_END);
++		if (dwc->xhci_resources[0].flags & IORESOURCE_MEM_NONPOSTED)
++			xhci_regs = ioremap_np(dwc->xhci_resources[0].start, DWC3_XHCI_REGS_END);
++		else
++			xhci_regs = ioremap(dwc->xhci_resources[0].start, DWC3_XHCI_REGS_END);
+ 		if (!xhci_regs) {
+ 			dev_err(dwc->dev, "Failed to ioremap xhci_regs\n");
+ 			return;
+-- 
+2.47.3

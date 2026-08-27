@@ -1,0 +1,2 @@
+# Avoid millisecond-scale IRQ wake latency while any SuperSpeed host device is active.
+ACTION=="add|remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", RUN+="/usr/lib/vamos/usb-performance $env{ACTION} $kernel"

@@ -42,8 +42,8 @@ the backup GPT, userdata partition, and ext4 filesystem expand to use the
 remaining capacity of larger NVMe or UFS media.
 
 Fresh devices authorize the intentionally shared `tools/ssh/comma_setup.b64` key
-once when no SSH keys have been provisioned, allowing initial access as
-`comma@192.168.42.2` over USB NCM or through another reachable network path.
+once when no SSH keys have been provisioned, allowing initial access over a
+reachable Wi-Fi network path.
 Host tools use that checked-in key by default; set `DRAGON_SSH_KEY` or pass a
 tool-specific identity option to use an operator key. The bootstrap key can be
 replaced in `/data/params/d/GithubSshKeys`.

@@ -148,7 +148,7 @@ RUN mkdir -p /root/.config
 # modem, and SDM845 remote processors remain disabled.
 RUN for svc in \
   sshd rsyslogd busybox-ntpd iptables \
-  avahi-ssh-publish ssh-param-watcher ncm-param-watcher dnsmasq varwatch power_monitor \
+  avahi-ssh-publish ssh-param-watcher varwatch power_monitor \
   tailscaled \
   keygen \
   bluetoothd \
@@ -165,7 +165,7 @@ RUN rm -f /etc/runit/runsvdir/default/udevd
 RUN sed -i 's/FileCreateMode 0640/FileCreateMode 0644/' /etc/rsyslog.conf
 
 # Set executable permissions
-RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/bin/journalctl /usr/bin/systemctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/bin/vamos-hypervisor /usr/bin/vamos-wifi /usr/local/bin/qnn-smoke /etc/sv/keygen/run /etc/sv/bluetoothd/run /etc/sv/ncm-param-watcher/run /etc/sv/ncm-param-watcher/finish /etc/sv/dnsmasq/run /etc/sv/tailscaled/run /etc/sv/vamos-boot-commit/run /etc/sv/vamos-hypervisor-reboot/run
+RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/bin/journalctl /usr/bin/systemctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/bin/vamos-hypervisor /usr/bin/vamos-wifi /usr/local/bin/qnn-smoke /etc/sv/keygen/run /etc/sv/bluetoothd/run /etc/sv/tailscaled/run /etc/sv/vamos-boot-commit/run /etc/sv/vamos-hypervisor-reboot/run
 RUN chmod +x /etc/runit/1 /etc/runit/2 /etc/runit/3
 
 # Shutdown wrappers - send wall broadcast like systemd does on Ubuntu

@@ -30,7 +30,6 @@ handle_setup_access () {
     fi
 
     echo -n 1 > /data/params/d/SshEnabled
-    echo -n 1 > /data/params/d/UsbNcmEnabled
   fi
 }
 

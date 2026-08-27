@@ -1,0 +1,1 @@
+SUBSYSTEM=="usb", ATTR{idVendor}=="3801", ATTR{idProduct}=="0001", GROUP="gpu", MODE="0660"

@@ -24,7 +24,6 @@ map_unit() {
     ssh) echo sshd ;;
     systemd-timesyncd) echo busybox-ntpd ;;
     ssh-param-watcher.path|ssh-param-watcher) echo ssh-param-watcher ;;
-    adb-param-watcher.path|adb-param-watcher) echo ncm-param-watcher ;;
     *) echo "${1%.service}" ;;
   esac
 }

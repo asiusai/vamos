@@ -1,0 +1,161 @@
+#!/usr/bin/python3
+"""Keep SuperSpeed host interrupts out of deep-idle wake latency."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+SYS = Path(os.environ.get("VAMOS_USB_PERF_SYS", "/sys"))
+PROC = Path(os.environ.get("VAMOS_USB_PERF_PROC", "/proc"))
+RUN = Path(os.environ.get("VAMOS_USB_PERF_RUN", "/run"))
+USB_DEVICES = SYS / "bus/usb/devices"
+CPUS = SYS / "devices/system/cpu"
+STATE = RUN / "vamos-usb-performance"
+MAX_IDLE_LATENCY_US = 100
+
+
+def read(path: Path) -> str:
+  try:
+    return path.read_text(encoding="ascii").strip()
+  except (FileNotFoundError, OSError):
+    return ""
+
+
+def write(path: Path, value: str) -> bool:
+  try:
+    path.write_text(value, encoding="ascii")
+    return True
+  except (FileNotFoundError, OSError):
+    return False
+
+
+def bus_number(path: Path) -> int | None:
+  match = re.fullmatch(r"usb([0-9]+)", path.name)
+  return int(match.group(1)) if match else None
+
+
+def superspeed_controllers() -> dict[Path, str]:
+  controllers: dict[Path, str] = {}
+  for root in USB_DEVICES.glob("usb[0-9]*"):
+    try:
+      if int(read(root / "speed")) < 5000:
+        continue
+    except ValueError:
+      continue
+
+    controller = root.resolve().parent
+    roots = [entry for entry in controller.glob("usb[0-9]*") if bus_number(entry) is not None]
+    if roots:
+      controllers[controller] = min(roots, key=lambda entry: bus_number(entry) or 0).name
+  return controllers
+
+
+def active_superspeed_controllers(removed_device: str | None = None) -> set[Path]:
+  active: set[Path] = set()
+  for device in USB_DEVICES.glob("[0-9]*-*"):
+    removing_device = removed_device and (
+      device.name == removed_device or device.name.startswith(f"{removed_device}.")
+    )
+    if removing_device:
+      continue
+    try:
+      if int(read(device / "speed")) < 5000:
+        continue
+      bus = int(device.name.split("-", 1)[0])
+    except ValueError:
+      continue
+
+    root = USB_DEVICES / f"usb{bus}"
+    if root.exists():
+      active.add(root.resolve().parent)
+  return active
+
+
+def irq_for_root(root_name: str) -> int | None:
+  suffix = f"xhci-hcd:{root_name}"
+  for line in read(PROC / "interrupts").splitlines():
+    if line.rstrip().endswith(suffix):
+      try:
+        return int(line.split(":", 1)[0])
+      except ValueError:
+        return None
+  return None
+
+
+def performance_cpu() -> int | None:
+  candidates: list[tuple[int, int]] = []
+  for cpu_path in CPUS.glob("cpu[0-9]*"):
+    try:
+      cpu = int(cpu_path.name[3:])
+      if read(cpu_path / "online") == "0":
+        continue
+      capacity = int(read(cpu_path / "cpu_capacity") or cpu)
+      candidates.append((capacity, cpu))
+    except ValueError:
+      continue
+
+  candidates.sort()
+  if not candidates:
+    return None
+  # Leave the fastest core available to latency-sensitive userspace.
+  return candidates[-2 if len(candidates) > 1 else -1][1]
+
+
+def set_idle_latency(cpu: int, active: bool) -> None:
+  for state in (CPUS / f"cpu{cpu}/cpuidle").glob("state[0-9]*"):
+    try:
+      latency = int(read(state / "latency"))
+    except ValueError:
+      continue
+    if latency > MAX_IDLE_LATENCY_US:
+      write(state / "disable", "1" if active else "0")
+
+
+def log(message: str) -> None:
+  try:
+    subprocess.run(["logger", "-t", "usb-performance", message], check=False)
+  except OSError:
+    pass
+
+
+def main() -> int:
+  removed_device = sys.argv[2] if len(sys.argv) > 2 and sys.argv[1] == "remove" else None
+  controllers = superspeed_controllers()
+  active_controllers = active_superspeed_controllers(removed_device)
+  cpu = performance_cpu()
+  if not controllers or cpu is None:
+    return 0
+
+  tuned_irqs: list[int] = []
+  online = read(CPUS / "online") or "0"
+  for controller, root_name in controllers.items():
+    irq = irq_for_root(root_name)
+    if irq is None:
+      continue
+    is_active = controller in active_controllers
+    affinity = str(cpu) if is_active else online
+    if write(PROC / f"irq/{irq}/smp_affinity_list", affinity) and is_active:
+      tuned_irqs.append(irq)
+
+  active = bool(tuned_irqs)
+  previous = read(STATE)
+  set_idle_latency(cpu, active)
+  if active:
+    STATE.write_text(str(cpu), encoding="ascii")
+  else:
+    STATE.unlink(missing_ok=True)
+
+  current = str(cpu) if active else ""
+  if current != previous:
+    detail = f"CPU {cpu}, IRQs {','.join(map(str, tuned_irqs))}" if active else "inactive"
+    log(detail)
+  return 0
+
+
+if __name__ == "__main__":
+  raise SystemExit(main())

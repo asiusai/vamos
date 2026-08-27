@@ -1,0 +1,111 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Asius <dev@asius.ai>
+Date: Thu, 27 Aug 2026 12:30:00 +0000
+Subject: [PATCH] arm64: dts: qcom: describe Dragon static USB3 lanes
+
+The Dragon Q6A has no Type-C mux on usb_1. Its RX1/TX1 pair is wired to
+the USB port while RX0/TX0 is wired to the DisplayPort-to-HDMI bridge.
+Describe both fixed paths so the combo PHY can select the correct lane
+orientation without a hard-coded driver parameter.
+
+This is the USB topology from Radxa commit 56bb627ee1dd ("arm64: dts:
+qcom: qcs6490-radxa-dragon-q6a: Enable USB 3.0 and HDMI ports"), adapted
+to the vamOS board DTS.
+---
+ arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts | 58 +++++++++++++++++-
+ 1 file changed, 54 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+index 111111111..222222222 100644
+--- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
++++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+@@ -214,6 +214,31 @@
+ 		#sound-dai-cells = <1>;
+ 	};
+ 
++	usb3_con: usb3-connector {
++		compatible = "usb-a-connector";
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				reg = <0>;
++
++				usb3_con_hs_in: endpoint {
++					remote-endpoint = <&usb_1_dwc3_hs>;
++				};
++			};
++
++			port@1 {
++				reg = <1>;
++
++				usb3_con_ss_in: endpoint {
++					remote-endpoint = <&usb_1_qmpphy_out_usb>;
++				};
++			};
++		};
++	};
++
+ 	bridge {
+ 		compatible = "radxa,ra620";
+ 
+@@ -225,7 +250,7 @@
+ 				reg = <0>;
+ 
+ 				hdmi_bridge_in: endpoint {
+-					remote-endpoint = <&usb_dp_qmpphy_out>;
++					remote-endpoint = <&usb_1_qmpphy_out_dp>;
+ 				};
+ 			};
+ 
+@@ -1417,6 +1442,10 @@
+ 	dr_mode = "host";
+ };
+ 
++&usb_1_dwc3_hs {
++	remote-endpoint = <&usb3_con_hs_in>;
++};
++
+ &usb_1_hsphy {
+ 	vdda-pll-supply = <&vreg_l10c_0p88>;
+ 	vdda33-supply = <&vreg_l2b_3p072>;
+@@ -1430,11 +1459,32 @@
+ 	vdda-phy-supply = <&vreg_l6b_1p2>;
+ 	vdda-pll-supply = <&vreg_l1b_0p912>;
+ 
++	/delete-property/ orientation-switch;
++
+ 	status = "okay";
+-};
+ 
+-&usb_dp_qmpphy_out {
+-	remote-endpoint = <&hdmi_bridge_in>;
++	ports {
++		port@0 {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			/delete-node/ endpoint;
++
++			/* RX0/TX0 is statically connected to the RA620 bridge. */
++			usb_1_qmpphy_out_dp: endpoint@0 {
++				reg = <0>;
++				data-lanes = <0 1>;
++				remote-endpoint = <&hdmi_bridge_in>;
++			};
++
++			/* RX1/TX1 is statically connected to the USB port. */
++			usb_1_qmpphy_out_usb: endpoint@1 {
++				reg = <1>;
++				data-lanes = <2 3>;
++				remote-endpoint = <&usb3_con_ss_in>;
++			};
++		};
++	};
+ };
+ 
+ &usb_2 {
+-- 
+2.47.3

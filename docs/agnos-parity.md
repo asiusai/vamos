@@ -13,10 +13,10 @@ Q6A. This comparison uses AGNOS 19.5 on a comma four and the public
 | Immutable OS | read-only root with RAM-backed mutable state | read-only root with tmpfs `/var`, `/tmp`, and an ephemeral `/home` overlay |
 | Persistent state | userdata mounted at `/data` | userdata mounted at `/data` |
 | Rollback-safe OS update | A/B partitions and `abctl` | signed A/B updater, one-shot trial boot, hardware-watchdog rollback, and redundant on-disk state |
-| USB development link | ADB | USB NCM at `192.168.42.2`; provides normal SSH/IP transport without Android's ADB stack |
+| USB development link | ADB | Wi-Fi SSH; the dual-role USB controller stays in host mode for Chestnut |
 | Wi-Fi | NetworkManager | NetworkManager |
 | SSH control | `SshEnabled` parameter watcher | compatible `SshEnabled` directory watcher; safe across atomic Params replacement |
-| USB control | `AdbEnabled` parameter watcher | `UsbNcmEnabled` parameter watcher |
+| USB control | `AdbEnabled` parameter watcher | Host-only during Linux runtime; EDL remains available in boot firmware |
 | Local discovery | Avahi SSH publication | compatible Avahi SSH publication |
 | Clock sync | systemd-timesyncd | BusyBox NTP under runit |
 | Logs | rsyslog, journald, hourly logrotate, varwatch | rsyslog, bounded `journalctl` shim, hourly logrotate, native low-overhead varwatch |
