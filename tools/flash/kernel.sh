@@ -69,7 +69,7 @@ for partition in "${ESP_PARTITIONS[@]}"; do
   grub-editenv "$FLASH_ENV" create
   grub-editenv "$FLASH_ENV" set \
     generation=1 active=a pending= phase=stable \
-    root_a=PARTLABEL=rootfs_a root_b=PARTLABEL=rootfs_b
+    root_a=PARTLABEL=rootfs_a root_b=PARTLABEL=rootfs_b edl_request=0 usb_mode=ncm
   mcopy -o -i "$FLASH_ESP" "$FLASH_ENV" ::/EFI/vamos/grubenv
   echo "== Writing $partition =="
   "${EDL[@]}" write-part "$partition" "$FLASH_ESP"

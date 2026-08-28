@@ -106,6 +106,13 @@ else
     ls -la /sbin/udev* 2>/dev/null || true
 fi
 
+# Boot firmware fixes the external DWC3 controller's role before Linux probes it.
+# Bind NCM immediately in peripheral mode so recovery networking comes up in
+# parallel with storage initialization and the remaining device probes.
+if [ -f /ASIUS ] && [ -x /usr/comma/set_ncm.sh ]; then
+    /usr/comma/set_ncm.sh >/run/vamos-ncm.log 2>&1 &
+fi
+
 # Expose standard embedded userspace paths where Asius hardware has an equivalent
 # interface under a different kernel name.
 if [ -f /ASIUS ]; then

@@ -10,7 +10,10 @@ CORE_WITH_SL="$DIR/build/u-boot/u-boot-xbl-core-secure-launch.bin"
 EMBED_SL="$DIR/tools/build/embed_secure_launch.py"
 QTESTSIGN="$DIR/bootloader/qtestsign/qtestsign.py"
 PATCHXBL="$DIR/bootloader/qtestsign/patchxbl.py"
-STOCK="$DIR/build/xbl-stock-dragon-q6a.bin"
+DEFAULT_STOCK="$DIR/build/xbl-stock-dragon-q6a.bin"
+STOCK_OVERRIDE="${VAMOS_XBL_STOCK:-}"
+STOCK_BACKUPS="$DIR/build/xbl-backups"
+CURRENT="$DIR/build/xbl-current-dragon-q6a.bin"
 TZAPPS="$DIR/build/tzapps-stock-dragon-q6a.bin"
 PLAT="$DIR/build/plat-stock-dragon-q6a.bin"
 UNSIGNED="$DIR/build/u-boot-dragon-q6a-xbl.elf"
@@ -18,6 +21,9 @@ SIGNED="$DIR/build/u-boot-dragon-q6a-xbl.signed.mbn"
 UBOOT="$DIR/build/u-boot-dragon-q6a-xbl.mbn"
 VERIFY="$DIR/build/xbl-verify-dragon-q6a.bin"
 XBL_SIZE=$((6 * 1024 * 1024))
+# U-Boot is physically validated only with this Dragon firmware revision. A
+# newer SOM revision enters Qualcomm crashdump with the current payload.
+SUPPORTED_STOCK_SHA256=62e35c5aa2b564ed0f604debee94d284c5842b9db46f35194948c41717a0ded5
 restore=0
 
 case "${1:-}" in
@@ -43,18 +49,64 @@ fi
 detach_qcserial
 EDL=(sudo edl-ng --maxpayload=65536 --memory=Spinor --slot=0 --loader="$LOADER")
 
-if [ ! -f "$STOCK" ]; then
-  echo "== Saving current XBL firmware =="
-  "${EDL[@]}" read-part XBL "$STOCK"
-  if [ "$(stat -c%s "$STOCK")" -ne "$XBL_SIZE" ]; then
-    echo "ERROR: stock XBL backup is not exactly 6 MiB" >&2
+echo "== Reading connected Dragon XBL =="
+"${EDL[@]}" read-part XBL "$CURRENT"
+if [ "$(stat -c%s "$CURRENT")" -ne "$XBL_SIZE" ]; then
+  echo "ERROR: connected XBL is not exactly 6 MiB" >&2
+  exit 1
+fi
+current_hash="$(sha256sum "$CURRENT" | cut -d' ' -f1)"
+
+if [ "$restore" -eq 1 ]; then
+  STOCK="${STOCK_OVERRIDE:-$DEFAULT_STOCK}"
+elif [ -n "$STOCK_OVERRIDE" ]; then
+  STOCK="$STOCK_OVERRIDE"
+elif [ "$current_hash" = "$SUPPORTED_STOCK_SHA256" ]; then
+  mkdir -p "$STOCK_BACKUPS"
+  STOCK="$STOCK_BACKUPS/xbl-stock-dragon-q6a-${current_hash:0:8}.bin"
+  if [ -f "$STOCK" ] && ! cmp -s "$CURRENT" "$STOCK"; then
+    echo "ERROR: stock XBL backup does not match its content hash: $STOCK" >&2
     exit 1
   fi
+  if [ ! -f "$STOCK" ]; then
+    cp "$CURRENT" "$STOCK.tmp"
+    mv "$STOCK.tmp" "$STOCK"
+  fi
+  echo "Saved connected stock XBL as $STOCK"
+else
+  mkdir -p "$STOCK_BACKUPS"
+  observed="$STOCK_BACKUPS/xbl-observed-dragon-q6a-${current_hash:0:8}.bin"
+  if [ ! -f "$observed" ]; then
+    cp "$CURRENT" "$observed.tmp"
+    mv "$observed.tmp" "$observed"
+  fi
+  echo "ERROR: connected XBL $current_hash is not a validated stock revision" >&2
+  echo "It was preserved at $observed; no firmware was written." >&2
+  echo "For attended bring-up, set VAMOS_XBL_STOCK=$observed and VAMOS_ALLOW_UNTESTED_XBL=1." >&2
+  exit 1
 fi
+
+if [ ! -f "$STOCK" ]; then
+  echo "ERROR: no stock XBL backup is available: $STOCK" >&2
+  echo "Set VAMOS_XBL_STOCK to this Dragon's verified backup." >&2
+  exit 1
+fi
+if [ "$(stat -c%s "$STOCK")" -ne "$XBL_SIZE" ]; then
+  echo "ERROR: stock XBL backup is not exactly 6 MiB: $STOCK" >&2
+  exit 1
+fi
+stock_hash="$(sha256sum "$STOCK" | cut -d' ' -f1)"
 
 if [ "$restore" -eq 1 ]; then
   payload="$STOCK"
 else
+  if [ "$stock_hash" != "$SUPPORTED_STOCK_SHA256" ] && \
+     [ "${VAMOS_ALLOW_UNTESTED_XBL:-0}" != 1 ]; then
+    echo "ERROR: U-Boot is not validated with stock XBL $stock_hash" >&2
+    echo "The backup was preserved at $STOCK; keep stock UEFI on this SOM." >&2
+    echo "Set VAMOS_ALLOW_UNTESTED_XBL=1 only for an attended recovery test." >&2
+    exit 1
+  fi
   if ! command -v uefiextract >/dev/null 2>&1; then
     echo "ERROR: uefiextract is required to derive Secure Launch data from stock XBL" >&2
     echo "Install the uefitool-cli package" >&2

@@ -15,6 +15,7 @@ from typing import BinaryIO
 ROOT = Path(__file__).resolve().parents[2]
 BUILD_DIR = ROOT / "build"
 OUTPUT_DIR = BUILD_DIR / "flash"
+OBJECT_CACHE: dict[str, dict] = {}
 PRODUCT = "asius-v1"
 MANIFEST_VERSION = 2
 # Keep each browser allocation modest while avoiding thousands of individual
@@ -35,6 +36,50 @@ def atomic_write(path: Path, data: bytes) -> None:
     os.replace(temporary, path)
   finally:
     temporary.unlink(missing_ok=True)
+
+
+def load_object_cache(manifest_path: Path) -> dict[str, dict]:
+  """Load verified-object metadata from the previous local manifest."""
+  try:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("manifest_version") != MANIFEST_VERSION:
+      return {}
+    payloads = [manifest["base"], *manifest["optional_payloads"].values()]
+  except (KeyError, OSError, TypeError, json.JSONDecodeError):
+    return {}
+
+  cache = {}
+  conflicts = set()
+  for payload in payloads:
+    if not isinstance(payload, dict) or not isinstance(payload.get("operations"), list):
+      return {}
+    for operation in payload["operations"]:
+      if not isinstance(operation, dict):
+        continue
+      if operation.get("operation") != "program":
+        continue
+      try:
+        url = operation["url"]
+        if not isinstance(url, str):
+          continue
+        filename = url.rsplit("/", 1)[-1]
+        raw_hash = operation["sha256"]
+        metadata = {
+          "compressed_sha256": operation["compressed_sha256"],
+          "compressed_size": operation["compressed_size"],
+          "sha256": raw_hash,
+          "size": operation["size"],
+        }
+      except (KeyError, TypeError):
+        continue
+      if filename != f"chunk-{raw_hash}.img.xz":
+        continue
+      if filename in cache and cache[filename] != metadata:
+        cache.pop(filename)
+        conflicts.add(filename)
+      elif filename not in conflicts:
+        cache[filename] = metadata
+  return cache
 
 
 def package_programmer(source: Path, base_url: str) -> dict:
@@ -61,11 +106,19 @@ def program_operation(raw: bytes, offset: int, base_url: str) -> dict:
   destination = OUTPUT_DIR / filename
   if destination.exists():
     compressed = destination.read_bytes()
-    try:
-      if lzma.decompress(compressed) != raw:
-        raise ValueError(f"cached flash object does not match its name: {destination}")
-    except lzma.LZMAError as error:
-      raise ValueError(f"cached flash object is invalid: {destination}") from error
+    cached = OBJECT_CACHE.get(filename)
+    cache_matches = cached == {
+      "compressed_sha256": sha256_bytes(compressed),
+      "compressed_size": len(compressed),
+      "sha256": raw_hash,
+      "size": len(raw),
+    }
+    if not cache_matches:
+      try:
+        if lzma.decompress(compressed) != raw:
+          raise ValueError(f"cached flash object does not match its name: {destination}")
+      except lzma.LZMAError as error:
+        raise ValueError(f"cached flash object is invalid: {destination}") from error
   else:
     compressed = lzma.compress(raw, format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, preset=1)
     atomic_write(destination, compressed)
@@ -178,7 +231,7 @@ def prune_unreferenced_objects(manifest: dict) -> None:
 
 
 def main() -> None:
-  global OUTPUT_DIR
+  global OBJECT_CACHE, OUTPUT_DIR
   parser = argparse.ArgumentParser(description="Package a signed-manifest-ready Asius v1 browser flash image")
   parser.add_argument(
     "--base-url",
@@ -198,6 +251,7 @@ def main() -> None:
 
   OUTPUT_DIR = args.output_dir
   OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+  OBJECT_CACHE = load_object_cache(OUTPUT_DIR / "flash.json")
   layout = load_layout(args.layout)
   sector_size = layout["sector_size"]
   operations, image_size = package_base_image(args.image, args.base_url, sector_size)

@@ -1,0 +1,13 @@
+#!/bin/sh
+exec 2>&1
+
+case " $(cat /proc/cmdline) " in
+  *" vamos.usb_mode=ncm "*) ;;
+  *) exec sleep infinity ;;
+esac
+
+while ! ip link show usb0 >/dev/null 2>&1; do
+  sleep 0.1
+done
+mkdir -p /var/lib/misc
+exec dnsmasq --keep-in-foreground --conf-dir=/etc/dnsmasq.d

@@ -41,9 +41,23 @@ different minimum capacity. On first boot,
 the backup GPT, userdata partition, and ext4 filesystem expand to use the
 remaining capacity of larger NVMe or UFS media.
 
+Factory OS flashing keeps the connected SOM's stock UEFI. The optional
+`flash uboot` path first reads and content-addresses that board's XBL backup,
+and refuses firmware revisions that have not passed physical boot testing.
+`VAMOS_XBL_STOCK` selects an explicit backup for recovery; an attended bring-up
+can opt into an unvalidated revision with `VAMOS_ALLOW_UNTESTED_XBL=1`.
+
+`build disk` also packages and verifies the reusable Firehose inputs for that
+storage target. This work happens once per image build; `flash system` reuses
+the prepared chunks for every device. Set `VAMOS_SKIP_FLASH_BUNDLE=1` only when
+building a disk artifact that will not be flashed locally.
+
 Fresh devices authorize the intentionally shared `tools/ssh/comma_setup.b64` key
-once when no SSH keys have been provisioned, allowing initial access over a
-reachable Wi-Fi network path.
+once when no SSH keys have been provisioned, allowing initial access over USB
+NCM at `192.168.42.2` or a reachable Wi-Fi network path. The boot firmware
+selects the external controller's role before Linux starts; use
+`vamos-update usb-mode host|ncm` to persist the other role and reboot without
+unsafe live switching.
 Host tools use that checked-in key by default; set `DRAGON_SSH_KEY` or pass a
 tool-specific identity option to use an operator key. The bootstrap key can be
 replaced in `/data/params/d/GithubSshKeys`.
@@ -55,10 +69,11 @@ sudo reboot-edl
 ```
 
 The command writes a one-shot request to both redundant A/B boot-control
-records, syncs them, and reboots. U-Boot consumes and clears the request before
-loading Linux, then invokes the stock Qualcomm EDL secure-call sequence. This
-keeps the recovery request power-loss safe, preserves any OTA trial state, and
-does not rely on secure calls that the Dragon firmware rejects from Linux EL1.
+records, syncs them, and reboots. U-Boot or the stock-UEFI selector consumes
+and clears the request before loading Linux, then invokes the stock Qualcomm
+EDL secure-call sequence. This keeps the request power-loss safe, preserves any
+OTA trial state, and does not rely on secure calls that the Dragon firmware
+rejects from Linux EL1.
 
 On the Dragon development bench, `dragon.py` automates the complete transition
 through a USB hub with real ganged VBUS switching:

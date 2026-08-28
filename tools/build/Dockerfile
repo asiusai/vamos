@@ -52,8 +52,9 @@ RUN gcc -Wall -Wextra -Werror -O2 -o /usr/bin/reboot-edl /tmp/vamos/reboot-edl.c
 # Required for EGL/GBM to work with the display
 RUN yes | xbps-install -Sy mesa-dri
 
-# Asius Connect uses Tailscale for remote access.
-RUN xbps-install -y tailscale
+# Asius Connect uses Tailscale for remote access. dnsmasq provides DHCP on the
+# USB NCM recovery link.
+RUN xbps-install -y tailscale dnsmasq
 
 # Python packages via uv
 ARG XDG_DATA_HOME="/usr/local"
@@ -79,6 +80,7 @@ COPY ./kernel/firmware/LICENSES/LICENSE.qcom ./kernel/firmware/LICENSES/NOTICE.q
 
 # Root filesystem overlay — all userspace files at their final paths
 COPY ./userspace/root/ /
+RUN rm -f /etc/sv/dnsmasq/down
 
 # Screenless setup/reset implementations. The source overlay retains the AGNOS
 # zipapps for reference, but they cannot be operated on v1 and waste 47 MiB.
@@ -137,6 +139,7 @@ RUN ln -sfn libcdsprpc.so.1 /usr/lib/libcdsprpc.so && \
     ldconfig
 
 COPY ./build/BOOTAA64.EFI /usr/share/vamos/BOOTAA64.EFI
+COPY ./build/EDLAA64.EFI /usr/share/vamos/EDLAA64.EFI
 
 # Fix ownership on home directory (overlay COPY runs as root)
 RUN chown -R comma:comma /home/comma
@@ -147,7 +150,7 @@ RUN mkdir -p /root/.config
 # Enable the minimal Dragon services. Comma hardware services for its screen,
 # modem, and SDM845 remote processors remain disabled.
 RUN for svc in \
-  sshd rsyslogd busybox-ntpd iptables \
+  sshd rsyslogd busybox-ntpd iptables dnsmasq \
   avahi-ssh-publish ssh-param-watcher varwatch power_monitor \
   tailscaled \
   keygen \
@@ -165,7 +168,7 @@ RUN rm -f /etc/runit/runsvdir/default/udevd
 RUN sed -i 's/FileCreateMode 0640/FileCreateMode 0644/' /etc/rsyslog.conf
 
 # Set executable permissions
-RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/bin/journalctl /usr/bin/systemctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/bin/vamos-hypervisor /usr/bin/vamos-wifi /usr/local/bin/qnn-smoke /etc/sv/keygen/run /etc/sv/bluetoothd/run /etc/sv/tailscaled/run /etc/sv/vamos-boot-commit/run /etc/sv/vamos-hypervisor-reboot/run
+RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/bin/journalctl /usr/bin/systemctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/bin/vamos-hypervisor /usr/bin/vamos-wifi /usr/local/bin/qnn-smoke /etc/sv/keygen/run /etc/sv/bluetoothd/run /etc/sv/dnsmasq/run /etc/sv/tailscaled/run /etc/sv/vamos-boot-commit/run /etc/sv/vamos-hypervisor-reboot/run
 RUN chmod +x /etc/runit/1 /etc/runit/2 /etc/runit/3
 
 # Shutdown wrappers - send wall broadcast like systemd does on Ubuntu

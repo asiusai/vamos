@@ -614,6 +614,7 @@ class BootControlSafetyTest(unittest.TestCase):
       "root_a": "PARTUUID=1111-aaaa",
       "root_b": "PARTUUID=2222-bbbb",
       "edl_request": 0,
+      "usb_mode": "ncm",
     }
     values.update(overrides)
     return values
@@ -681,6 +682,25 @@ class BootControlSafetyTest(unittest.TestCase):
     sync.assert_called_once()
     run.assert_not_called()
 
+  def test_usb_mode_is_redundant_and_preserves_ota_state(self) -> None:
+    with (
+      mock.patch.object(update.os, "geteuid", return_value=0),
+      mock.patch.object(update, "selected_boot_control", return_value=self.control(phase="attempted")),
+      mock.patch.object(update, "_write_control_to_slot", return_value=True) as write,
+      mock.patch.object(update.os, "sync"),
+      mock.patch.object(update, "run") as run,
+    ):
+      generation = update.set_usb_mode("host", reboot=False)
+
+    self.assertEqual(generation, 8)
+    self.assertEqual([call.args[0] for call in write.call_args_list], ["a", "b"])
+    for call in write.call_args_list:
+      control = update.decode_boot_control(call.args[1])
+      self.assertEqual(control["phase"], "attempted")
+      self.assertEqual(control["pending"], "b")
+      self.assertEqual(control["usb_mode"], "host")
+    run.assert_not_called()
+
   def test_selector_migration_preserves_running_kernel(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
       esp = Path(temporary)
@@ -690,11 +710,14 @@ class BootControlSafetyTest(unittest.TestCase):
       kernel[128:132] = b"PE\0\0"
       kernel[132:134] = (0xaa64).to_bytes(2, "little")
       selector = bytes(kernel) + b"selector"
+      edl_application = esp / "EDLAA64.EFI"
+      edl_application.write_bytes(kernel)
       (esp / "Image").write_bytes(kernel)
       control = update.encode_boot_control(self.control(phase="stable", pending=""))
 
       with (
         mock.patch.object(update, "mounted_esp", return_value=contextlib.nullcontext(esp)),
+        mock.patch.object(update, "EDL_APPLICATION_SOURCE", edl_application),
         mock.patch.object(update, "run"),
         mock.patch.object(update.os, "sync"),
       ):
@@ -703,7 +726,39 @@ class BootControlSafetyTest(unittest.TestCase):
       self.assertEqual((esp / update.ESP_KERNEL).read_bytes(), bytes(kernel))
       self.assertEqual((esp / update.ESP_PRIMARY_LOADER).read_bytes(), selector)
       self.assertEqual((esp / update.ESP_RECOVERY_LOADER).read_bytes(), selector)
+      self.assertEqual((esp / update.ESP_EDL_APPLICATION).read_bytes(), bytes(kernel))
       self.assertEqual(update.decode_boot_control((esp / update.BOOT_CONTROL).read_bytes())["phase"], "stable")
+
+  def test_selector_migration_sources_edl_application_from_new_esp(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      esp = Path(temporary)
+      application = bytearray(512)
+      application[:2] = b"MZ"
+      application[0x3c:0x40] = (128).to_bytes(4, "little")
+      application[128:132] = b"PE\0\0"
+      application[132:134] = (0xaa64).to_bytes(2, "little")
+      selector = bytes(application) + b"selector"
+      (esp / update.ESP_PRIMARY_LOADER).parent.mkdir(parents=True, exist_ok=True)
+      (esp / update.ESP_KERNEL).parent.mkdir(parents=True, exist_ok=True)
+      (esp / update.ESP_PRIMARY_LOADER).write_bytes(selector)
+      (esp / update.ESP_KERNEL).write_bytes(bytes(application))
+      (esp / update.ESP_EDL_APPLICATION).write_bytes(bytes(application))
+
+      with (
+        mock.patch.object(update, "partition_path", return_value=Path("/esp_b")),
+        mock.patch.object(update, "mounted_esp", return_value=contextlib.nullcontext(esp)),
+        mock.patch.object(update, "selected_boot_control", return_value=self.control()),
+        mock.patch.object(update, "root_reference", side_effect=lambda slot: f"PARTLABEL=rootfs_{slot}"),
+        mock.patch.object(update, "_install_selector_on_slot") as install,
+        mock.patch.object(update, "_write_control_to_slot", return_value=True),
+        mock.patch.object(update, "run"),
+      ):
+        generation = update.prepare_disk_selector("a", "b")
+
+      self.assertEqual(generation, 8)
+      install.assert_called_once()
+      self.assertEqual(install.call_args.args[:2], ("a", selector))
+      self.assertEqual(install.call_args.kwargs["edl_application"], bytes(application))
 
 
 class BootSafetyTest(unittest.TestCase):

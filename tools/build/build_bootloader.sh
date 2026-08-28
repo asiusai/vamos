@@ -4,7 +4,9 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null && pwd)"
 BUILD_DIR="$DIR/build"
 OUTPUT="$BUILD_DIR/BOOTAA64.EFI"
+EDL_OUTPUT="$BUILD_DIR/EDLAA64.EFI"
 CONFIG="$DIR/tools/boot/grub.cfg"
+EDL_SOURCE="$DIR/tools/boot/edl_efi.S"
 
 GRUB_PACKAGE_VERSION="2.12-1ubuntu7.3"
 GRUB_PACKAGE_SHA256="d43219525621449cd795dd0a932f28729ea7da391115d84436c90521ab30ed31"
@@ -39,6 +41,28 @@ if [ ! -f "$GRUB_MODULES/modinfo.sh" ]; then
 fi
 
 mkdir -p "$BUILD_DIR"
+if command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
+  EFI_CC=aarch64-linux-gnu-gcc
+  EFI_LD=aarch64-linux-gnu-ld
+  EFI_OBJCOPY=aarch64-linux-gnu-objcopy
+elif [ "$(uname -m)" = aarch64 ]; then
+  EFI_CC=gcc
+  EFI_LD=ld
+  EFI_OBJCOPY=objcopy
+else
+  echo "ERROR: an AArch64 GNU toolchain is required" >&2
+  exit 1
+fi
+
+echo "== Building stock-UEFI software EDL application =="
+"$EFI_CC" -c -ffreestanding -fno-stack-protector -fno-pic \
+  -o "$BUILD_DIR/edl-efi.o" "$EDL_SOURCE"
+"$EFI_LD" -nostdlib -e efi_main -Ttext=0x1000 --section-start=.reloc=0x2000 \
+  -o "$BUILD_DIR/edl-efi.elf" "$BUILD_DIR/edl-efi.o"
+"$EFI_OBJCOPY" -O pei-aarch64-little --subsystem=efi-app \
+  "$BUILD_DIR/edl-efi.elf" "$EDL_OUTPUT.tmp"
+mv "$EDL_OUTPUT.tmp" "$EDL_OUTPUT"
+
 echo "== Building disk-resident ARM64 A/B selector =="
 grub-mkstandalone \
   --directory="$GRUB_MODULES" \
@@ -47,9 +71,10 @@ grub-mkstandalone \
   --compress=xz \
   --locales="" \
   --fonts="" \
-  --install-modules="part_gpt fat search search_label loadenv chain normal configfile test echo regexp halt" \
-  --modules="part_gpt fat search search_label loadenv chain regexp" \
+  --install-modules="part_gpt fat search search_label loadenv linux chain normal configfile test echo regexp fdt halt" \
+  --modules="part_gpt fat search search_label loadenv linux chain regexp fdt" \
   "boot/grub/grub.cfg=$CONFIG"
 mv "$OUTPUT.tmp" "$OUTPUT"
 
 file "$OUTPUT"
+file "$EDL_OUTPUT"

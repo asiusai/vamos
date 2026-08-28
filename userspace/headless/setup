@@ -14,6 +14,7 @@ exec /data/openpilot/launch_openpilot.sh
 CONTINUE_SCRIPT
   chmod 755 "$CONTINUE.tmp"
   mv "$CONTINUE.tmp" "$CONTINUE"
+  chown comma:comma "$CONTINUE"
 }
 
 if git -C "$OPENPILOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -30,7 +31,9 @@ staging="/data/.openpilot-setup.$$"
 trap 'rm -rf -- "$staging"' EXIT
 rm -rf -- "$staging"
 git clone --branch "$BRANCH" --single-branch --recurse-submodules "$REPOSITORY" "$staging"
+git -C "$staging" lfs install --local
 git -C "$staging" lfs pull
+chown -R comma:comma "$staging"
 
 if [[ -e "$OPENPILOT" ]]; then
   recovery="/data/openpilot.failed.$(date -u +%Y%m%dT%H%M%SZ)"

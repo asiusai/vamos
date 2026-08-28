@@ -4,6 +4,7 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null && pwd)"
 BUILD_DIR="$DIR/build"
 SELECTOR="$BUILD_DIR/BOOTAA64.EFI"
+EDL_APPLICATION="$BUILD_DIR/EDLAA64.EFI"
 AAVMF_CODE=/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd
 AAVMF_VARS=/usr/share/AAVMF/AAVMF_VARS.fd
 
@@ -20,6 +21,26 @@ fi
 
 "$DIR/tools/build/build_bootloader.sh"
 GRUB_MODULES="$BUILD_DIR/grub-arm64/root/usr/lib/grub/arm64-efi"
+if ! strings "$SELECTOR" | grep -q 'vamos.usb_mode=$usb_mode'; then
+  echo "ERROR: EFI selector does not pass the persisted USB mode to Linux" >&2
+  exit 1
+fi
+if ! strings "$SELECTOR" | grep -q 'msm.separate_gpu_kms=1'; then
+  echo "ERROR: EFI selector does not enable the headless Adreno DRM device" >&2
+  exit 1
+fi
+if ! strings "$SELECTOR" | grep -q 'qcs6490-radxa-dragon-q6a-ncm.dtb'; then
+  echo "ERROR: EFI selector does not install the NCM device tree" >&2
+  exit 1
+fi
+if ! strings "$SELECTOR" | grep -q 'EFI/vamos/edl.efi'; then
+  echo "ERROR: EFI selector does not consume software EDL requests" >&2
+  exit 1
+fi
+if ! file "$EDL_APPLICATION" | grep -q 'EFI application.*Aarch64'; then
+  echo "ERROR: software EDL recovery is not an ARM64 EFI application" >&2
+  exit 1
+fi
 
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT
@@ -44,7 +65,7 @@ make_env() {
   grub-editenv "$output" create
   grub-editenv "$output" set \
     generation="$generation" active="$active" pending="$pending" phase="$phase" \
-    root_a=PARTLABEL=rootfs_a root_b=PARTLABEL=rootfs_b
+    root_a=PARTLABEL=rootfs_a root_b=PARTLABEL=rootfs_b edl_request=0 usb_mode=ncm
 }
 
 make_esp() {
@@ -57,6 +78,7 @@ make_esp() {
   mcopy -i "$output" "$SELECTOR" ::/Image
   mcopy -i "$output" "$SELECTOR" ::/EFI/BOOT/BOOTAA64.EFI
   mcopy -i "$output" "$PAYLOAD" ::/EFI/vamos/Image
+  mcopy -i "$output" "$EDL_APPLICATION" ::/EFI/vamos/edl.efi
   mcopy -i "$output" "$env" ::/EFI/vamos/grubenv
 }
 
@@ -136,4 +158,22 @@ extract_env "$START_B" "$temporary/after-rollback-b"
 grep -q '^phase=stable$' < <(grub-editenv "$temporary/after-rollback-a" list)
 grep -q '^pending=$' < <(grub-editenv "$temporary/after-rollback-b" list)
 
-echo "ARM64 EFI selector trial, rollback, redundant persistence, and board portability passed"
+echo "== QEMU: stock-UEFI software EDL request is one-shot =="
+for start in "$START_A" "$START_B"; do
+  dd if="$DISK" of="$temporary/request-esp.img" bs=512 skip="$start" count=$((64 * 1024 * 1024 / 512)) status=none
+  mcopy -i "$temporary/request-esp.img" ::/EFI/vamos/grubenv "$temporary/request-env"
+  grub-editenv "$temporary/request-env" set edl_request=1
+  mcopy -o -i "$temporary/request-esp.img" "$temporary/request-env" ::/EFI/vamos/grubenv
+  dd if="$temporary/request-esp.img" of="$DISK" bs=512 seek="$start" conv=notrunc status=none
+  rm -f "$temporary/request-env"
+done
+run_boot "$temporary/edl.log"
+expect_log "vamOS: entering one-shot software EDL recovery" "$temporary/edl.log"
+# QEMU does not implement the Qualcomm SMC and stops at the recovery handoff.
+# The safety property is that both requests were durably consumed first.
+extract_env "$START_A" "$temporary/after-edl-a"
+extract_env "$START_B" "$temporary/after-edl-b"
+grep -q '^edl_request=0$' < <(grub-editenv "$temporary/after-edl-a" list)
+grep -q '^edl_request=0$' < <(grub-editenv "$temporary/after-edl-b" list)
+
+echo "ARM64 EFI selector trial, rollback, software EDL, redundant persistence, and board portability passed"

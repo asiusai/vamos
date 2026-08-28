@@ -29,6 +29,8 @@ esac
 
 DISK_IMG="$BUILD_DIR/dragon${ARTIFACT_SUFFIX}.img"
 LAYOUT_JSON="$BUILD_DIR/factory-layout${ARTIFACT_SUFFIX}.json"
+FLASH_DIR="$BUILD_DIR/flash${ARTIFACT_SUFFIX}"
+RAWPROGRAM_DIR="$BUILD_DIR/manual-flash${ARTIFACT_SUFFIX}"
 
 KERNEL_IMAGE="$BUILD_DIR/Image"
 DTB_FILE="$BUILD_DIR/qcs6490-radxa-dragon-q6a.dtb"
@@ -213,7 +215,8 @@ for slot in a b; do
   grub-editenv "$env_path" create
   grub-editenv "$env_path" set \
     generation=1 active=a pending= phase=stable \
-    root_a="PARTUUID=$ROOT_A_GUID" root_b="PARTUUID=$ROOT_B_GUID"
+    root_a="PARTUUID=$ROOT_A_GUID" root_b="PARTUUID=$ROOT_B_GUID" \
+    edl_request=0 usb_mode=ncm
   mcopy -o -i "$esp_path" "$env_path" ::/EFI/vamos/grubenv
   echo "  prepared VAMOS-$slot_upper"
 done
@@ -387,7 +390,7 @@ if [ -n "$GPT_LOOP" ]; then
 fi
 trap - EXIT
 
-echo "== Done =="
+echo "== Verifying factory images =="
 ls -lh "$DISK_IMG" "$USERDATA_IMG" "$USERDATA_OPENPILOT_IMG" "$LAYOUT_JSON"
 du -h "$DISK_IMG" "$USERDATA_IMG" "$USERDATA_OPENPILOT_IMG"
 if [ "$SECTOR_SIZE" -eq 512 ]; then
@@ -398,3 +401,19 @@ else
   sudo sgdisk --print "$VERIFY_LOOP"
   sudo losetup --detach "$VERIFY_LOOP"
 fi
+
+if [ "${VAMOS_SKIP_FLASH_BUNDLE:-0}" != "1" ]; then
+  echo "== Building reusable verified factory flash bundle =="
+  python3 "$DIR/tools/build/package_flash.py" \
+    --image "$DISK_IMG" \
+    --layout "$LAYOUT_JSON" \
+    --userdata "$USERDATA_IMG" \
+    --openpilot-userdata "$USERDATA_OPENPILOT_IMG" \
+    --output-dir "$FLASH_DIR"
+  for payload in base openpilot; do
+    python3 "$DIR/tools/flash/prepare_rawprogram.py" \
+      "$FLASH_DIR/flash.json" "$RAWPROGRAM_DIR/$payload" --payload "$payload"
+  done
+fi
+
+echo "== Done =="

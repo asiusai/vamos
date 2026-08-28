@@ -2,6 +2,7 @@
 build
 !build/downloads
 !build/BOOTAA64.EFI
+!build/EDLAA64.EFI
 firmware
 kernel
 !kernel/firmware

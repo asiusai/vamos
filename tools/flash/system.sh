@@ -43,7 +43,7 @@ LOADER="$DIR/firmware-dragon/flat_build/spinor/dragon-q6a/prog_firehose_ddr.elf"
 for input in "$DISK_IMG" "$USERDATA_IMG" "$OPENPILOT_IMG" "$LAYOUT" "$LOADER"; do
   if [ ! -f "$input" ]; then
     echo "ERROR: required factory artifact not found: $input" >&2
-    echo "Run: ./vamos build disk" >&2
+    echo "Run: ./vamos build disk --storage ${storage,,}" >&2
     exit 1
   fi
 done
