@@ -1,2 +1,4 @@
 # Avoid millisecond-scale IRQ wake latency while any SuperSpeed host device is active.
 ACTION=="add|remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", RUN+="/usr/lib/vamos/usb-performance $env{ACTION} $kernel"
+# CPU hotplug resets IRQ affinity when openpilot brings the performance cluster back online.
+ACTION=="online", SUBSYSTEM=="cpu", RUN+="/usr/lib/vamos/usb-performance cpu-online $kernel"

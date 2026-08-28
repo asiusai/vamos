@@ -128,7 +128,15 @@ def main() -> int:
   controllers = superspeed_controllers()
   active_controllers = active_superspeed_controllers(removed_device)
   cpu = performance_cpu()
+  previous = read(STATE)
+  try:
+    previous_cpu = int(previous)
+  except ValueError:
+    previous_cpu = None
   if not controllers or cpu is None:
+    if previous_cpu is not None:
+      set_idle_latency(previous_cpu, False)
+    STATE.unlink(missing_ok=True)
     return 0
 
   tuned_irqs: list[int] = []
@@ -143,7 +151,8 @@ def main() -> int:
       tuned_irqs.append(irq)
 
   active = bool(tuned_irqs)
-  previous = read(STATE)
+  if previous_cpu is not None and (not active or previous_cpu != cpu):
+    set_idle_latency(previous_cpu, False)
   set_idle_latency(cpu, active)
   if active:
     STATE.write_text(str(cpu), encoding="ascii")
