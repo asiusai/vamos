@@ -21,10 +21,26 @@ SIGNED="$DIR/build/u-boot-dragon-q6a-xbl.signed.mbn"
 UBOOT="$DIR/build/u-boot-dragon-q6a-xbl.mbn"
 VERIFY="$DIR/build/xbl-verify-dragon-q6a.bin"
 XBL_SIZE=$((6 * 1024 * 1024))
-# U-Boot is physically validated only with this Dragon firmware revision. A
-# newer SOM revision enters Qualcomm crashdump with the current payload.
-SUPPORTED_STOCK_SHA256=62e35c5aa2b564ed0f604debee94d284c5842b9db46f35194948c41717a0ded5
+# Stock XBL revisions physically validated with this U-Boot payload. Keep the
+# exact hash check: the stock image also supplies board-matched Secure Launch
+# data and is the recovery image if an attended bring-up fails.
+SUPPORTED_STOCK_SHA256=(
+  62e35c5aa2b564ed0f604debee94d284c5842b9db46f35194948c41717a0ded5
+  76a5964746253aaead8c77ed20987c430d05f80fe6e3dbe6c94c34474308c5cd
+)
 restore=0
+
+stock_is_supported() {
+  local candidate="$1"
+  local supported
+
+  for supported in "${SUPPORTED_STOCK_SHA256[@]}"; do
+    if [ "$candidate" = "$supported" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 case "${1:-}" in
   "") ;;
@@ -61,7 +77,7 @@ if [ "$restore" -eq 1 ]; then
   STOCK="${STOCK_OVERRIDE:-$DEFAULT_STOCK}"
 elif [ -n "$STOCK_OVERRIDE" ]; then
   STOCK="$STOCK_OVERRIDE"
-elif [ "$current_hash" = "$SUPPORTED_STOCK_SHA256" ]; then
+elif stock_is_supported "$current_hash"; then
   mkdir -p "$STOCK_BACKUPS"
   STOCK="$STOCK_BACKUPS/xbl-stock-dragon-q6a-${current_hash:0:8}.bin"
   if [ -f "$STOCK" ] && ! cmp -s "$CURRENT" "$STOCK"; then
@@ -100,7 +116,7 @@ stock_hash="$(sha256sum "$STOCK" | cut -d' ' -f1)"
 if [ "$restore" -eq 1 ]; then
   payload="$STOCK"
 else
-  if [ "$stock_hash" != "$SUPPORTED_STOCK_SHA256" ] && \
+  if ! stock_is_supported "$stock_hash" && \
      [ "${VAMOS_ALLOW_UNTESTED_XBL:-0}" != 1 ]; then
     echo "ERROR: U-Boot is not validated with stock XBL $stock_hash" >&2
     echo "The backup was preserved at $STOCK; keep stock UEFI on this SOM." >&2
