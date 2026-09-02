@@ -73,7 +73,7 @@ exit 1
 
     self.assertEqual(result.returncode, 0, result.stdout)
     self.assertFalse(self.calls.exists())
-    self.assertIn("RESULT=--memory=Nvme --slot=0|NVMe slot 0 (Asius v1 default)", result.stdout)
+    self.assertIn("RESULT=--memory=Nvme --slot=0|NVMe slot 0 (Asius v0 default)", result.stdout)
     self.assertIn("TRANSPORT=--maxpayload=65536", result.stdout)
 
   def test_explicit_ufs_override(self) -> None:

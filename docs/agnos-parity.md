@@ -1,4 +1,4 @@
-# AGNOS parity for Asius v1
+# AGNOS parity for Asius v0
 
 VamOS should present the same operational contract to openpilot and an operator
 as AGNOS, while using the hardware-native implementation for the Radxa Dragon
@@ -7,7 +7,7 @@ Q6A. This comparison uses AGNOS 19.5 on a comma four and the public
 
 ## Functional matrix
 
-| Capability | AGNOS | VamOS / Asius v1 |
+| Capability | AGNOS | VamOS / Asius v0 |
 | --- | --- | --- |
 | Service supervision | systemd | runit, with a small `systemctl` compatibility shim for operator/openpilot workflows |
 | Immutable OS | read-only root with RAM-backed mutable state | read-only root with tmpfs `/var`, `/tmp`, and an ephemeral `/home` overlay |

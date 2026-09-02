@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-HOSTNAME="asius-v1"
+HOSTNAME="asius-v0"
 
 echo "hostname: '$HOSTNAME'"
 hostname "$HOSTNAME"

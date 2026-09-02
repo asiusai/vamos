@@ -21,7 +21,7 @@ class PackageFlashTest(unittest.TestCase):
     with tempfile.TemporaryDirectory() as temporary:
       root = Path(temporary)
       image = root / "dragon.img"
-      first = b"asius-v1" + bytes(CHUNK_SIZE - len("asius-v1"))
+      first = b"asius-v0" + bytes(CHUNK_SIZE - len("asius-v0"))
       image.write_bytes(first + bytes(CHUNK_SIZE))
 
       with patch("package_flash.OUTPUT_DIR", root / "out"):
@@ -78,7 +78,7 @@ class PackageFlashTest(unittest.TestCase):
       root = Path(temporary)
       output = root / "out"
       output.mkdir()
-      raw = b"asius-v1" + bytes(512 - len("asius-v1"))
+      raw = b"asius-v0" + bytes(512 - len("asius-v0"))
       with patch("package_flash.OUTPUT_DIR", output), \
            patch("package_flash.OBJECT_CACHE", {}):
         operation = program_operation(raw, 0, "https://updates.example/objects")

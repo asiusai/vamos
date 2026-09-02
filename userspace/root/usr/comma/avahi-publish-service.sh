@@ -3,7 +3,7 @@
 # Read the raw device model
 RAW_MODEL=$(tr -d '\0' < /sys/firmware/devicetree/base/model)
 
-# Extract the short device type, preserving "v1" while keeping legacy
+# Extract the short device type, preserving "v0" while keeping legacy
 # models like "mici" and "tici" stable.
 MODEL="${RAW_MODEL#comma }"
 MODEL="${MODEL#Asius }"

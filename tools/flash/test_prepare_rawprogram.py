@@ -54,7 +54,7 @@ class PrepareRawprogramTest(unittest.TestCase):
   def test_reuses_verified_prepared_payload_and_rebuilds_changed_output(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
       root = Path(temporary)
-      raw = b"asius-v1" + bytes(512 - len("asius-v1"))
+      raw = b"asius-v0" + bytes(512 - len("asius-v0"))
       compressed = lzma.compress(raw)
       source = root / "object.img.xz"
       source.write_bytes(compressed)

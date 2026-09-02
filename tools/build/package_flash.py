@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BUILD_DIR = ROOT / "build"
 OUTPUT_DIR = BUILD_DIR / "flash"
 OBJECT_CACHE: dict[str, dict] = {}
-PRODUCT = "asius-v1"
+PRODUCT = "asius-v0"
 MANIFEST_VERSION = 2
 # Keep each browser allocation modest while avoiding thousands of individual
 # HTTP requests and Firehose program commands for a source-complete payload.
@@ -232,7 +232,7 @@ def prune_unreferenced_objects(manifest: dict) -> None:
 
 def main() -> None:
   global OBJECT_CACHE, OUTPUT_DIR
-  parser = argparse.ArgumentParser(description="Package a signed-manifest-ready Asius v1 browser flash image")
+  parser = argparse.ArgumentParser(description="Package a signed-manifest-ready Asius v0 browser flash image")
   parser.add_argument(
     "--base-url",
     default=os.environ.get("VAMOS_FLASH_BASE_URL", "https://updates.asius.ai/vamos/flash/objects"),

@@ -1,6 +1,6 @@
 # VamOS
 
-The device OS for Asius v1, built around the Radxa Dragon Q6A and designed to
+The device OS for Asius v0, built around the Radxa Dragon Q6A and designed to
 provide an AGNOS-compatible operational environment for openpilot without a
 screen or Android userspace. See the [AGNOS parity matrix](docs/agnos-parity.md)
 for equivalent capabilities, intentional hardware-specific differences, and
@@ -26,7 +26,7 @@ the release checklist.
 ./vamos device-update comma@192.168.88.20
 ```
 
-EDL flashing defaults to Asius v1 NVMe. NVMe factory images use 512-byte
+EDL flashing defaults to Asius v0 NVMe. NVMe factory images use 512-byte
 logical sectors; supported removable UFS modules use 4096-byte logical sectors.
 Select the hardware target with `--storage nvme|ufs`; `--nvme` and `--ufs` are
 equivalent shortcuts. Low-level tooling can still use

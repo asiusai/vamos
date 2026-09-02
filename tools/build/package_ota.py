@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 BUILD_DIR = ROOT / "build"
 OUTPUT_DIR = BUILD_DIR / "ota"
-PRODUCT = "asius-v1"
+PRODUCT = "asius-v0"
 MANIFEST_VERSION = 1
 UPDATER_VERSION = 1
 CHUNK_SIZE = 4 * 1024 * 1024

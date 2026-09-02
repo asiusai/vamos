@@ -169,7 +169,7 @@ index 0000000..1e793de
 +/delete-node/ &xbl_mem;
 +
 +/ {
-+	model = "asius v1";
++	model = "asius v0";
 +	compatible = "radxa,dragon-q6a", "qcom,qcm6490";
 +	chassis-type = "embedded";
 +	memory@80000000 {

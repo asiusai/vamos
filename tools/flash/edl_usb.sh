@@ -43,7 +43,7 @@ detect_edl_storage() {
   if [ -n "${VAMOS_EDL_MEMORY:-}" ]; then
     EDL_STORAGE_LABEL="$label slot 0 (explicit)"
   else
-    EDL_STORAGE_LABEL="NVMe slot 0 (Asius v1 default)"
+    EDL_STORAGE_LABEL="NVMe slot 0 (Asius v0 default)"
   fi
   echo "== Using $EDL_STORAGE_LABEL =="
 }
