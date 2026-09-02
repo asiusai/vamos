@@ -1,7 +1,7 @@
 diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
 --- a/drivers/firmware/efi/libstub/fdt.c
 +++ b/drivers/firmware/efi/libstub/fdt.c
-@@ -110,6 +110,192 @@ static void asius_keep_panda_som_alive(void *fdt)
+@@ -110,6 +110,188 @@ static void asius_keep_panda_som_alive(void *fdt)
  			 status);
  }
  
@@ -103,8 +103,8 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +static void asius_configure_panda_audio(void *fdt)
 +{
 +	static const char old_links[][24] = {
-+		"wcd-playback-dai-link",
 +		"wcd-capture-dai-link",
++		"panda-playback-dai-link",
 +		"dp0-dai-link",
 +	};
 +	static const char pin_paths[][64] = {
@@ -172,11 +172,7 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +		}
 +	}
 +
-+	status = fdt_delprop(fdt, sound, "audio-routing");
-+	if (status == -FDT_ERR_NOTFOUND)
-+		status = 0;
-+	status = status ?:
-+		 fdt_setprop(fdt, sound, "pinctrl-0", pinctrl, sizeof(pinctrl)) ?:
++	status = fdt_setprop(fdt, sound, "pinctrl-0", pinctrl, sizeof(pinctrl)) ?:
 +		 fdt_setprop_string(fdt, sound, "pinctrl-names", "default") ?:
 +		 asius_fdt_configure_audio_link(fdt, sound,
 +						 "panda-playback-dai-link",
@@ -188,13 +184,13 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +						 17, capture_codec, q6apm_phandle);
 +fail:
 +	if (status)
-+		efi_warn("Failed to configure Asius panda audio: %d\n", status);
++		efi_warn("Failed to configure Asius audio: %d\n", status);
 +}
 +
  #define ASIUS_PWRKEY_PATH \
  	"/soc@0/spmi@c440000/pmic@0/pon@1300/pwrkey"
  #define ASIUS_PAIR_KEY_CODE		148
-@@ -829,6 +1015,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+@@ -829,6 +1011,7 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
  
  	asius_enable_panda_spi(fdt);
  	asius_keep_panda_som_alive(fdt);

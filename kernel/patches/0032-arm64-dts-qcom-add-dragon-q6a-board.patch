@@ -123,7 +123,7 @@ new file mode 100644
 index 0000000..1e793de
 --- /dev/null
 +++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
-@@ -0,0 +1,1565 @@
+@@ -0,0 +1,1567 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +/*
 + * Copyright (c) 2025 Radxa Computer (Shenzhen) Co., Ltd.
@@ -1090,9 +1090,27 @@ index 0000000..1e793de
 +&sound {
 +	compatible = "qcom,qcs6490-rb3gen2-sndcard";
 +	model = "QCS6490-Radxa-Dragon-Q6A";
++	audio-routing = "IN1_HPHL", "HPHL_OUT",
++			"IN2_HPHR", "HPHR_OUT";
 +	pinctrl-0 = <&mi2s0_mclk>, <&mi2s0_sclk>, <&mi2s0_ws>,
 +		    <&mi2s0_data0>, <&mi2s0_data1>;
 +	pinctrl-names = "default";
++
++	wcd-playback-dai-link {
++		link-name = "WCD Playback";
++
++		cpu {
++			sound-dai = <&q6apmbedai RX_CODEC_DMA_RX_0>;
++		};
++
++		codec {
++			sound-dai = <&wcd938x 0>, <&swr0 0>, <&lpass_rx_macro 0>;
++		};
++
++		platform {
++			sound-dai = <&q6apm>;
++		};
++	};
 +
 +	panda-playback-dai-link {
 +		link-name = "Panda Playback";
@@ -1125,22 +1143,6 @@ index 0000000..1e793de
 +			sound-dai = <&q6apm>;
 +		};
 +	};
-+
-+	// va-dai-link {
-+	// 	link-name = "CODEC_DMA-LPAIF_VA-TX-0";
-+
-+	// 	cpu {
-+	// 		sound-dai = <&q6apmbedai VA_CODEC_DMA_TX_0>;
-+	// 	};
-+
-+	// 	codec {
-+	// 		sound-dai = <&lpass_va_macro 0>;
-+	// 	};
-+
-+	// 	platform {
-+	// 		sound-dai = <&q6apm>;
-+	// 	};
-+	// };
 +};
 +
 +/* Pin 19, 21, 23, 24, 26 in GPIO header */

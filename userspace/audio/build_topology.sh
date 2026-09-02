@@ -5,7 +5,7 @@ DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)
 UPSTREAM_URL=https://github.com/linux-msm/audioreach-topology.git
 UPSTREAM_TAG=v1.0.4
 UPSTREAM_COMMIT=d7a5e9d80ad18a7a6844eeb32cacbdeea0e7e677
-EXPECTED_SHA256=f49f942604fcfe6601ea064aaeb196db6ad863def58ef7ad4efc0a763ace62b5
+EXPECTED_SHA256=2652926bd9a9a81e9219b5ed33f27ddb87822f28f1a200bfd8c9f145e4554eff
 
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
