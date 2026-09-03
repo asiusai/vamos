@@ -232,15 +232,72 @@ def validate_acpi(data: bytes) -> tuple[int, int]:
   return load_offset, load_size
 
 
+def embedded_firmware(xbl: bytes) -> tuple[bytes, bytes, bytes]:
+  """Extract the validated Secure Launch blob from a vamOS U-Boot XBL."""
+  checked_range(xbl, 0, 64, "XBL ELF header")
+  if xbl[:7] != b"\x7fELF\x02\x01\x01":
+    raise ValueError("existing XBL is not a 64-bit little-endian ELF image")
+
+  program_offset = struct.unpack_from("<Q", xbl, 32)[0]
+  program_size = u16(xbl, 54)
+  program_count = u16(xbl, 56)
+  if program_size < 56 or not program_count:
+    raise ValueError("existing XBL has no valid program headers")
+  checked_range(xbl, program_offset, program_size * program_count,
+                "XBL program headers")
+
+  cores = []
+  header_size = struct.calcsize("<8sIIII")
+  for index in range(program_count):
+    program = program_offset + index * program_size
+    file_offset = struct.unpack_from("<Q", xbl, program + 8)[0]
+    file_size = struct.unpack_from("<Q", xbl, program + 32)[0]
+    if file_size < BLOB_OFFSET + header_size:
+      continue
+    checked_range(xbl, file_offset, file_size, f"XBL core segment {index}")
+    candidate = xbl[file_offset:file_offset + file_size]
+    if candidate[BLOB_OFFSET:BLOB_OFFSET + len(BLOB_MAGIC)] == BLOB_MAGIC:
+      cores.append(candidate)
+  if len(cores) != 1:
+    raise ValueError(
+      f"expected one XBL core segment with embedded firmware, found {len(cores)}"
+    )
+
+  core = cores[0]
+  checked_range(core, BLOB_OFFSET, header_size, "Secure Launch blob header")
+  magic, version, tcb_size, mssecapp_size, acpi_size = struct.unpack_from(
+    "<8sIIII", core, BLOB_OFFSET
+  )
+  if magic != BLOB_MAGIC:
+    raise ValueError("existing XBL core has no vamOS Secure Launch blob")
+  if version != BLOB_VERSION:
+    raise ValueError(f"unsupported Secure Launch blob version: {version}")
+
+  offset = BLOB_OFFSET + header_size
+  checked_range(core, offset, tcb_size + mssecapp_size + acpi_size,
+                "Secure Launch blob payload")
+  tcb = core[offset:offset + tcb_size]
+  offset += tcb_size
+  mssecapp = core[offset:offset + mssecapp_size]
+  offset += mssecapp_size
+  acpi = core[offset:offset + acpi_size]
+  validate_tcb(tcb)
+  validate_mssecapp(mssecapp)
+  validate_acpi(acpi)
+  return tcb, mssecapp, acpi
+
+
 def main() -> None:
   parser = argparse.ArgumentParser()
   parser.add_argument("--core", type=Path, required=True)
-  parser.add_argument("--resource", type=Path, required=True,
+  parser.add_argument("--resource", type=Path,
                       help="XOR-0x5a resource.bin raw section from stock XBL")
-  parser.add_argument("--tzapps", type=Path, required=True,
+  parser.add_argument("--tzapps", type=Path,
                       help="device TZAPPS partition containing mssecapp.mbn")
-  parser.add_argument("--plat", type=Path, required=True,
+  parser.add_argument("--plat", type=Path,
                       help="device PLAT partition containing ACPI/ACPI.elf")
+  parser.add_argument("--existing-xbl", type=Path,
+                      help="reuse firmware embedded in an existing vamOS U-Boot XBL")
   parser.add_argument("--output", type=Path, required=True)
   args = parser.parse_args()
 
@@ -250,12 +307,20 @@ def main() -> None:
       f"U-Boot core is {len(core)} bytes and overlaps blob offset 0x{BLOB_OFFSET:x}"
     )
 
-  encoded = args.resource.read_bytes()
-  tcb = bytes(byte ^ 0x5A for byte in encoded)
-  validate_tcb(tcb)
-  mssecapp = fat12_file(args.tzapps.read_bytes(), MSSECAPP_PATH)
-  validate_mssecapp(mssecapp)
-  acpi = fat12_file(args.plat.read_bytes(), ACPI_PATH)
+  stock_inputs = (args.resource, args.tzapps, args.plat)
+  if args.existing_xbl:
+    if any(stock_inputs):
+      parser.error("--existing-xbl cannot be combined with stock firmware inputs")
+    tcb, mssecapp, acpi = embedded_firmware(args.existing_xbl.read_bytes())
+  else:
+    if not all(stock_inputs):
+      parser.error("--resource, --tzapps, and --plat are required together")
+    encoded = args.resource.read_bytes()
+    tcb = bytes(byte ^ 0x5A for byte in encoded)
+    validate_tcb(tcb)
+    mssecapp = fat12_file(args.tzapps.read_bytes(), MSSECAPP_PATH)
+    validate_mssecapp(mssecapp)
+    acpi = fat12_file(args.plat.read_bytes(), ACPI_PATH)
   acpi_load_offset, acpi_load_size = validate_acpi(acpi)
 
   header = struct.pack(

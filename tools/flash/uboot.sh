@@ -13,6 +13,7 @@ PATCHXBL="$DIR/bootloader/qtestsign/patchxbl.py"
 DEFAULT_STOCK="$DIR/build/xbl-stock-dragon-q6a.bin"
 STOCK_OVERRIDE="${VAMOS_XBL_STOCK:-}"
 STOCK_BACKUPS="$DIR/build/xbl-backups"
+UBOOT_BACKUPS="$DIR/build/xbl-backups/uboot"
 CURRENT="$DIR/build/xbl-current-dragon-q6a.bin"
 TZAPPS="$DIR/build/tzapps-stock-dragon-q6a.bin"
 PLAT="$DIR/build/plat-stock-dragon-q6a.bin"
@@ -72,11 +73,41 @@ if [ "$(stat -c%s "$CURRENT")" -ne "$XBL_SIZE" ]; then
   exit 1
 fi
 current_hash="$(sha256sum "$CURRENT" | cut -d' ' -f1)"
+reuse_secure_launch=0
+
+# An installed vamOS U-Boot no longer contains EDK2's resource.bin. Validate
+# and preserve its embedded, board-derived Secure Launch firmware so upgrades
+# can replace the U-Boot core without requiring the original stock XBL.
+if [ "$restore" -eq 0 ] && [ -z "$STOCK_OVERRIDE" ]; then
+  reuse_log="$(mktemp)"
+  if python3 "$EMBED_SL" --core "$CORE" --existing-xbl "$CURRENT" \
+      --output "$CORE_WITH_SL" >"$reuse_log" 2>&1; then
+    reuse_secure_launch=1
+    mkdir -p "$UBOOT_BACKUPS"
+    BASE="$UBOOT_BACKUPS/xbl-uboot-dragon-q6a-${current_hash:0:8}.bin"
+    if [ -f "$BASE" ] && ! cmp -s "$CURRENT" "$BASE"; then
+      echo "ERROR: U-Boot XBL backup does not match its content hash: $BASE" >&2
+      rm -f "$reuse_log"
+      exit 1
+    fi
+    if [ ! -f "$BASE" ]; then
+      cp "$CURRENT" "$BASE.tmp"
+      mv "$BASE.tmp" "$BASE"
+    fi
+    echo "Saved connected vamOS U-Boot XBL as $BASE"
+    cat "$reuse_log"
+  fi
+  rm -f "$reuse_log"
+fi
 
 if [ "$restore" -eq 1 ]; then
   STOCK="${STOCK_OVERRIDE:-$DEFAULT_STOCK}"
+  BASE="$STOCK"
 elif [ -n "$STOCK_OVERRIDE" ]; then
   STOCK="$STOCK_OVERRIDE"
+  BASE="$STOCK"
+elif [ "$reuse_secure_launch" -eq 1 ]; then
+  STOCK=""
 elif stock_is_supported "$current_hash"; then
   mkdir -p "$STOCK_BACKUPS"
   STOCK="$STOCK_BACKUPS/xbl-stock-dragon-q6a-${current_hash:0:8}.bin"
@@ -89,6 +120,7 @@ elif stock_is_supported "$current_hash"; then
     mv "$STOCK.tmp" "$STOCK"
   fi
   echo "Saved connected stock XBL as $STOCK"
+  BASE="$STOCK"
 else
   mkdir -p "$STOCK_BACKUPS"
   observed="$STOCK_BACKUPS/xbl-observed-dragon-q6a-${current_hash:0:8}.bin"
@@ -102,52 +134,54 @@ else
   exit 1
 fi
 
-if [ ! -f "$STOCK" ]; then
-  echo "ERROR: no stock XBL backup is available: $STOCK" >&2
-  echo "Set VAMOS_XBL_STOCK to this Dragon's verified backup." >&2
+if [ ! -f "$BASE" ]; then
+  echo "ERROR: no XBL base is available: $BASE" >&2
+  echo "Set VAMOS_XBL_STOCK to this Dragon's verified stock backup." >&2
   exit 1
 fi
-if [ "$(stat -c%s "$STOCK")" -ne "$XBL_SIZE" ]; then
-  echo "ERROR: stock XBL backup is not exactly 6 MiB: $STOCK" >&2
+if [ "$(stat -c%s "$BASE")" -ne "$XBL_SIZE" ]; then
+  echo "ERROR: XBL base is not exactly 6 MiB: $BASE" >&2
   exit 1
 fi
-stock_hash="$(sha256sum "$STOCK" | cut -d' ' -f1)"
 
 if [ "$restore" -eq 1 ]; then
-  payload="$STOCK"
+  payload="$BASE"
 else
-  if ! stock_is_supported "$stock_hash" && \
-     [ "${VAMOS_ALLOW_UNTESTED_XBL:-0}" != 1 ]; then
-    echo "ERROR: U-Boot is not validated with stock XBL $stock_hash" >&2
-    echo "The backup was preserved at $STOCK; keep stock UEFI on this SOM." >&2
-    echo "Set VAMOS_ALLOW_UNTESTED_XBL=1 only for an attended recovery test." >&2
-    exit 1
-  fi
-  if ! command -v uefiextract >/dev/null 2>&1; then
-    echo "ERROR: uefiextract is required to derive Secure Launch data from stock XBL" >&2
-    echo "Install the uefitool-cli package" >&2
-    exit 1
+  if [ "$reuse_secure_launch" -eq 0 ]; then
+    stock_hash="$(sha256sum "$STOCK" | cut -d' ' -f1)"
+    if ! stock_is_supported "$stock_hash" && \
+       [ "${VAMOS_ALLOW_UNTESTED_XBL:-0}" != 1 ]; then
+      echo "ERROR: U-Boot is not validated with stock XBL $stock_hash" >&2
+      echo "The backup was preserved at $STOCK; keep stock UEFI on this SOM." >&2
+      echo "Set VAMOS_ALLOW_UNTESTED_XBL=1 only for an attended recovery test." >&2
+      exit 1
+    fi
+    if ! command -v uefiextract >/dev/null 2>&1; then
+      echo "ERROR: uefiextract is required to derive Secure Launch data from stock XBL" >&2
+      echo "Install the uefitool-cli package" >&2
+      exit 1
+    fi
+
+    extract_dir="$(mktemp -d)"
+    trap 'rm -rf -- "$extract_dir"' EXIT
+    cp "$STOCK" "$extract_dir/xbl.bin"
+    (cd "$extract_dir" && uefiextract xbl.bin all >/dev/null)
+    mapfile -d '' resources < <(find "$extract_dir/xbl.bin.dump" -type f \
+      -path '*resource.bin/1 Raw section/body.bin' -print0)
+    if [ "${#resources[@]}" -ne 1 ]; then
+      echo "ERROR: expected exactly one Secure Launch resource.bin in stock XBL; found ${#resources[@]}" >&2
+      exit 1
+    fi
+    echo "== Reading device Secure Launch dependencies =="
+    "${EDL[@]}" read-part TZAPPS "$TZAPPS"
+    "${EDL[@]}" read-part PLAT "$PLAT"
+    python3 "$EMBED_SL" --core "$CORE" --resource "${resources[0]}" \
+      --tzapps "$TZAPPS" --plat "$PLAT" \
+      --output "$CORE_WITH_SL"
   fi
 
-  extract_dir="$(mktemp -d)"
-  trap 'rm -rf -- "$extract_dir"' EXIT
-  cp "$STOCK" "$extract_dir/xbl.bin"
-  (cd "$extract_dir" && uefiextract xbl.bin all >/dev/null)
-  mapfile -d '' resources < <(find "$extract_dir/xbl.bin.dump" -type f \
-    -path '*resource.bin/1 Raw section/body.bin' -print0)
-  if [ "${#resources[@]}" -ne 1 ]; then
-    echo "ERROR: expected exactly one Secure Launch resource.bin in stock XBL; found ${#resources[@]}" >&2
-    exit 1
-  fi
-  echo "== Reading device Secure Launch dependencies =="
-  "${EDL[@]}" read-part TZAPPS "$TZAPPS"
-  "${EDL[@]}" read-part PLAT "$PLAT"
-  python3 "$EMBED_SL" --core "$CORE" --resource "${resources[0]}" \
-    --tzapps "$TZAPPS" --plat "$PLAT" \
-    --output "$CORE_WITH_SL"
-
-  echo "== Replacing the Dragon EDK2 XBL segment with U-Boot =="
-  python3 "$PATCHXBL" -c "$CORE_WITH_SL" -o "$UNSIGNED" "$STOCK"
+  echo "== Replacing the Dragon XBL core with U-Boot =="
+  python3 "$PATCHXBL" -c "$CORE_WITH_SL" -o "$UNSIGNED" "$BASE"
   python3 "$QTESTSIGN" -v6 sbl1 "$UNSIGNED" -o "$SIGNED"
   if [ "$(stat -c%s "$SIGNED")" -gt "$XBL_SIZE" ]; then
     echo "ERROR: signed XBL is larger than 6 MiB: $SIGNED" >&2
@@ -156,7 +190,7 @@ else
   # qtestsign emits through the final ELF segment, while the SPI partition
   # also contains device-specific trailing bytes. Produce one deterministic,
   # full-partition payload so verification covers every programmed byte.
-  cp "$STOCK" "$UBOOT"
+  cp "$BASE" "$UBOOT"
   dd if="$SIGNED" of="$UBOOT" conv=notrunc status=none
 
   # Firehose rounds writes up to the target's 4 KiB logical block size. Match

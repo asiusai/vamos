@@ -39,6 +39,9 @@ running vamOS system:
 ```
 
 The first flash saves the current XBL as `build/xbl-stock-dragon-q6a.bin`.
+Later U-Boot upgrades validate and reuse the board-specific Secure Launch
+firmware embedded by the first flash, so they do not require the original
+stock XBL on the build host. Keep the stock backup for restoring UEFI.
 Restore it with:
 
 ```sh
