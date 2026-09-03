@@ -12,7 +12,7 @@ OUT_DIR="$DIR/build"
 BASE_DEFCONFIG="defconfig"
 CONFIG_FRAGMENT="$DIR/kernel/configs/vamos.config"
 
-# Dragon Q6A DTB (patched into the kernel tree by kernel/patches/0032,0051)
+# Dragon Q6A DTB, added to the kernel tree by the Dragon patch series.
 DTB_TARGET="qcom/qcs6490-radxa-dragon-q6a.dtb"
 
 HOST_OS="$(uname)"
@@ -31,17 +31,15 @@ prepare_kernel_volume() {
 
 seed_kernel_workspace() {
   local sync_container_id
-  local kernel_bundle="$TMP_DIR/kernel-linux.bundle"
+  local kernel_bundle="$DIR/build/kernel-linux.bundle"
 
   echo "Syncing kernel/linux into Docker volume"
-  mkdir -p "$TMP_DIR"
+  mkdir -p "$DIR/build"
   rm -f "$kernel_bundle"
   git -C "$KERNEL_DIR" bundle create "$kernel_bundle" HEAD >/dev/null
 
   sync_container_id=$(docker run -d --entrypoint tail -v "$kernel_bundle:/kernel-linux.bundle:ro" -v "$KERNEL_LINUX_VOLUME:/linux" vamos-builder -f /dev/null)
-
   docker exec "$sync_container_id" sh -lc "rm -rf /linux/* /linux/.[!.]* /linux/..?*"
-  # Transfer through a bundle so worktree gitdir pointers stay on the host side.
   docker exec -u "$(id -u):$(id -g)" "$sync_container_id" sh -lc "cd /linux && git clone /kernel-linux.bundle . >/dev/null 2>&1 && git checkout --force '$KERNEL_REV' >/dev/null 2>&1"
   docker container rm -f "$sync_container_id" >/dev/null
   rm -f "$kernel_bundle"
@@ -65,10 +63,51 @@ kernel_workspace_ready() {
     >/dev/null
 }
 
-# Check submodule initted, need to run setup
 if [ ! -f "$KERNEL_DIR/Makefile" ]; then
   "$DIR/vamos" setup
 fi
+
+KERNEL_REV="$(git -C "$KERNEL_DIR" rev-parse HEAD)"
+
+echo "Building vamos-builder docker image"
+export DOCKER_BUILDKIT=1
+docker build -f tools/build/Dockerfile.builder -t vamos-builder "$DIR" \
+  --build-arg UNAME="$(id -nu)" \
+  --build-arg UID="$(id -u)" \
+  --build-arg GID="$(id -g)"
+
+echo "Starting vamos-builder container"
+if [ "$HOST_OS" = "Darwin" ]; then
+  if ! kernel_workspace_ready; then
+    echo "Kernel workspace volume is missing, uninitialized, or out of date; reseeding"
+    prepare_kernel_volume
+    seed_kernel_workspace
+  fi
+  prepare_ccache_volume
+  CONTAINER_ID=$(docker run -d \
+    --ulimit nofile=65536:65536 \
+    -u "$(id -u):$(id -g)" \
+    -v "$DIR":"$DIR" \
+    -v "$KERNEL_LINUX_VOLUME:$KERNEL_DIR" \
+    -v "$CCACHE_VOLUME:/ccache" \
+    -w "$DIR" \
+    vamos-builder)
+else
+  GIT_MOUNT_ARGS=()
+  if [ -f "$DIR/.git" ]; then
+    GIT_COMMON_DIR="$(git -C "$DIR" rev-parse --path-format=absolute --git-common-dir)"
+    GIT_MOUNT_ARGS=(-v "$GIT_COMMON_DIR":"$GIT_COMMON_DIR")
+  fi
+  CONTAINER_ID=$(docker run -d \
+    --ulimit nofile=65536:65536 \
+    -u "$(id -u):$(id -g)" \
+    -v "$DIR":"$DIR" \
+    "${GIT_MOUNT_ARGS[@]}" \
+    -w "$DIR" \
+    vamos-builder)
+fi
+
+trap cleanup EXIT
 
 clean_kernel_tree() {
   git -C "$KERNEL_DIR" reset --hard HEAD >/dev/null 2>&1 || true
@@ -89,79 +128,56 @@ apply_patches() {
       git apply --whitespace=nowarn "$patch"
     done
   fi
-
-  cd "$DIR"
 }
 
-# Reset kernel source and apply patches before starting container
-apply_patches
-
-# Build docker container
-echo "Building vamos-builder docker image"
-export DOCKER_BUILDKIT=1
-docker build -f tools/build/Dockerfile.builder -t vamos-builder "$DIR" \
-  --build-arg UNAME="$(id -nu)" \
-  --build-arg UID="$(id -u)" \
-  --build-arg GID="$(id -g)"
-
-echo "Starting vamos-builder container"
-# If vamOS is itself a git submodule, mount the outer superproject so that
-# nested .git gitfiles (kernel/linux/.git → ../../../.git/modules/...) resolve.
-MOUNT_ROOT="$(git -C "$DIR" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
-[ -z "$MOUNT_ROOT" ] && MOUNT_ROOT="$DIR"
-CONTAINER_ID=$(docker run -d --ulimit nofile=65536:65536 -u "$(id -u):$(id -g)" -v "$MOUNT_ROOT":"$MOUNT_ROOT":z -w "$DIR" vamos-builder)
-
-trap cleanup EXIT
-
 build_kernel() {
-  # Cross-compilation setup
-  ARCH_HOST=$(uname -m)
+  apply_patches
+
+  local arch_host
+  arch_host=$(uname -m)
   export ARCH=arm64
-  if [ "$ARCH_HOST" != "aarch64" ] && [ "$ARCH_HOST" != "arm64" ]; then
+  if [ "$arch_host" != "aarch64" ] && [ "$arch_host" != "arm64" ]; then
     export CROSS_COMPILE=aarch64-none-elf-
   fi
 
-  # ccache (use CC= directly instead of PATH symlinks for reliability)
-  export CCACHE_DIR="$DIR/.ccache"
-  if [ -n "$CROSS_COMPILE" ]; then
-    CC_CMD="ccache ${CROSS_COMPILE}gcc"
+  if [ "$HOST_OS" = "Darwin" ]; then
+    export CCACHE_DIR="/ccache"
   else
-    CC_CMD="ccache gcc"
+    export CCACHE_DIR="$DIR/.ccache"
   fi
+  local make_args=(
+    O="$KBUILD_OUT"
+    CC="ccache ${CROSS_COMPILE:-}gcc"
+    HOSTCC="ccache gcc"
+    HOSTCXX="ccache g++"
+  )
 
-  # Reproducible builds
   export KBUILD_BUILD_USER="vamos"
   export KBUILD_BUILD_HOST="vamos"
   export KCFLAGS="-w"
-
   export LOCALVERSION="-vamos"
 
-  # Build kernel
   cd "$KERNEL_DIR"
-
   mkdir -p "$KBUILD_OUT"
 
   echo "-- Loading base config $BASE_DEFCONFIG --"
-  make CC="$CC_CMD" O="$KBUILD_OUT" "$BASE_DEFCONFIG"
+  make "${make_args[@]}" "$BASE_DEFCONFIG"
 
   echo "-- Merging config fragment $(basename "$CONFIG_FRAGMENT") --"
   KCONFIG_CONFIG="$KBUILD_OUT/.config" \
     bash scripts/kconfig/merge_config.sh \
-    -m "$KBUILD_OUT/.config" "$CONFIG_FRAGMENT"
-  # Point EXTRA_FIRMWARE_DIR to our firmware directory so the kernel build
-  # can find the blobs without symlinking into the kernel tree
+    -m -y "$KBUILD_OUT/.config" "$CONFIG_FRAGMENT"
   echo "CONFIG_EXTRA_FIRMWARE_DIR=\"$DIR/kernel/firmware\"" >> "$KBUILD_OUT/.config"
-  make CC="$CC_CMD" O="$KBUILD_OUT" olddefconfig
+  make "${make_args[@]}" olddefconfig
 
   echo "-- Building kernel with $(nproc) cores --"
   make -j"$(nproc)" "${make_args[@]}" Image Image.gz vmlinuz.efi "$DTB_TARGET"
 
   echo "-- Building and installing kernel modules --"
-  make CC="$CC_CMD" -j$(nproc) O="$KBUILD_OUT" modules
+  make -j"$(nproc)" "${make_args[@]}" modules
   rm -rf "$OUT_DIR/modules_install"
-  make CC="$CC_CMD" O="$KBUILD_OUT" INSTALL_MOD_PATH="$OUT_DIR/modules_install" modules_install
+  make "${make_args[@]}" INSTALL_MOD_PATH="$OUT_DIR/modules_install" modules_install
 
-  # Collect artifacts: EFI-stub Image + Dragon DTB
   mkdir -p "$OUT_DIR"
   cp "$KBUILD_OUT/arch/arm64/boot/Image" "$OUT_DIR/Image"
   cp "$KBUILD_OUT/arch/arm64/boot/Image.gz" "$OUT_DIR/Image.gz"
@@ -189,7 +205,6 @@ EOF
   docker container rm -f "${CONTAINER_ID:-}" >/dev/null 2>&1 || true
 }
 
-# Run build inside container
 docker exec -i -u "$(id -u):$(id -g)" "$CONTAINER_ID" bash <<EOF
 set -e
 
@@ -203,10 +218,11 @@ PATCHES_DIR='$PATCHES_DIR'
 KBUILD_OUT='$KBUILD_OUT'
 OUT_DIR='$OUT_DIR'
 
-# building both kernel and system at same time causes git dubious ownership errors
-git config --global --add safe.directory '$DIR'
-git config --global --add safe.directory '$KERNEL_DIR'
+git -C / config --global --add safe.directory '$DIR'
+git -C / config --global --add safe.directory '$KERNEL_DIR'
 
+$(declare -f clean_kernel_tree)
+$(declare -f apply_patches)
 $(declare -f build_kernel)
 
 build_kernel
