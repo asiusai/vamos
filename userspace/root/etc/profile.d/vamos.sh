@@ -1,1 +1,0 @@
-export NO_FAN_CONTROL=1
