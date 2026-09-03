@@ -150,7 +150,7 @@ RUN mkdir -p /root/.config
 # Enable the minimal Dragon services. Comma hardware services for its screen,
 # modem, and SDM845 remote processors remain disabled.
 RUN for svc in \
-  sshd rsyslogd busybox-ntpd iptables dnsmasq \
+  sshd rsyslogd busybox-ntpd nftables dnsmasq \
   avahi-ssh-publish ssh-param-watcher varwatch power_monitor \
   tailscaled \
   keygen \
@@ -181,9 +181,6 @@ RUN chmod +x /usr/local/sbin/poweroff && \
 # removing comma's LTE profile; persistent Wi-Fi profiles live under /data.
 RUN find /usr/lib/NetworkManager/system-connections -maxdepth 1 \
       -type f -name '*.nmconnection' -exec chmod 600 {} +
-
-# Void's iptables service expects iptables.rules
-RUN ln -s /etc/iptables/rules.v4 /etc/iptables/iptables.rules
 
 # MOTD - profile.d runs update-motd.d scripts into /run/motd, pam_motd displays it
 RUN sed -i 's|motd=/etc/motd|motd=/run/motd|' /etc/pam.d/system-login
@@ -262,9 +259,6 @@ RUN echo '#!/bin/sh' > /etc/sv/sshd/run && \
     echo '  ssh-keygen -A -f /data' >> /etc/sv/sshd/run && \
     echo 'fi' >> /etc/sv/sshd/run && \
     echo 'exec /usr/bin/sshd -D' >> /etc/sv/sshd/run
-
-# DEBUG: Fix iptables to allow SSH (insert before wwan0 DROP rule)
-RUN sed -i '/-A INPUT -i wwan0 -j DROP/i -A INPUT -p tcp --dport 22 -j ACCEPT' /etc/iptables/rules.v4 || true
 
 RUN ldconfig
 

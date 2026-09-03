@@ -70,6 +70,7 @@ xbps-install -y \
   net-tools \
   NetworkManager \
   nload \
+  nftables \
   portaudio \
   pv \
   rsync \
