@@ -3,12 +3,6 @@
 
 source /etc/profile
 
-# Asius v0 does not fit a driver-facing camera. Keep the flag in the workload
-# environment so openpilot skips the camera while publishing neutral DM state.
-if [[ -f /ASIUS ]]; then
-  export NO_DCAM=1
-fi
-
 # Add venv to PATH for Void
 export PATH="/usr/local/venv/bin:$PATH"
 
