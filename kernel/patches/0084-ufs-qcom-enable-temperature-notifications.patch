@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Asius <dev@asius.ai>
+Date: Fri, 4 Sep 2026 10:45:00 +0000
+Subject: [PATCH] ufs: qcom: enable device temperature notifications
+
+Qualcomm UFS controllers can use the core query path for UFS 3.0 device
+temperature attributes and exception events. Advertise that capability so
+devices which report high/low temperature notification support get the UFS
+hwmon interface.
+
+Signed-off-by: Asius <dev@asius.ai>
+---
+ drivers/ufs/host/ufs-qcom.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/ufs/host/ufs-qcom.c b/drivers/ufs/host/ufs-qcom.c
+index 7c5fcbb0241f..4022d1009da8 100644
+--- a/drivers/ufs/host/ufs-qcom.c
++++ b/drivers/ufs/host/ufs-qcom.c
+@@ -1165,6 +1165,7 @@ static void ufs_qcom_set_caps(struct ufs_hba *hba)
+ 	hba->caps |= UFSHCD_CAP_WB_EN;
+ 	hba->caps |= UFSHCD_CAP_AGGR_POWER_COLLAPSE;
+ 	hba->caps |= UFSHCD_CAP_RPM_AUTOSUSPEND;
++	hba->caps |= UFSHCD_CAP_TEMP_NOTIF;
+ 
+ 	ufs_qcom_set_host_caps(hba);
+ }
+-- 
+2.43.0
+
