@@ -1171,7 +1171,7 @@ index 0000000..9ab70c7
 +#include <linux/timer.h>
 +
 +#define ASIUS_BOOT_BLINK_MS	500
-+#define ASIUS_BOOT_BRIGHTNESS	204
++#define ASIUS_BOOT_BRIGHTNESS	26
 +
 +static struct led_trigger *asius_boot_trigger;
 +static struct timer_list asius_boot_timer;
