@@ -1,8 +1,27 @@
 #!/bin/sh
 exec 2>&1
+# A corrupt RTC can be more than an NTP era away from the current date. Seed
+# from the image build time before asking NTP to resolve the 32-bit timestamp.
+build_time=$(cat /etc/vamos-build-time) || exit 1
+case "$build_time" in ''|*[!0-9]*) echo "Invalid image build time"; exit 1 ;; esac
+now=$(date +%s)
+if [ "$now" -lt "$build_time" ] || [ "$now" -gt "$((build_time + 315576000))" ]; then
+  date -u -s "@$build_time" || exit 1
+fi
+
+# Numeric Cloudflare NTP endpoints break the clock -> Tailscale TLS -> DNS ->
+# NTP dependency when resolv.conf still points at Tailscale's local resolver.
+# https://developers.cloudflare.com/time-services/ntp/usage/
+set -- -p 162.159.200.1 -p 162.159.200.123
+rm -f /run/vamos-time-synced
 # Fast initial sync: retry every 10s until clock is set, then run as daemon
 # Matches upstream timesyncd ConnectionRetrySec=10 for faster sync after network connects
-while ! busybox ntpd -nqN -p pool.ntp.org 2>&1; do
+while ! busybox ntpd -nqN "$@"; do
   sleep 10
 done
-exec busybox ntpd -nN -p pool.ntp.org
+touch /run/vamos-time-synced
+# Boards with an RTC should retain the corrected date across reboot.
+if [ -e /dev/rtc0 ]; then
+  hwclock --rtc /dev/rtc0 --systohc --utc || echo "Unable to save synchronized time to RTC"
+fi
+exec busybox ntpd -nN "$@"

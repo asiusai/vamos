@@ -9,10 +9,11 @@ SOCKET_DIR=/var/run/tailscale
 mkdir -p "$STATE_DIR" "$SOCKET_DIR"
 chmod 700 "$STATE_DIR"
 
-# The Dragon has no battery-backed RTC. Avoid starting tailscaled while the
-# clock is still at 1970, since TLS validation against the control plane fails.
+# Wait for actual synchronization, not just a lower bound on the year: a
+# corrupt RTC set to the far future also breaks TLS. NTP does not require DNS.
+# Still start after the bounded wait so offline devices can recover later.
 for _ in $(seq 1 120); do
-  [ "$(date +%Y)" -ge 2026 ] && break
+  [ -e /run/vamos-time-synced ] && break
   sleep 1
 done
 

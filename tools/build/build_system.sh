@@ -131,9 +131,13 @@ exec_as_root rm -f "$ROOTFS_DIR/.dockerenv"
 echo "Setting network stuff"
 GIT_HASH=${GIT_HASH:-$(git --git-dir="$DIR/.git" rev-parse HEAD)}
 DATETIME=$(date '+%Y-%m-%dT%H:%M:%S')
+BUILD_EPOCH=$(date +%s)
 exec_as_root sh -c "
   set -e
   cd '$ROOTFS_DIR'
+
+  # Trusted local seed for recovering missing or corrupt RTC dates at boot.
+  echo '$BUILD_EPOCH' > etc/vamos-build-time
 
   # Add hostname and hosts
   HOST=asius-v0

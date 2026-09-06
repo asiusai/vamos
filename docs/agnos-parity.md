@@ -18,7 +18,7 @@ Q6A. This comparison uses AGNOS 19.5 on a comma four and the public
 | SSH control | `SshEnabled` parameter watcher | compatible `SshEnabled` directory watcher; safe across atomic Params replacement |
 | USB control | `AdbEnabled` parameter watcher | Redundant A/B `usb_mode` state selects host or NCM at the next boot |
 | Local discovery | Avahi SSH publication | compatible Avahi SSH publication |
-| Clock sync | systemd-timesyncd | BusyBox NTP under runit |
+| Clock sync | systemd-timesyncd | BusyBox NTP under runit; numeric peers avoid DNS bootstrap dependencies, image build time repairs implausible RTC dates, and successful sync is saved to the RTC |
 | Logs | rsyslog, journald, hourly logrotate, varwatch | rsyslog, bounded `journalctl` shim, hourly logrotate, native low-overhead varwatch |
 | Runaway-power watchdog | `power_monitor` | compatible `power_monitor` and `/var/tmp/power_watchdog` contract |
 | Setup | touchscreen installer | preinstalled openpilot checkout, with network recovery when the checkout is missing |
