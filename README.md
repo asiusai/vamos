@@ -75,15 +75,34 @@ EDL secure-call sequence. This keeps the request power-loss safe, preserves any
 OTA trial state, and does not rely on secure calls that the Dragon firmware
 rejects from Linux EL1.
 
-On the Dragon development bench, `dragon.py` automates the complete transition
-through a USB hub with real ganged VBUS switching:
+On the Dragon development bench, `dragon.py` automates recovery over USB and
+UART. It can also control a dock with real ganged VBUS switching:
 
 ```bash
 ./dragon.py edl                 # request reboot-edl over NCM
-./dragon.py normal              # Firehose reset; cycle dock VBUS when available
+./dragon.py normal              # leave EDL over USB (NVMe product)
+./dragon.py normal --storage ufs # same command for a Dragon with UFS
 ./dragon.py dock status
 ./dragon.py dock on|off|cycle
 ```
+
+The Dragon U-Boot also detects an upstream USB host at power-on and enters EDL
+without the button wire. A connected PC triggers this through USB requests;
+VBUS alone does not. `dragon.py normal` uses Firehose to set and verify a
+one-shot normal request in both boot-control records, then resets over the
+same USB cable. U-Boot consumes the request and boots Linux with the PC still
+attached. UART, dock power switching, and the EDL wire are not needed. This
+requires the updated Dragon U-Boot and readable A/B boot records. See
+[bootloader recovery](bootloader/README.md) for the probe timeout and manual
+recovery commands.
+
+The Dragon U-Boot starts a hardware watchdog that Linux and the early userspace
+supervisor take over. Stable boots and OTA trials must reach the common OS
+health checks before it is disarmed. Failed trials roll back on the next normal
+boot. `sudo vamos-boot status` shows the current and previous boot stages plus
+available reset evidence; `/data/vamos-boot/` retains a bounded boot history.
+See [boot supervision](bootloader/README.md#boot-watchdog-and-diagnostics) for
+timeouts and coverage limits.
 
 The default dock locations are `1-1` (USB 2) and `2-1` (USB 3). Override them
 with `DRAGON_DOCK_USB2_HUB` and `DRAGON_DOCK_USB3_HUB`. The host tool assigns

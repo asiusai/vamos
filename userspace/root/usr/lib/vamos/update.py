@@ -584,20 +584,32 @@ def verify_arm64_efi(path: Path) -> None:
 
 
 def encode_boot_control(values: dict[str, str | int]) -> bytes:
-  ordered = ("generation", "active", "pending", "phase", "root_a", "root_b", "edl_request", "usb_mode")
+  ordered = ("generation", "active", "pending", "phase", "root_a", "root_b", "edl_request", "normal_request", "usb_mode")
   lines = []
   for key in ordered:
-    default: str | int = 0 if key == "edl_request" else "ncm" if key == "usb_mode" else ""
+    default: str | int = 0 if key in ("edl_request", "normal_request") else "ncm" if key == "usb_mode" else ""
     value = str(values.get(key, default))
     if "\n" in value or "\r" in value or "=" in key:
       raise UpdateError(f"invalid boot-control value for {key}")
     lines.append(f"{key}={value}\n".encode())
+  for key, default in BOOT_DIAGNOSTIC_DEFAULTS.items():
+    value = str(values.get(key, default))
+    if "\n" in value or "\r" in value or not value.isascii():
+      raise UpdateError(f"invalid boot-control value for {key}")
+    lines.append(f"{key}={value}\n".encode("ascii"))
   payload = GRUB_ENV_HEADER + b"".join(lines)
   if len(payload) > GRUB_ENV_SIZE:
     raise UpdateError("boot-control environment exceeds the GRUB block size")
   encoded = payload + b"#" * (GRUB_ENV_SIZE - len(payload))
   decode_boot_control(encoded)
   return encoded
+
+
+BOOT_DIAGNOSTIC_DEFAULTS: dict[str, str | int] = {
+  "boot_count": 0, "boot_stage": "unknown", "boot_slot": "-",
+  "prev_count": 0, "prev_stage": "unknown", "prev_slot": "-",
+}
+BOOT_STAGES = ("unknown", "loading", "kernel", "userspace", "healthy")
 
 
 def decode_boot_control(payload: bytes) -> dict[str, str | int]:
@@ -626,11 +638,14 @@ def decode_boot_control(payload: bytes) -> dict[str, str | int]:
   pending = values.get("pending", "")
   phase = values.get("phase")
   edl_request = values.get("edl_request", "0")
+  normal_request = values.get("normal_request", "0")
   usb_mode = values.get("usb_mode", "ncm")
   if generation < 0 or active not in ("a", "b") or phase not in BOOT_PHASE_RANK:
     raise UpdateError("boot-control state is invalid")
   if edl_request not in ("0", "1"):
     raise UpdateError("boot-control EDL request is invalid")
+  if normal_request not in ("0", "1"):
+    raise UpdateError("boot-control normal request is invalid")
   if usb_mode not in USB_MODES:
     raise UpdateError("boot-control USB mode is invalid")
   if phase != "stable" and (pending not in ("a", "b") or pending == active):
@@ -639,10 +654,21 @@ def decode_boot_control(payload: bytes) -> dict[str, str | int]:
     root = values.get(f"root_{slot}", "")
     if not re.fullmatch(r"PART(?:UUID|LABEL)=[A-Za-z0-9._-]+", root):
       raise UpdateError(f"boot-control root for slot {slot} is invalid")
+  diagnostics = {key: values.get(key, default) for key, default in BOOT_DIAGNOSTIC_DEFAULTS.items()}
+  for prefix in ("boot", "prev"):
+    try:
+      count = int(diagnostics[f"{prefix}_count"])
+    except ValueError as exc:
+      raise UpdateError("boot diagnostic count is invalid") from exc
+    if not 0 <= count < 2**64 or diagnostics[f"{prefix}_stage"] not in BOOT_STAGES or diagnostics[f"{prefix}_slot"] not in ("a", "b", "-"):
+      raise UpdateError("boot diagnostics are invalid")
+    diagnostics[f"{prefix}_count"] = count
   return {
     **values,
+    **diagnostics,
     "generation": generation,
     "edl_request": int(edl_request),
+    "normal_request": int(normal_request),
     "usb_mode": usb_mode,
   }
 
@@ -723,10 +749,13 @@ def set_boot_control(active: str, pending: str = "", phase: str = "stable") -> i
   previous = selected_boot_control()
   generation = (int(previous["generation"]) if previous is not None else 0) + 1
   values: dict[str, str | int] = {
+    **(previous or {}),
     "generation": generation,
     "active": active,
     "pending": pending,
     "phase": phase,
+    "edl_request": 0,
+    "normal_request": 0,
     "root_a": root_reference("a"),
     "root_b": root_reference("b"),
     "usb_mode": str(previous.get("usb_mode", "ncm")) if previous is not None else "ncm",
@@ -746,6 +775,7 @@ def request_edl(*, reboot: bool = True) -> int:
     raise UpdateError("no valid redundant boot-control state found")
 
   values: dict[str, str | int] = {
+    **previous,
     "generation": int(previous["generation"]) + 1,
     "active": str(previous["active"]),
     "pending": str(previous.get("pending", "")),
@@ -753,6 +783,7 @@ def request_edl(*, reboot: bool = True) -> int:
     "root_a": str(previous["root_a"]),
     "root_b": str(previous["root_b"]),
     "edl_request": 1,
+    "normal_request": 0,
     "usb_mode": str(previous.get("usb_mode", "ncm")),
   }
   payload = encode_boot_control(values)
@@ -775,6 +806,7 @@ def set_usb_mode(mode: str, *, reboot: bool = True) -> int:
     raise UpdateError("no valid redundant boot-control state found")
 
   values: dict[str, str | int] = {
+    **previous,
     "generation": int(previous["generation"]) + 1,
     "active": str(previous["active"]),
     "pending": str(previous.get("pending", "")),
@@ -850,6 +882,7 @@ def prepare_disk_selector(active: str, target: str) -> int:
   previous = selected_boot_control()
   generation = (int(previous["generation"]) if previous is not None else 0) + 1
   control = encode_boot_control({
+    **(previous or {}),
     "generation": generation,
     "active": active,
     "pending": "",

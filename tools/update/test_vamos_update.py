@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "userspace/root/usr/lib"))
 
 from vamos import update
 from vamos import boot
+from vamos import bootdiag
 
 
 class ManifestTest(unittest.TestCase):
@@ -607,6 +608,7 @@ class ActivationSafetyTest(unittest.TestCase):
 class BootControlSafetyTest(unittest.TestCase):
   def control(self, **overrides) -> dict[str, str | int]:
     values: dict[str, str | int] = {
+      **update.BOOT_DIAGNOSTIC_DEFAULTS,
       "generation": 7,
       "active": "a",
       "pending": "b",
@@ -614,6 +616,7 @@ class BootControlSafetyTest(unittest.TestCase):
       "root_a": "PARTUUID=1111-aaaa",
       "root_b": "PARTUUID=2222-bbbb",
       "edl_request": 0,
+      "normal_request": 0,
       "usb_mode": "ncm",
     }
     values.update(overrides)
@@ -628,6 +631,10 @@ class BootControlSafetyTest(unittest.TestCase):
       update.encode_boot_control(self.control(root_a="/dev/nvme0n1p2"))
     with self.assertRaises(update.UpdateError):
       update.decode_boot_control(payload[:-1])
+    with self.assertRaises(update.UpdateError):
+      update.encode_boot_control(self.control(normal_request=2))
+    self.assertEqual(update.decode_boot_control(update.encode_boot_control(
+      self.control(normal_request=1)))["normal_request"], 1)
 
   def test_accepts_single_legacy_uboot_nul_before_padding(self) -> None:
     payload = update.encode_boot_control(self.control())
@@ -777,6 +784,8 @@ class BootSafetyTest(unittest.TestCase):
       "VERSION_FILE": self.directory / "VERSION",
     }
     self.patchers = [mock.patch.object(boot, name, path) for name, path in self.paths.items()]
+    self.patchers += [mock.patch.object(bootdiag, "BOOTSTATUS", self.directory / "bootstatus"),
+                      mock.patch.object(bootdiag, "diagnose")]
     for patcher in self.patchers:
       patcher.start()
     self.paths["TRIAL_MARKER"].touch()
@@ -877,6 +886,131 @@ class BootSafetyTest(unittest.TestCase):
     self.assertEqual(state["boot_generation"], 9)
     self.assertFalse(self.paths["TRIAL_MARKER"].exists())
     save_state.assert_called_once_with(state, "committed")
+
+  def test_stable_boot_also_takes_over_watchdog(self) -> None:
+    self.paths["TRIAL_MARKER"].unlink()
+    process = mock.Mock(pid=123)
+    process.poll.return_value = None
+    with (
+      mock.patch.object(boot, "cmdline", return_value="vamos.watchdog=1 vamos.slot=a"),
+      mock.patch.object(boot.subprocess, "Popen", return_value=process),
+      mock.patch.object(boot.time, "sleep", side_effect=lambda _: self.paths["WATCHDOG_READY_MARKER"].touch()),
+    ):
+      boot.start_watchdog()
+    self.assertFalse(self.paths["TRIAL_MARKER"].exists())
+    self.assertTrue(self.paths["WATCHDOG_READY_MARKER"].exists())
+
+  def test_stable_boot_disarms_without_committing_an_ota(self) -> None:
+    self.paths["TRIAL_MARKER"].unlink()
+    self.paths["WATCHDOG_READY_MARKER"].touch()
+    self.paths["WATCHDOG_PID_FILE"].write_text(f"{os.getpid()}\n")
+    with (
+      mock.patch.object(boot, "cmdline", return_value="vamos.watchdog=1"),
+      mock.patch.object(boot.os.path, "ismount", return_value=True),
+      mock.patch.object(boot.time, "sleep", side_effect=lambda _: self.paths["WATCHDOG_DISARMED_MARKER"].touch()),
+      mock.patch.object(boot, "commit_boot") as commit,
+    ):
+      boot.commit()
+    commit.assert_not_called()
+    bootdiag.diagnose.assert_called_once_with("healthy")
+
+  def test_health_record_failure_keeps_watchdog_armed(self) -> None:
+    self.paths["TRIAL_MARKER"].unlink()
+    self.paths["WATCHDOG_READY_MARKER"].touch()
+    self.paths["WATCHDOG_PID_FILE"].write_text(f"{os.getpid()}\n")
+    bootdiag.diagnose.side_effect = update.UpdateError("ESP write failed")
+    with (
+      mock.patch.object(boot, "cmdline", return_value="vamos.watchdog=1"),
+      mock.patch.object(boot.os.path, "ismount", return_value=True),
+    ):
+      with self.assertRaises(update.UpdateError):
+        boot.commit()
+    self.assertFalse(self.paths["HEALTHY_MARKER"].exists())
+    self.assertFalse(self.paths["WATCHDOG_DISARMED_MARKER"].exists())
+
+
+class BootDiagnosticsTest(unittest.TestCase):
+  def control(self):
+    return BootControlSafetyTest().control(boot_count=12, boot_stage="kernel", boot_slot="b",
+                                         prev_count=11, prev_stage="healthy", prev_slot="a")
+
+  def test_progress_preserves_trial_and_recovery_requests_with_one_failed_esp(self) -> None:
+    control = self.control()
+    control.update(normal_request=1, edl_request=1)
+    with (
+      mock.patch.object(bootdiag, "arguments", return_value={"vamos.boot_count": "12"}),
+      mock.patch.object(update, "current_slot", return_value="b"),
+      mock.patch.object(update, "update_lock", side_effect=contextlib.nullcontext),
+      mock.patch.object(update, "selected_boot_control", return_value=control.copy()),
+      mock.patch.object(update, "_write_control_to_slot", side_effect=[True, False]) as write,
+    ):
+      bootdiag.record_stage("userspace")
+    self.assertEqual([call.args[0] for call in write.call_args_list], ["b", "a"])
+    saved = update.decode_boot_control(write.call_args.args[1])
+    self.assertEqual(saved, {**control, "generation": 8, "boot_stage": "userspace"})
+
+  def test_wrong_boot_cannot_overwrite_diagnostics(self) -> None:
+    with (
+      mock.patch.object(bootdiag, "arguments", return_value={"vamos.boot_count": "11"}),
+      mock.patch.object(update, "update_lock", side_effect=contextlib.nullcontext),
+      mock.patch.object(update, "selected_boot_control", return_value=self.control()),
+      mock.patch.object(update, "_write_control_to_slot") as write,
+    ):
+      with self.assertRaises(update.UpdateError):
+        bootdiag.record_stage("healthy")
+    write.assert_not_called()
+
+  def test_both_esp_failures_are_reported(self) -> None:
+    with (
+      mock.patch.object(bootdiag, "arguments", return_value={"vamos.boot_count": "12"}),
+      mock.patch.object(update, "current_slot", return_value="b"),
+      mock.patch.object(update, "update_lock", side_effect=contextlib.nullcontext),
+      mock.patch.object(update, "selected_boot_control", return_value=self.control()),
+      mock.patch.object(update, "_write_control_to_slot", return_value=False),
+    ):
+      with self.assertRaises(update.UpdateError):
+        bootdiag.record_stage("userspace")
+
+  def test_ota_transition_preserves_previous_boot_diagnostics(self) -> None:
+    control = self.control()
+    with (
+      mock.patch.object(update, "selected_boot_control", return_value=control),
+      mock.patch.object(update, "root_reference", side_effect=lambda slot: control[f"root_{slot}"]),
+      mock.patch.object(update, "_write_control_to_slot", return_value=True) as write,
+    ):
+      update.commit_boot("b", "a")
+    saved = update.decode_boot_control(write.call_args.args[1])
+    for key in update.BOOT_DIAGNOSTIC_DEFAULTS:
+      self.assertEqual(saved[key], control[key])
+    self.assertEqual(saved["active"], "b")
+    self.assertEqual(saved["phase"], "stable")
+
+  def test_invalid_diagnostics_rejected(self) -> None:
+    for overrides in ({"boot_count": -1}, {"prev_count": 2**64}, {"boot_stage": "oops"},
+                      {"boot_slot": "aa"}, {"boot_stage": "healthy\nextra=1"}):
+      with self.subTest(overrides=overrides), self.assertRaises(update.UpdateError):
+        update.encode_boot_control({**self.control(), **overrides})
+
+  def test_history_is_bounded_and_keeps_incomplete_boot(self) -> None:
+    with (
+      tempfile.TemporaryDirectory() as tmp,
+      mock.patch.object(bootdiag, "REPORT", Path(tmp) / "run.json"),
+      mock.patch.object(bootdiag, "HISTORY_DIR", Path(tmp) / "history"),
+      mock.patch.object(bootdiag, "BOOTSTATUS", Path(tmp) / "absent"),
+      mock.patch.object(update.os.path, "ismount", return_value=True),
+      mock.patch.object(update, "current_slot", return_value="a"),
+      mock.patch.object(bootdiag, "arguments", return_value={"vamos.prev_stage": "kernel", "vamos.prev_slot": "b", "vamos.pon": "0001"}),
+    ):
+      bootdiag.HISTORY_DIR.mkdir()
+      (bootdiag.HISTORY_DIR / "history.json").write_text(json.dumps([{"boot_id": str(n)} for n in range(40)]))
+      bootdiag.report("userspace")
+      result = bootdiag.report("healthy")
+      history = json.loads((bootdiag.HISTORY_DIR / "history.json").read_text())
+      self.assertEqual(len(history), 32)
+      self.assertEqual(history[-1], result)
+      self.assertEqual(result["previous"]["stage"], "kernel")
+      self.assertIsNone(result["reset"]["watchdog_cardreset"])
+      self.assertTrue((bootdiag.HISTORY_DIR / "last-incomplete.json").exists())
 
 
 if __name__ == "__main__":

@@ -41,6 +41,6 @@ fdtput -t s "$NCM_DTB_FILE" /soc@0/usb@a600000 dr_mode peripheral
 mcopy -i "$ESP_IMG" "$NCM_DTB_FILE" ::/qcs6490-radxa-dragon-q6a-ncm.dtb
 mcopy -i "$ESP_IMG" "$BOOTLOADER" ::/Image
 grub-editenv "$BUILD_DIR/grubenv" create
-grub-editenv "$BUILD_DIR/grubenv" set generation=0 active=a pending= phase=stable root_a=PARTLABEL=rootfs_a root_b=PARTLABEL=rootfs_b edl_request=0 usb_mode=ncm
+grub-editenv "$BUILD_DIR/grubenv" set generation=0 active=a pending= phase=stable root_a=PARTLABEL=rootfs_a root_b=PARTLABEL=rootfs_b edl_request=0 normal_request=0 usb_mode=ncm
 mcopy -i "$ESP_IMG" "$BUILD_DIR/grubenv" ::/EFI/vamos/grubenv
 mdir -i "$ESP_IMG" -/ ::/

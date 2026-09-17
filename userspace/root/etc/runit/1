@@ -14,6 +14,18 @@ mountpoint -q /dev || mount -t devtmpfs dev /dev -o mode=0755,nosuid
 mkdir -p /run/lock /run/user /dev/pts /dev/shm
 touch /run/motd && chmod 666 /run/motd
 
+# Take ownership before filesystem checks, migrations, udev, or firmware work.
+# U-Boot's timer and watchdog.open_timeout cover failures before this point.
+if [ -f /ASIUS ] && [ -x /usr/bin/vamos-boot ]; then
+    if ! /usr/bin/vamos-boot early 2>/run/vamos-boot-early.err; then
+        echo "ERROR: failed to take over the boot watchdog"
+        cat /run/vamos-boot-early.err
+        sync
+        reboot -f
+        while true; do sleep 60; done
+    fi
+fi
+
 mountpoint -q /dev/pts || mount -t devpts devpts /dev/pts -o mode=0620,gid=5,nosuid,noexec
 mountpoint -q /dev/shm || mount -t tmpfs shm /dev/shm -o mode=1777,nosuid,nodev
 
@@ -188,22 +200,7 @@ elif [ -f /ASIUS ]; then
 fi
 
 if [ -f /ASIUS ] && [ -x /usr/bin/vamos-boot ]; then
-    if ! /usr/bin/vamos-boot early 2>/run/vamos-boot-early.err; then
-        echo "ERROR: failed to start vamOS trial watchdog; returning to the fallback slot"
-        if mountpoint -q /data; then
-            mkdir -p /data/vamos-update
-            {
-                echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) trial watchdog startup failed ==="
-                cat /run/vamos-boot-early.err 2>/dev/null || true
-                cat /run/vamos-watchdog.log 2>/dev/null || true
-                ls -l /dev/watchdog* 2>&1 || true
-                dmesg 2>/dev/null | grep -i -E 'watchdog|qcom_wdt|deferred probe' | tail -100 || true
-            } >> /data/vamos-update/trial-failure.log
-        fi
-        sync
-        reboot -f
-        while true; do sleep 60; done
-    fi
+    /usr/bin/vamos-boot diagnose || echo "WARN: failed to persist boot diagnostics"
     /usr/bin/vamos-boot reconcile || echo "WARN: failed to reconcile vamOS boot state"
 fi
 

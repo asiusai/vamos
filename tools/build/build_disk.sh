@@ -216,7 +216,7 @@ for slot in a b; do
   grub-editenv "$env_path" set \
     generation=1 active=a pending= phase=stable \
     root_a="PARTUUID=$ROOT_A_GUID" root_b="PARTUUID=$ROOT_B_GUID" \
-    edl_request=0 usb_mode=ncm
+    edl_request=0 normal_request=0 usb_mode=ncm
   mcopy -o -i "$esp_path" "$env_path" ::/EFI/vamos/grubenv
   echo "  prepared VAMOS-$slot_upper"
 done

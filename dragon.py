@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Dragon Q6A control: power, USB dock, EDL, UART, SSH.
 
-Hardware: 12V via CHA_FAN1 (pwm1 on nct6799 / hwmon5), EDL/NCM through a
-ganged-power USB dock, serial on /dev/ttyUSB0, NCM at 192.168.42.2.
+Hardware: 12V via CHA_FAN1 (pwm1 on nct6799 / hwmon5), EDL/NCM over USB
+(optional ganged-power dock), serial on /dev/ttyUSB0, NCM at 192.168.42.2.
 
 Usage:
   dragon.py on                        Power on via fan header
@@ -11,7 +11,7 @@ Usage:
   dragon.py edl                       Enter EDL through a running vamOS device
   dragon.py edl --bios                Cold cycle + navigate BIOS menu to EDL
   dragon.py edl --no-cycle            Skip power cycle, just navigate
-  dragon.py normal                    Reset EDL to normal boot using dock VBUS
+  dragon.py normal --storage ufs       Leave EDL over USB, bypassing host detection once
   dragon.py dock on|off|cycle|status  Control the development dock VBUS
   dragon.py ssh [cmd...]               SSH to Dragon over USB NCM (run cmd if given)
   dragon.py status                     Show power, NCM, SSH, UART status
@@ -330,34 +330,10 @@ def wait_for_usb(vid_pid, timeout=30):
         time.sleep(0.5)
     return False
 
-def request_uboot_edl(timeout=10):
-    """Reboot, interrupt zero-delay autoboot, and run U-Boot's EDL command."""
+def run_uboot_command(command, timeout=10):
+    """Catch the next U-Boot rescue window and send one console command."""
     try:
         import serial
-
-        iface, _host_ip = check_ncm()
-        if iface:
-            ensure_ncm()
-            subprocess.Popen(
-                ["ssh", *SSH_OPTS, "-o", "BatchMode=yes",
-                 "-o", "ConnectTimeout=4", f"comma@{NCM_IP}",
-                 "sudo reboot -f"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        else:
-            # NCM may be unplugged or unavailable on a broken userspace image.
-            # A controlled 12 V cycle still reaches the known U-Boot UART path
-            # and does not require asserting the hardware EDL input.
-            print("[edl] NCM unavailable; power-cycling into the U-Boot UART rescue window")
-            try:
-                power(0)
-                time.sleep(OFF_SETTLE_SECS)
-                power(255)
-            except SystemExit:
-                return False
-
         # U-Boot has a zero-delay autoboot check.  A long blocking read makes
         # the nominal 5 ms poke interval miss that single tstc() window.
         with serial.Serial(PORT, BAUD, timeout=0.001) as uart:
@@ -379,14 +355,39 @@ def request_uboot_edl(timeout=10):
                 # logs and shell output can legitimately contain the two-byte
                 # string "=>" and must not make us send the command into Linux.
                 if re.search(rb"(?:^|[\r\n])=>[ \t]*$", response):
-                    print("[edl] requesting Qualcomm SCM EDL reset from U-Boot")
-                    write_uart_command(uart, "edl")
+                    print(f"[uart] U-Boot: {command}")
+                    write_uart_command(uart, command)
                     return True
             if os.environ.get("VAMOS_EDL_DEBUG"):
                 print(strip_ansi(response.decode("utf-8", "replace")))
     except (ImportError, OSError):
         pass
     return False
+
+def request_uboot_edl(timeout=10):
+    """Reboot, interrupt zero-delay autoboot, and run U-Boot's EDL command."""
+    iface, _host_ip = check_ncm()
+    if iface:
+        ensure_ncm()
+        subprocess.Popen(
+            ["ssh", *SSH_OPTS, "-o", "BatchMode=yes",
+             "-o", "ConnectTimeout=4", f"comma@{NCM_IP}",
+             "sudo reboot -f"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        # NCM may be unavailable on a broken userspace image. UART recovery
+        # still reaches U-Boot without asserting the hardware EDL input.
+        print("[edl] NCM unavailable; power-cycling into the U-Boot UART rescue window")
+        try:
+            power(0)
+            time.sleep(OFF_SETTLE_SECS)
+            power(255)
+        except SystemExit:
+            return False
+    return run_uboot_command("edl", timeout)
 
 def request_legacy_system_edl():
     """Stage the current updater so old systems can request U-Boot EDL safely."""
@@ -534,45 +535,34 @@ def cmd_normal(args):
         sys.exit("[normal] Dragon is not visible in EDL or NCM mode")
     if not shutil.which("edl-ng"):
         sys.exit("edl-ng not found")
-    if args.delay < 4:
-        sys.exit("normal --delay must be at least 4 seconds")
+    if args.delay < 1:
+        sys.exit("normal --delay must be at least 1 second")
     if not os.path.isfile(EDL_LOADER):
         sys.exit(f"Firehose loader not found: {EDL_LOADER}")
 
-    memory = os.environ.get("VAMOS_EDL_MEMORY", "Nvme").capitalize()
+    memory = args.storage.capitalize()
     if memory not in {"Ufs", "Nvme"}:
         sys.exit("VAMOS_EDL_MEMORY must be Ufs or Nvme")
 
     detach_qcserial()
-    reset_cmd = [
-        "sudo", "edl-ng", "--maxpayload=65536",
-        f"--memory={memory}", "--slot=0",
-        f"--loader={EDL_LOADER}", "reset", f"--delay={args.delay}",
-    ]
-    print(f"[normal] scheduling Firehose reset in {args.delay}s")
-    subprocess.run(reset_cmd, check=True)
+    from tools.flash.edl_normal import EdlDisk, request_normal
 
-    if dock_power_available():
-        dock_off = False
-        try:
-            print("[normal] dock VBUS off")
-            dock_power(False)
-            dock_off = True
-            time.sleep(args.delay + 2)
-        finally:
-            if dock_off:
-                print("[normal] dock VBUS on")
-                dock_power(True)
-    else:
-        print("[normal] configured dock hubs are unavailable; using Firehose reset only")
-        time.sleep(args.delay + 2)
+    disk = EdlDisk(EDL_LOADER, memory)
+    try:
+        print(f"[normal] requesting one normal boot through {memory} Firehose", flush=True)
+        state = request_normal(disk)
+        print(f"[normal] verified both boot records at generation {state['generation']}", flush=True)
+        disk.reset(args.delay)
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+        print(f"[normal] {exc}", file=sys.stderr)
+        return 2
 
-    if not wait_for_usb("1d6b:0103", timeout=30):
+    if not wait_for_usb("1d6b:0103", timeout=args.delay + 45):
         if check_edl():
-            print("[normal] Dragon returned to EDL; VBUS did not release EDL",
+            print("[normal] Dragon returned to EDL; the boot-time trigger was not bypassed",
                   file=sys.stderr)
         else:
-            print("[normal] NCM did not enumerate within 30s", file=sys.stderr)
+            print(f"[normal] NCM did not enumerate within {args.delay + 45}s", file=sys.stderr)
         return 2
     ensure_ncm()
     print(f"[normal] Dragon is in normal mode at {NCM_IP}")
@@ -813,9 +803,12 @@ def main():
     edl_p.add_argument("--f2-wait", type=float, default=10.0,
                        help="Seconds to press F2 after power-on (default 10)")
 
-    normal_p = sub.add_parser("normal", help="Reset EDL to normal boot via dock VBUS")
-    normal_p.add_argument("--delay", type=int, default=8,
-                          help="Firehose reset delay in seconds (default 8)")
+    normal_p = sub.add_parser("normal", help="Boot normally once using only the EDL USB cable")
+    normal_p.add_argument("--storage", choices=("ufs", "nvme"),
+                          default=os.environ.get("VAMOS_EDL_MEMORY", "nvme").lower(),
+                          help="installed storage (default: VAMOS_EDL_MEMORY or nvme)")
+    normal_p.add_argument("--delay", type=int, default=1,
+                          help="Firehose reset delay in seconds (default 1)")
 
     uart_p = sub.add_parser("uart", help="UART commands")
     uart_p.add_argument("uart_cmd", choices=["read", "send", "exec", "login", "wake"])

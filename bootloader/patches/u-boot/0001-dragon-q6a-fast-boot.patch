@@ -1,9 +1,9 @@
-diff --git a/arch/arm/dts/qcs6490-radxa-dragon-q6a-u-boot.dtsi b/arch/arm/dts/qcs6490-radxa-dragon-q6a-u-boot.dtsi
+diff --git c/arch/arm/dts/qcs6490-radxa-dragon-q6a-u-boot.dtsi w/arch/arm/dts/qcs6490-radxa-dragon-q6a-u-boot.dtsi
 new file mode 100644
-index 00000000..3e2676f8
+index 00000000000..b529f8cab13
 --- /dev/null
-+++ b/arch/arm/dts/qcs6490-radxa-dragon-q6a-u-boot.dtsi
-@@ -0,0 +1,87 @@
++++ w/arch/arm/dts/qcs6490-radxa-dragon-q6a-u-boot.dtsi
+@@ -0,0 +1,110 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +
 +/*
@@ -91,10 +91,33 @@ index 00000000..3e2676f8
 +&uart5 {
 +	bootph-all;
 +};
-diff --git a/arch/arm/lib/bootm-fdt.c b/arch/arm/lib/bootm-fdt.c
-index a82ceeaf..e01b9533 100644
---- a/arch/arm/lib/bootm-fdt.c
-+++ b/arch/arm/lib/bootm-fdt.c
++
++/* Keep the timer running across the raw Image handoff to Linux. */
++&watchdog {
++	status = "okay";
++	timeout-sec = <30>;
++};
++
++/* Recovery only needs USB2. Keep the USB3/DisplayPort combo PHY untouched. */
++&usb_1 {
++	status = "okay";
++	dr_mode = "peripheral";
++	maximum-speed = "high-speed";
++	phys = <&usb_1_hsphy>;
++	phy-names = "usb2-phy";
++	qcom,select-utmi-as-pipe-clk;
++};
++
++&usb_1_hsphy {
++	status = "okay";
++	vdda-pll-supply = <&vreg_l10c_0p88>;
++	vdda33-supply = <&vreg_l2b_3p072>;
++	vdda18-supply = <&vreg_l1c_1p8>;
++};
+diff --git c/arch/arm/lib/bootm-fdt.c w/arch/arm/lib/bootm-fdt.c
+index a82ceeaf22f..e01b9533f56 100644
+--- c/arch/arm/lib/bootm-fdt.c
++++ w/arch/arm/lib/bootm-fdt.c
 @@ -24,6 +24,11 @@
  
  DECLARE_GLOBAL_DATA_PTR;
@@ -123,10 +146,10 @@ index a82ceeaf..e01b9533 100644
  #endif
  
  #ifdef CONFIG_ARMV8_SPIN_TABLE
-diff --git a/arch/arm/mach-snapdragon/Kconfig b/arch/arm/mach-snapdragon/Kconfig
-index d3de8693..f8323428 100644
---- a/arch/arm/mach-snapdragon/Kconfig
-+++ b/arch/arm/mach-snapdragon/Kconfig
+diff --git c/arch/arm/mach-snapdragon/Kconfig w/arch/arm/mach-snapdragon/Kconfig
+index d3de8693b5a..f8323428a65 100644
+--- c/arch/arm/mach-snapdragon/Kconfig
++++ w/arch/arm/mach-snapdragon/Kconfig
 @@ -26,6 +26,24 @@ config SYS_MALLOC_LEN
  config LNX_KRNL_IMG_TEXT_OFFSET_BASE
  	default 0x80000000
@@ -152,10 +175,10 @@ index d3de8693..f8323428 100644
  config SYS_BOARD
  	string "Snapdragon SoCs based board"
  	help
-diff --git a/arch/arm/mach-snapdragon/Makefile b/arch/arm/mach-snapdragon/Makefile
-index 343e825c..e56b2bf0 100644
---- a/arch/arm/mach-snapdragon/Makefile
-+++ b/arch/arm/mach-snapdragon/Makefile
+diff --git c/arch/arm/mach-snapdragon/Makefile w/arch/arm/mach-snapdragon/Makefile
+index 343e825c6fd..e56b2bf0732 100644
+--- c/arch/arm/mach-snapdragon/Makefile
++++ w/arch/arm/mach-snapdragon/Makefile
 @@ -3,5 +3,6 @@
  # (C) Copyright 2015 Mateusz Kulikowski <mateusz.kulikowski@gmail.com>
  
@@ -163,19 +186,28 @@ index 343e825c..e56b2bf0 100644
 +obj-$(CONFIG_QCOM_SECURE_LAUNCH) += secure_launch.o secure_launch_transition.o
  obj-$(CONFIG_EFI_HAVE_CAPSULE_SUPPORT) += capsule_update.o
  obj-$(CONFIG_OF_LIVE) += of_fixup.o
-diff --git a/arch/arm/mach-snapdragon/board.c b/arch/arm/mach-snapdragon/board.c
-index 35735f15..d190cc33 100644
---- a/arch/arm/mach-snapdragon/board.c
-+++ b/arch/arm/mach-snapdragon/board.c
-@@ -24,6 +24,7 @@
+diff --git c/arch/arm/mach-snapdragon/board.c w/arch/arm/mach-snapdragon/board.c
+index 35735f1551c..6ceb177426f 100644
+--- c/arch/arm/mach-snapdragon/board.c
++++ w/arch/arm/mach-snapdragon/board.c
+@@ -24,6 +24,8 @@
  #include <init.h>
  #include <linux/arm-smccc.h>
  #include <linux/bug.h>
 +#include <linux/delay.h>
++#include <linux/err.h>
  #include <linux/psci.h>
  #include <linux/sizes.h>
  #include <lmb.h>
-@@ -39,6 +40,114 @@ DECLARE_GLOBAL_DATA_PTR;
+@@ -31,6 +33,7 @@
+ #include <fdt_support.h>
+ #include <usb.h>
+ #include <sort.h>
++#include <smem.h>
+ #include <time.h>
+ 
+ #include "qcom-priv.h"
+@@ -39,6 +42,114 @@ DECLARE_GLOBAL_DATA_PTR;
  
  enum qcom_boot_source qcom_boot_source __section(".data") = 0;
  
@@ -290,30 +322,46 @@ index 35735f15..d190cc33 100644
  static struct mm_region rbx_mem_map[CONFIG_NR_DRAM_BANKS + 2] = { { 0 } };
  
  struct mm_region *mem_map = rbx_mem_map;
-@@ -509,5 +618,14 @@
--void __weak qcom_late_init(void)
--{
--}
--
-+void __weak qcom_late_init(void)
-+{
+@@ -508,6 +619,34 @@ void qcom_show_boot_source(void)
+ 
+ void __weak qcom_late_init(void)
+ {
 +	bool ufs_present;
++	struct udevice *smem;
++	size_t size;
++	const u8 *pon;
++	char status[129];
++	int i;
 +
 +	if (fdt_node_check_compatible(gd->fdt_blob, 0, "radxa,dragon-q6a"))
 +		return;
++
++	/* XBL saves PMIC power-on status in SMEM item 403 before clearing it.
++	 * Preserve the raw bytes: the layout is firmware/platform specific.
++	 */
++	env_set("vamos_pon", "unavailable");
++	if (!uclass_get_device(UCLASS_SMEM, 0, &smem)) {
++		pon = smem_get(smem, -1, 403, &size);
++		if (!IS_ERR_OR_NULL(pon) && size && size <= 64) {
++			for (i = 0; i < size; i++)
++				sprintf(status + i * 2, "%02x", pon[i]);
++			env_set("vamos_pon", status);
++			printf("vamOS: XBL power-on status %s\n", status);
++		}
++	}
 +
 +	ufs_present = dragon_q6a_ufs_present();
 +	env_set("vamos_storage", ufs_present ? "ufs" : "nvme");
 +	printf("vamOS: %s selected by UFS card detect\n",
 +	       ufs_present ? "UFS" : "NVMe");
-+}
-+
+ }
+ 
  #define KERNEL_COMP_SIZE	SZ_64M
-diff --git a/arch/arm/mach-snapdragon/secure_launch.c b/arch/arm/mach-snapdragon/secure_launch.c
+diff --git c/arch/arm/mach-snapdragon/secure_launch.c w/arch/arm/mach-snapdragon/secure_launch.c
 new file mode 100644
-index 00000000..b3f06240
+index 00000000000..b3f06240f10
 --- /dev/null
-+++ b/arch/arm/mach-snapdragon/secure_launch.c
++++ w/arch/arm/mach-snapdragon/secure_launch.c
 @@ -0,0 +1,1055 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +/*
@@ -1370,11 +1418,11 @@ index 00000000..b3f06240
 +	puts("Dragon: Secure Launch handed U-Boot EL2\n");
 +	return 0;
 +}
-diff --git a/arch/arm/mach-snapdragon/secure_launch_transition.S b/arch/arm/mach-snapdragon/secure_launch_transition.S
+diff --git c/arch/arm/mach-snapdragon/secure_launch_transition.S w/arch/arm/mach-snapdragon/secure_launch_transition.S
 new file mode 100644
-index 00000000..102c1244
+index 00000000000..102c1244e1d
 --- /dev/null
-+++ b/arch/arm/mach-snapdragon/secure_launch_transition.S
++++ w/arch/arm/mach-snapdragon/secure_launch_transition.S
 @@ -0,0 +1,135 @@
 +/* SPDX-License-Identifier: BSD-3-Clause */
 +/*
@@ -1511,12 +1559,12 @@ index 00000000..102c1244
 +.global qcom_sl_jump_buffer
 +qcom_sl_jump_buffer:
 +	.zero 8 * 21
-diff --git a/board/qualcomm/asius-dragon-q6a.env b/board/qualcomm/asius-dragon-q6a.env
+diff --git c/board/qualcomm/asius-dragon-q6a.env w/board/qualcomm/asius-dragon-q6a.env
 new file mode 100644
-index 00000000..d4380cb7
+index 00000000000..80e9f537dcc
 --- /dev/null
-+++ b/board/qualcomm/asius-dragon-q6a.env
-@@ -0,0 +1,55 @@
++++ w/board/qualcomm/asius-dragon-q6a.env
+@@ -0,0 +1,68 @@
 +stdin=serial
 +stdout=serial
 +stderr=serial
@@ -1548,8 +1596,10 @@ index 00000000..d4380cb7
 +			fdt set /soc@0/usb@a600000 dr_mode peripheral;
 +			setenv vamos_usb_arg vamos.usb_mode=ncm;
 +		fi;
-+		setenv bootargs ${bootargs_base} root=${vamos_root} vamos.slot=${vamos_slot} ${vamos_state_arg} ${vamos_usb_arg};
-+		booti ${kernel_addr_r} - ${fdt_addr_r};
++		setenv bootargs ${bootargs_base} root=${vamos_root} vamos.slot=${vamos_slot} ${vamos_state_arg} ${vamos_usb_arg} ${vamos_diag_arg} vamos.pon=${vamos_pon} vamos.watchdog=1 watchdog.open_timeout=45;
++		if vamosboot ${vamos_interface} ${vamos_device} kernel; then
++			booti ${kernel_addr_r} - ${fdt_addr_r};
++		fi;
 +	fi
 +vamos_nvme=
 +	setenv vamos_interface nvme;
@@ -1563,7 +1613,7 @@ index 00000000..d4380cb7
 +	ufs init && scsi scan && vamosboot scsi 0 &&
 +	if test "${vamos_edl}" = "1"; then edl; else run vamos_load; fi;
 +	vamosboot scsi 0 fail && run vamos_load
-+bootcmd=
++vamos_boot=
 +	if test "${vamos_storage}" = "ufs"; then
 +		run vamos_ufs;
 +		run vamos_nvme;
@@ -1572,10 +1622,21 @@ index 00000000..d4380cb7
 +		run vamos_ufs;
 +	fi;
 +	echo vamOS: no bootable NVMe or UFS slot found
-diff --git a/boot/Kconfig b/boot/Kconfig
-index c67dc0ba..9c1908b9 100644
---- a/boot/Kconfig
-+++ b/boot/Kconfig
++vamos_host_edl=
++	setenv vamos_normal 0;
++	if test "${vamos_storage}" = "ufs"; then
++		ufs init && scsi scan && vamosboot scsi 0 usb-check;
++	else
++		pci enum && nvme scan && vamosboot nvme 0 usb-check;
++	fi;
++	if test "${vamos_normal}" != "1"; then edl; fi
++bootcmd=
++	if edlprobe; then run vamos_host_edl; fi;
++	run vamos_boot
+diff --git c/boot/Kconfig w/boot/Kconfig
+index c67dc0ba493..9c1908b949d 100644
+--- c/boot/Kconfig
++++ w/boot/Kconfig
 @@ -1612,6 +1612,16 @@ config BOOTDELAY
  
  	  See doc/README.autoboot for details.
@@ -1593,11 +1654,11 @@ index c67dc0ba..9c1908b9 100644
  config AUTOBOOT_KEYED
  	bool "Stop autobooting via specific input key / string"
  	help
-diff --git a/cmd/Kconfig b/cmd/Kconfig
-index ff90a870..2a6cc700 100644
---- a/cmd/Kconfig
-+++ b/cmd/Kconfig
-@@ -539,6 +539,21 @@ config CMD_ABOOTIMG
+diff --git c/cmd/Kconfig w/cmd/Kconfig
+index ff90a87024c..6e4bf6c0e44 100644
+--- c/cmd/Kconfig
++++ w/cmd/Kconfig
+@@ -539,6 +539,28 @@ config CMD_ABOOTIMG
  
  	  See doc/android/boot-image.rst for details.
  
@@ -1616,28 +1677,134 @@ index ff90a870..2a6cc700 100644
 +	  secure-monitor cookie-and-reset sequence. This provides software recovery
 +	  without UEFI.
 +
++config CMD_EDLPROBE
++	bool "edlprobe"
++	depends on CMD_QCOM_EDL && DM_USB_GADGET
++	help
++	  Briefly attach as a USB2 peripheral and detect a host's device descriptor
++	  request. Used for automatic EDL entry without a separate button wire.
++
  config CMD_CEDIT
  	bool "cedit - Configuration editor"
  	depends on CEDIT
-diff --git a/cmd/Makefile b/cmd/Makefile
-index ce772e55..89472e1c 100644
---- a/cmd/Makefile
-+++ b/cmd/Makefile
-@@ -200,6 +200,8 @@ obj-$(CONFIG_CMD_UNLZ4) += unlz4.o
+diff --git c/cmd/Makefile w/cmd/Makefile
+index ce772e5555b..7c34b19869f 100644
+--- c/cmd/Makefile
++++ w/cmd/Makefile
+@@ -200,6 +200,9 @@ obj-$(CONFIG_CMD_UNLZ4) += unlz4.o
  obj-$(CONFIG_CMD_UNZIP) += unzip.o
  obj-$(CONFIG_CMD_UPL) += upl.o
  obj-$(CONFIG_CMD_VIRTIO) += virtio.o
 +obj-$(CONFIG_CMD_VAMOSBOOT) += vamosboot.o
 +obj-$(CONFIG_CMD_QCOM_EDL) += qcom_edl.o
++obj-$(CONFIG_CMD_EDLPROBE) += edlprobe.o
  obj-$(CONFIG_CMD_WDT) += wdt.o
  obj-$(CONFIG_CMD_LZMADEC) += lzmadec.o
  obj-$(CONFIG_CMD_UFS) += ufs.o
-diff --git a/cmd/qcom_edl.c b/cmd/qcom_edl.c
+diff --git c/cmd/edlprobe.c w/cmd/edlprobe.c
 new file mode 100644
-index 00000000..8aad8a64
+index 00000000000..c532615621c
 --- /dev/null
-+++ b/cmd/qcom_edl.c
-@@ -0,0 +1,151 @@
++++ w/cmd/edlprobe.c
+@@ -0,0 +1,92 @@
++// SPDX-License-Identifier: GPL-2.0+
++/* Detect an upstream USB host without treating connector VBUS as EDL. */
++
++#include <command.h>
++#include <console.h>
++#include <time.h>
++#include <usb.h>
++#include <watchdog.h>
++#include <linux/delay.h>
++#include <linux/usb/gadget.h>
++
++static bool host_seen;
++
++static int edlprobe_bind(struct usb_gadget *gadget)
++{
++	return 0;
++}
++
++static void edlprobe_disconnect(struct usb_gadget *gadget)
++{
++}
++
++static int edlprobe_setup(struct usb_gadget *gadget,
++			  const struct usb_ctrlrequest *ctrl)
++{
++	/* A power source or another peripheral cannot send this SETUP packet. */
++	if (ctrl->bRequestType == (USB_DIR_IN | USB_TYPE_STANDARD | USB_RECIP_DEVICE) &&
++	    ctrl->bRequest == USB_REQ_GET_DESCRIPTOR &&
++	    le16_to_cpu(ctrl->wValue) == (USB_DT_DEVICE << 8) &&
++	    !ctrl->wIndex && le16_to_cpu(ctrl->wLength) >= 8)
++		host_seen = true;
++
++	/* Disconnect immediately after detection; no temporary USB identity. */
++	return -EOPNOTSUPP;
++}
++
++static struct usb_gadget_driver edlprobe_driver = {
++	.function = "EDL host probe",
++	.speed = USB_SPEED_HIGH,
++	.bind = edlprobe_bind,
++	.unbind = edlprobe_disconnect,
++	.setup = edlprobe_setup,
++	.disconnect = edlprobe_disconnect,
++};
++
++static int do_edlprobe(struct cmd_tbl *cmdtp, int flag, int argc,
++		       char *const argv[])
++{
++	struct udevice *udc;
++	ulong timeout = 750, start;
++	int ret;
++
++	if (argc > 1 && (strict_strtoul(argv[1], 10, &timeout) ||
++			!timeout || timeout > 10000))
++		return CMD_RET_USAGE;
++
++	host_seen = false;
++	ret = udc_device_get_by_index(0, &udc);
++	if (ret) {
++		printf("EDL: USB controller unavailable (%d)\n", ret);
++		return CMD_RET_FAILURE;
++	}
++
++	ret = usb_gadget_register_driver(&edlprobe_driver);
++	if (ret) {
++		printf("EDL: USB probe could not attach (%d)\n", ret);
++		goto out;
++	}
++
++	start = get_timer(0);
++	while (!host_seen && get_timer(start) < timeout) {
++		if (ctrlc())
++			break;
++		ret = dm_usb_gadget_handle_interrupts(udc);
++		if (ret)
++			break;
++		schedule();
++		udelay(100);
++	}
++	printf("EDL: USB host %s (%lu ms)\n",
++	       host_seen ? "detected" : "not detected", get_timer(start));
++	usb_gadget_unregister_driver(&edlprobe_driver);
++out:
++	udc_device_put(udc);
++	return host_seen ? CMD_RET_SUCCESS : CMD_RET_FAILURE;
++}
++
++U_BOOT_CMD(
++	edlprobe, 2, 0, do_edlprobe,
++	"detect a USB host for automatic EDL entry",
++	"[timeout_ms] - succeeds only on a host descriptor request (default 750 ms)"
++);
+diff --git c/cmd/qcom_edl.c w/cmd/qcom_edl.c
+new file mode 100644
+index 00000000000..cbb2d5c4131
+--- /dev/null
++++ w/cmd/qcom_edl.c
+@@ -0,0 +1,154 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/* Qualcomm software-only emergency download reset. */
 +
@@ -1647,6 +1814,7 @@ index 00000000..8aad8a64
 +#include <linux/kernel.h>
 +#include <qcom_secure_launch.h>
 +#include <vsprintf.h>
++#include <wdt.h>
 +
 +/*
 + * Keep the two SMCs adjacent and register-exact.  The same sequence, loaded
@@ -1694,6 +1862,8 @@ index 00000000..8aad8a64
 +{
 +	long ret;
 +
++	/* Recovery can remain in Firehose indefinitely; Linux will not take over. */
++	wdt_stop_all();
 +	puts("Entering Qualcomm EDL through the exact stock SMC sequence...\n");
 +	ret = qcom_enter_edl_exact();
 +	printf("Qualcomm EDL sequence returned unexpectedly: %ld\n", ret);
@@ -1789,12 +1959,12 @@ index 00000000..8aad8a64
 +	"authenticate and start a Qualcomm PAS firmware image",
 +	"<firmware_addr> <firmware_size> <pas_id> <region_addr> <region_size>"
 +);
-diff --git a/cmd/vamosboot.c b/cmd/vamosboot.c
+diff --git c/cmd/vamosboot.c w/cmd/vamosboot.c
 new file mode 100644
-index 00000000..e413eefa
+index 00000000000..3aa87e0957f
 --- /dev/null
-+++ b/cmd/vamosboot.c
-@@ -0,0 +1,370 @@
++++ w/cmd/vamosboot.c
+@@ -0,0 +1,480 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/* Redundant vamOS A/B selector compatible with the existing GRUB records. */
 +
@@ -1824,10 +1994,24 @@ index 00000000..e413eefa
 +	char pending;
 +	enum vamos_phase phase;
 +	bool edl_request;
++	bool normal_request;
 +	char usb_mode[8];
 +	char root_a[64];
 +	char root_b[64];
++	unsigned long boot_count;
++	unsigned long prev_count;
++	char boot_stage[16];
++	char prev_stage[16];
++	char boot_slot[2];
++	char prev_slot[2];
 +};
++
++static bool vamos_stage_valid(const char *stage)
++{
++	return !strcmp(stage, "unknown") || !strcmp(stage, "loading") ||
++	       !strcmp(stage, "kernel") || !strcmp(stage, "userspace") ||
++	       !strcmp(stage, "healthy");
++}
 +
 +static bool vamos_value(const char *buf, const char *name, char *out, size_t size)
 +{
@@ -1900,7 +2084,8 @@ index 00000000..e413eefa
 +			    struct vamos_state *state)
 +{
 +	char generation[24], active[4], pending[4], phase[16], edl_request[4];
-+	char usb_mode[8];
++	char usb_mode[8], normal_request[4];
++	char count[24];
 +	loff_t read = 0;
 +	char *buf;
 +	int ret;
@@ -1918,6 +2103,25 @@ index 00000000..e413eefa
 +		goto out;
 +	}
 +	buf[VAMOS_ENV_SIZE] = '\0';
++	state->boot_count = 0;
++	state->prev_count = 0;
++	strcpy(state->boot_stage, "unknown");
++	strcpy(state->prev_stage, "unknown");
++	strcpy(state->boot_slot, "-");
++	strcpy(state->prev_slot, "-");
++	if (vamos_value(buf, "boot_count", count, sizeof(count)) &&
++	    strict_strtoul(count, 10, &state->boot_count))
++		goto invalid;
++	if (vamos_value(buf, "prev_count", count, sizeof(count)) &&
++	    strict_strtoul(count, 10, &state->prev_count))
++		goto invalid;
++	vamos_value(buf, "boot_stage", state->boot_stage, sizeof(state->boot_stage));
++	vamos_value(buf, "prev_stage", state->prev_stage, sizeof(state->prev_stage));
++	vamos_value(buf, "boot_slot", state->boot_slot, sizeof(state->boot_slot));
++	vamos_value(buf, "prev_slot", state->prev_slot, sizeof(state->prev_slot));
++	if (!vamos_stage_valid(state->boot_stage) || !vamos_stage_valid(state->prev_stage) ||
++	    !strchr("ab-", state->boot_slot[0]) || !strchr("ab-", state->prev_slot[0]))
++		goto invalid;
 +
 +	if (!vamos_value(buf, "generation", generation, sizeof(generation)) ||
 +	    !vamos_value(buf, "active", active, sizeof(active)) ||
@@ -1935,6 +2139,7 @@ index 00000000..e413eefa
 +	state->active = active[0];
 +	state->pending = 0;
 +	state->edl_request = false;
++	state->normal_request = false;
 +	strcpy(state->usb_mode, "ncm");
 +	if (vamos_value(buf, "pending", pending, sizeof(pending))) {
 +		if (pending[1]) {
@@ -1950,6 +2155,14 @@ index 00000000..e413eefa
 +			goto out;
 +		}
 +		state->edl_request = !strcmp(edl_request, "1");
++	}
++	if (vamos_value(buf, "normal_request", normal_request,
++				sizeof(normal_request))) {
++		if (strcmp(normal_request, "0") && strcmp(normal_request, "1")) {
++			ret = -EINVAL;
++			goto out;
++		}
++		state->normal_request = !strcmp(normal_request, "1");
 +	}
 +	if (vamos_value(buf, "usb_mode", usb_mode, sizeof(usb_mode))) {
 +		if (strcmp(usb_mode, "host") && strcmp(usb_mode, "ncm")) {
@@ -1975,6 +2188,9 @@ index 00000000..e413eefa
 +		ret = -EINVAL;
 +	else
 +		ret = 0;
++	goto out;
++invalid:
++	ret = -EINVAL;
 +out:
 +	free(buf);
 +	return ret;
@@ -1998,10 +2214,14 @@ index 00000000..e413eefa
 +		"# GRUB Environment Block\n"
 +		"# WARNING: Do not edit this file by tools other than grub-editenv!!!\n"
 +		"generation=%lu\nactive=%c\npending=%s\nphase=%s\n"
-+		"root_a=%s\nroot_b=%s\nedl_request=%u\nusb_mode=%s\n",
++		"root_a=%s\nroot_b=%s\nedl_request=%u\nnormal_request=%u\nusb_mode=%s\n"
++		"boot_count=%lu\nboot_stage=%s\nboot_slot=%s\n"
++		"prev_count=%lu\nprev_stage=%s\nprev_slot=%s\n",
 +		state->generation, state->active, pending, phase,
 +		state->root_a, state->root_b, state->edl_request,
-+		state->usb_mode);
++		state->normal_request, state->usb_mode,
++		state->boot_count, state->boot_stage, state->boot_slot,
++		state->prev_count, state->prev_stage, state->prev_slot);
 +	if (len <= 0 || len >= VAMOS_ENV_SIZE) {
 +		ret = -E2BIG;
 +		goto out;
@@ -2075,12 +2295,20 @@ index 00000000..e413eefa
 +	char slot;
 +	int valid = 0, i;
 +	const char *boot_state_arg = "";
++	bool usb_check;
++	bool kernel, status;
 +
 +	if (argc < 3 || argc > 4)
++		return CMD_RET_USAGE;
++	usb_check = argc == 4 && !strcmp(argv[3], "usb-check");
++	kernel = argc == 4 && !strcmp(argv[3], "kernel");
++	status = argc == 4 && !strcmp(argv[3], "status");
++	if (argc == 4 && !usb_check && !kernel && !status && strcmp(argv[3], "fail"))
 +		return CMD_RET_USAGE;
 +	interface = argv[1];
 +	device = argv[2];
 +	env_set("vamos_edl", "0");
++	env_set("vamos_normal", "0");
 +
 +	for (i = 0; i < 2; i++) {
 +		int part = i ? 3 : 1;
@@ -2097,8 +2325,32 @@ index 00000000..e413eefa
 +		printf("vamOS: no valid A/B state on %s %s\n", interface, device);
 +		return CMD_RET_FAILURE;
 +	}
++	if (status) {
++		printf("vamOS: boot %lu slot %s stage %s; previous %lu slot %s stage %s\n",
++		       chosen->boot_count, chosen->boot_slot, chosen->boot_stage,
++		       chosen->prev_count, chosen->prev_slot, chosen->prev_stage);
++		return CMD_RET_SUCCESS;
++	}
++	if (kernel) {
++		chosen->generation++;
++		strcpy(chosen->boot_stage, "kernel");
++		return vamos_persist(interface, device, chosen) ?
++			CMD_RET_FAILURE : CMD_RET_SUCCESS;
++	}
 +
-+	if (argc == 3 && chosen->edl_request) {
++	if ((argc == 3 || usb_check) && chosen->normal_request) {
++		/* A Firehose request bypasses host detection for exactly one boot. */
++		chosen->generation++;
++		chosen->normal_request = false;
++		chosen->edl_request = false;
++		if (vamos_persist(interface, device, chosen)) {
++			puts("vamOS: could not consume normal boot request\n");
++			return CMD_RET_FAILURE;
++		}
++		puts("vamOS: consumed one-shot normal boot request\n");
++		env_set("vamos_normal", "1");
++	}
++	if ((argc == 3 || usb_check) && chosen->edl_request) {
 +		/*
 +		 * Advance the generation before clearing the redundant request.  If
 +		 * only one ESP is writable, its cleared record must outrank the stale
@@ -2108,12 +2360,19 @@ index 00000000..e413eefa
 +		chosen->edl_request = false;
 +		if (vamos_persist(interface, device, chosen)) {
 +			printf("vamOS: could not consume software EDL request\n");
-+		} else {
++			if (usb_check)
++				return CMD_RET_FAILURE;
++		} else if (!usb_check) {
 +			printf("vamOS: entering one-shot software EDL recovery\n");
 +			env_set("vamos_edl", "1");
 +			return CMD_RET_SUCCESS;
++		} else {
++			puts("vamOS: consumed software EDL request before USB recovery\n");
 +		}
 +	}
++	/* USB recovery must not attempt a trial slot or change normal boot policy. */
++	if (usb_check)
++		return CMD_RET_SUCCESS;
 +
 +	if (argc == 4 && !strcmp(argv[3], "fail")) {
 +		if (chosen->phase == VAMOS_PHASE_ATTEMPTED) {
@@ -2154,6 +2413,27 @@ index 00000000..e413eefa
 +	}
 +
 +	vamos_export_choice(chosen, interface, device, slot, boot_state_arg);
++	chosen->prev_count = chosen->boot_count;
++	strcpy(chosen->prev_stage, chosen->boot_stage);
++	strcpy(chosen->prev_slot, chosen->boot_slot);
++	chosen->boot_count++;
++	strcpy(chosen->boot_stage, "loading");
++	chosen->boot_slot[0] = slot;
++	chosen->boot_slot[1] = 0;
++	chosen->generation++;
++	if (vamos_persist(interface, device, chosen)) {
++		puts("vamOS: could not persist boot diagnostics\n");
++		return CMD_RET_FAILURE;
++	}
++	{
++		char args[192];
++
++		snprintf(args, sizeof(args),
++			 "vamos.boot_count=%lu vamos.prev_count=%lu vamos.prev_stage=%s vamos.prev_slot=%s",
++			 chosen->boot_count, chosen->prev_count,
++			 chosen->prev_stage, chosen->prev_slot);
++		env_set("vamos_diag_arg", args);
++	}
 +	printf("vamOS: booting slot %c%s\n", slot,
 +	       *boot_state_arg ? " (non-stable path)" : "");
 +	return CMD_RET_SUCCESS;
@@ -2162,13 +2442,13 @@ index 00000000..e413eefa
 +U_BOOT_CMD(
 +	vamosboot, 4, 0, do_vamosboot,
 +	"select and persist the vamOS A/B slot",
-+	"<interface> <device> [fail]\n"
++	"<interface> <device> [fail|usb-check|kernel|status]\n"
 +	"    - read redundant EFI/vamos/grubenv records and export vamos_*"
 +);
-diff --git a/common/autoboot.c b/common/autoboot.c
-index 4b80ddb5..1a220a1a 100644
---- a/common/autoboot.c
-+++ b/common/autoboot.c
+diff --git c/common/autoboot.c w/common/autoboot.c
+index 4b80ddb5b28..1a220a1a084 100644
+--- c/common/autoboot.c
++++ w/common/autoboot.c
 @@ -389,6 +389,23 @@ static int abortboot_single_key(int bootdelay)
  		abort = 1;	/* don't auto boot	*/
  	}
@@ -2193,10 +2473,10 @@ index 4b80ddb5..1a220a1a 100644
  	while ((bootdelay > 0) && (!abort)) {
  		--bootdelay;
  		/* delay 1000 ms */
-diff --git a/drivers/clk/qcom/clock-sc7280.c b/drivers/clk/qcom/clock-sc7280.c
-index 91e3fcc2..dbe4d8ed 100644
---- a/drivers/clk/qcom/clock-sc7280.c
-+++ b/drivers/clk/qcom/clock-sc7280.c
+diff --git c/drivers/clk/qcom/clock-sc7280.c w/drivers/clk/qcom/clock-sc7280.c
+index 91e3fcc27cb..dbe4d8edbb6 100644
+--- c/drivers/clk/qcom/clock-sc7280.c
++++ w/drivers/clk/qcom/clock-sc7280.c
 @@ -109,6 +109,26 @@ static ulong sc7280_set_rate(struct clk *clk, ulong rate)
  		clk_rcg_set_rate_mnd(priv->base, 0x17860,
  				     freq->pre_div, freq->m, freq->n, freq->src, 16);
@@ -2254,10 +2534,10 @@ index 91e3fcc2..dbe4d8ed 100644
  	}
  
  	return qcom_gate_clk_en(priv, clk->id);
-diff --git a/drivers/iommu/iommu-uclass.c b/drivers/iommu/iommu-uclass.c
-index 31b40e57..fbde4363 100644
---- a/drivers/iommu/iommu-uclass.c
-+++ b/drivers/iommu/iommu-uclass.c
+diff --git c/drivers/iommu/iommu-uclass.c w/drivers/iommu/iommu-uclass.c
+index 31b40e5713a..fbde4363bfa 100644
+--- c/drivers/iommu/iommu-uclass.c
++++ w/drivers/iommu/iommu-uclass.c
 @@ -18,6 +18,7 @@ static int dev_pci_iommu_enable(struct udevice *dev)
  {
  	struct udevice *parent = dev->parent;
@@ -2298,10 +2578,10 @@ index 31b40e57..fbde4363 100644
  
  	count = dev_count_phandle_with_args(dev, "iommus",
  					    "#iommu-cells", 0);
-diff --git a/drivers/iommu/qcom-hyp-smmu.c b/drivers/iommu/qcom-hyp-smmu.c
-index 5b37c21f..0c7c29e3 100644
---- a/drivers/iommu/qcom-hyp-smmu.c
-+++ b/drivers/iommu/qcom-hyp-smmu.c
+diff --git c/drivers/iommu/qcom-hyp-smmu.c w/drivers/iommu/qcom-hyp-smmu.c
+index 5b37c21f66c..0c7c29e3511 100644
+--- c/drivers/iommu/qcom-hyp-smmu.c
++++ w/drivers/iommu/qcom-hyp-smmu.c
 @@ -10,10 +10,12 @@
  #include <cpu_func.h>
  #include <dm.h>
@@ -2612,13 +2892,13 @@ index 5b37c21f..0c7c29e3 100644
  	INIT_LIST_HEAD(&priv->devices);
  
 -	priv->disable = current_el() > 1;
--
--	/* Read SMMU config */
--	val = gr0_readl(priv, ARM_SMMU_GR0_ID0);
--	priv->num_smr = FIELD_GET(ARM_SMMU_ID0_NUMSMRG, val);
 +	priv->disable = current_el() > 1 &&
 +			!dev_read_bool(dev, "qcom,configure-at-el2");
  
+-	/* Read SMMU config */
+-	val = gr0_readl(priv, ARM_SMMU_GR0_ID0);
+-	priv->num_smr = FIELD_GET(ARM_SMMU_ID0_NUMSMRG, val);
+-
 -	val = gr0_readl(priv, ARM_SMMU_GR0_ID1);
 -	priv->num_cb = FIELD_GET(ARM_SMMU_ID1_NUMCB, val);
 -	priv->pgshift = FIELD_GET(ARM_SMMU_ID1_PAGESIZE, val) ? 16 : 12;
@@ -2628,10 +2908,10 @@ index 5b37c21f..0c7c29e3 100644
  
  	dump_boot_mappings(priv);
  
-diff --git a/drivers/misc/qcom_geni.c b/drivers/misc/qcom_geni.c
-index a62ae6a2..896be795 100644
---- a/drivers/misc/qcom_geni.c
-+++ b/drivers/misc/qcom_geni.c
+diff --git c/drivers/misc/qcom_geni.c w/drivers/misc/qcom_geni.c
+index a62ae6a2478..896be795752 100644
+--- c/drivers/misc/qcom_geni.c
++++ w/drivers/misc/qcom_geni.c
 @@ -7,6 +7,8 @@
  #define pr_fmt(fmt) "GENI-SE: " fmt
  
@@ -2797,10 +3077,10 @@ index a62ae6a2..896be795 100644
 +	.of_match = geni_fw_only_ids,
 +	.probe = geni_se_fw_only_probe,
 +};
-diff --git a/drivers/nvme/nvme_pci.c b/drivers/nvme/nvme_pci.c
-index c24f8cf1..cc60bd77 100644
---- a/drivers/nvme/nvme_pci.c
-+++ b/drivers/nvme/nvme_pci.c
+diff --git c/drivers/nvme/nvme_pci.c w/drivers/nvme/nvme_pci.c
+index c24f8cf1eb1..cc60bd778c5 100644
+--- c/drivers/nvme/nvme_pci.c
++++ w/drivers/nvme/nvme_pci.c
 @@ -37,12 +37,26 @@ static int nvme_probe(struct udevice *udev)
  	return nvme_init(udev);
  }
@@ -2828,10 +3108,10 @@ index c24f8cf1..cc60bd77 100644
  };
  
  struct pci_device_id nvme_supported[] = {
-diff --git a/drivers/pci/pcie_dw_qcom.c b/drivers/pci/pcie_dw_qcom.c
-index ce6b4d97..592c6bff 100644
---- a/drivers/pci/pcie_dw_qcom.c
-+++ b/drivers/pci/pcie_dw_qcom.c
+diff --git c/drivers/pci/pcie_dw_qcom.c w/drivers/pci/pcie_dw_qcom.c
+index ce6b4d97d1d..592c6bff4f6 100644
+--- c/drivers/pci/pcie_dw_qcom.c
++++ w/drivers/pci/pcie_dw_qcom.c
 @@ -22,7 +22,7 @@
  
  struct qcom_pcie;
@@ -3009,10 +3289,10 @@ index ce6b4d97..592c6bff 100644
  	.priv_auto		= sizeof(struct qcom_pcie),
 +	.flags			= DM_FLAG_OS_PREPARE | DM_FLAG_LEAVE_PD_ON,
  };
-diff --git a/drivers/phy/qcom/phy-qcom-qmp-pcie.c b/drivers/phy/qcom/phy-qcom-qmp-pcie.c
-index 2f6ff259..d8e912a1 100644
---- a/drivers/phy/qcom/phy-qcom-qmp-pcie.c
-+++ b/drivers/phy/qcom/phy-qcom-qmp-pcie.c
+diff --git c/drivers/phy/qcom/phy-qcom-qmp-pcie.c w/drivers/phy/qcom/phy-qcom-qmp-pcie.c
+index 2f6ff259b35..d8e912a1d44 100644
+--- c/drivers/phy/qcom/phy-qcom-qmp-pcie.c
++++ w/drivers/phy/qcom/phy-qcom-qmp-pcie.c
 @@ -23,14 +23,18 @@
  #include <linux/ioport.h>
  
@@ -3308,10 +3588,10 @@ index 2f6ff259..d8e912a1 100644
  		.compatible = "qcom,sm8550-qmp-gen3x2-pcie-phy",
  		.data = (ulong)&sm8550_qmp_gen3x2_pciephy_cfg,
  	}, {
-diff --git a/drivers/power/domain/qcom-rpmhpd.c b/drivers/power/domain/qcom-rpmhpd.c
-index f51bc9a4..46711298 100644
---- a/drivers/power/domain/qcom-rpmhpd.c
-+++ b/drivers/power/domain/qcom-rpmhpd.c
+diff --git c/drivers/power/domain/qcom-rpmhpd.c w/drivers/power/domain/qcom-rpmhpd.c
+index f51bc9a4bbb..46711298023 100644
+--- c/drivers/power/domain/qcom-rpmhpd.c
++++ w/drivers/power/domain/qcom-rpmhpd.c
 @@ -50,6 +50,42 @@ struct rpmhpd_desc {
  };
  
@@ -3389,10 +3669,10 @@ index f51bc9a4..46711298 100644
  	{ .compatible = "qcom,sc8180x-rpmhpd", .data = (ulong)&stub_desc },
  	{ .compatible = "qcom,sc8280xp-rpmhpd", .data = (ulong)&stub_desc },
  	{ .compatible = "qcom,sdm670-rpmhpd", .data = (ulong)&stub_desc },
-diff --git a/drivers/serial/Kconfig b/drivers/serial/Kconfig
-index ffc58d66..9afd0cc4 100644
---- a/drivers/serial/Kconfig
-+++ b/drivers/serial/Kconfig
+diff --git c/drivers/serial/Kconfig w/drivers/serial/Kconfig
+index ffc58d663ff..9afd0cc4f3f 100644
+--- c/drivers/serial/Kconfig
++++ w/drivers/serial/Kconfig
 @@ -343,6 +343,13 @@ config DEBUG_UART_MSM_GENI
  	  will need to provide parameters to make this work. The driver will
  	  be available until the real driver-model serial is running.
@@ -3407,10 +3687,10 @@ index ffc58d66..9afd0cc4 100644
  config DEBUG_UART_MESON
  	bool "Amlogic Meson"
  	depends on MESON_SERIAL
-diff --git a/drivers/serial/serial_msm_geni.c b/drivers/serial/serial_msm_geni.c
-index ff91e001..687e615a 100644
---- a/drivers/serial/serial_msm_geni.c
-+++ b/drivers/serial/serial_msm_geni.c
+diff --git c/drivers/serial/serial_msm_geni.c w/drivers/serial/serial_msm_geni.c
+index ff91e0018fa..687e615adda 100644
+--- c/drivers/serial/serial_msm_geni.c
++++ w/drivers/serial/serial_msm_geni.c
 @@ -609,9 +609,11 @@ static struct udevice init_dev = {
  
  #include <debug_uart.h>
@@ -3425,11 +3705,11 @@ index ff91e001..687e615a 100644
  #error Clocks cannot be set at early debug. Change CONFIG_BAUDRATE
  #endif
  
-diff --git a/include/qcom_secure_launch.h b/include/qcom_secure_launch.h
+diff --git c/include/qcom_secure_launch.h w/include/qcom_secure_launch.h
 new file mode 100644
-index 00000000..475fdd95
+index 00000000000..475fdd95e21
 --- /dev/null
-+++ b/include/qcom_secure_launch.h
++++ w/include/qcom_secure_launch.h
 @@ -0,0 +1,13 @@
 +/* SPDX-License-Identifier: GPL-2.0+ */
 +#ifndef __QCOM_SECURE_LAUNCH_H

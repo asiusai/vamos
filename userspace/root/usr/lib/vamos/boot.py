@@ -5,6 +5,7 @@ import argparse
 import array
 import contextlib
 import fcntl
+import json
 import os
 import subprocess
 import sys
@@ -12,10 +13,11 @@ import time
 from pathlib import Path
 from typing import Sequence
 
+from vamos import bootdiag
+
 from vamos.update import (
   HEALTHY_MARKER,
   STAGE1_MARKER,
-  STATE_FILE,
   TRIAL_MARKER,
   WATCHDOG_DEVICE,
   WATCHDOG_DISARMED_MARKER,
@@ -33,10 +35,11 @@ from vamos.update import (
 
 
 WDIOC_SETTIMEOUT = (3 << 30) | (4 << 16) | (ord("W") << 8) | 6
+WDIOC_GETBOOTSTATUS = (2 << 30) | (4 << 16) | (ord("W") << 8) | 2
 WATCHDOG_TIMEOUT = 30
-TRIAL_DEADLINE = 180
+BOOT_HEALTH_DEADLINE = 180
 # The built-in QCOM driver can defer probing until its clock provider is ready.
-# This wait only applies to a one-shot trial boot.
+# The kernel services the inherited timer for at most 45 seconds before open.
 WATCHDOG_START_DEADLINE = 30
 WATCHDOG_STOP_DEADLINE = 5
 VERSION_FILE = Path("/VERSION")
@@ -48,13 +51,14 @@ def is_trial_boot() -> bool:
 
 
 def start_watchdog() -> None:
-  if not is_trial_boot():
+  if not is_trial_boot() and "vamos.watchdog=1" not in cmdline().split():
     return
-  TRIAL_MARKER.touch()
+  if is_trial_boot():
+    TRIAL_MARKER.touch()
   WATCHDOG_PID_FILE.unlink(missing_ok=True)
   WATCHDOG_READY_MARKER.unlink(missing_ok=True)
   WATCHDOG_DISARMED_MARKER.unlink(missing_ok=True)
-  WATCHDOG_LOG.write_text(f"trial watchdog launcher starting with {PYTHON}\n")
+  WATCHDOG_LOG.write_text(f"boot watchdog launcher starting with {PYTHON}\n")
   process = subprocess.Popen(
     [PYTHON, "/usr/bin/vamos-boot", "watchdog"],
     stdin=subprocess.DEVNULL,
@@ -64,16 +68,16 @@ def start_watchdog() -> None:
     close_fds=True,
   )
   with WATCHDOG_LOG.open("a") as output:
-    output.write(f"trial watchdog child {process.pid} launched\n")
+    output.write(f"boot watchdog child {process.pid} launched\n")
   deadline = time.monotonic() + WATCHDOG_START_DEADLINE
   while time.monotonic() < deadline:
     if process.poll() is not None:
-      raise UpdateError(f"trial watchdog exited during startup; see {WATCHDOG_LOG}")
+      raise UpdateError(f"boot watchdog exited during startup; see {WATCHDOG_LOG}")
     if WATCHDOG_READY_MARKER.exists():
       return
     time.sleep(0.05)
   with WATCHDOG_LOG.open("a") as output:
-    output.write(f"trial watchdog child {process.pid} did not become ready\n")
+    output.write(f"boot watchdog child {process.pid} did not become ready\n")
     for detail in ("status", "wchan", "cmdline"):
       with contextlib.suppress(OSError):
         value = Path(f"/proc/{process.pid}/{detail}").read_text(errors="replace")
@@ -81,14 +85,14 @@ def start_watchdog() -> None:
   process.terminate()
   with contextlib.suppress(subprocess.TimeoutExpired):
     process.wait(timeout=5)
-  raise UpdateError(f"trial watchdog did not become ready; see {WATCHDOG_LOG}")
+  raise UpdateError(f"boot watchdog did not become ready; see {WATCHDOG_LOG}")
 
 
 def watchdog() -> None:
   with WATCHDOG_LOG.open("a") as output:
-    output.write("trial watchdog starting\n")
+    output.write("boot watchdog starting\n")
   try:
-    deadline = time.monotonic() + TRIAL_DEADLINE
+    deadline = time.monotonic() + BOOT_HEALTH_DEADLINE
     open_deadline = time.monotonic() + WATCHDOG_START_DEADLINE
     while True:
       try:
@@ -100,6 +104,9 @@ def watchdog() -> None:
         time.sleep(0.05)
     timeout = array.array("i", [WATCHDOG_TIMEOUT])
     fcntl.ioctl(fd, WDIOC_SETTIMEOUT, timeout, True)
+    bootstatus = array.array("i", [0])
+    fcntl.ioctl(fd, WDIOC_GETBOOTSTATUS, bootstatus, True)
+    bootdiag.BOOTSTATUS.write_text(f"{bootstatus[0]}\n")
     WATCHDOG_PID_FILE.write_text(f"{os.getpid()}\n")
     WATCHDOG_READY_MARKER.touch()
     while True:
@@ -108,18 +115,18 @@ def watchdog() -> None:
         os.close(fd)
         fd = -1
         WATCHDOG_DISARMED_MARKER.touch()
-        WATCHDOG_LOG.write_text("trial committed; watchdog disarmed\n")
+        WATCHDOG_LOG.write_text("boot healthy; watchdog disarmed\n")
         return
       if time.monotonic() >= deadline:
         with WATCHDOG_LOG.open("a") as output:
-          output.write("trial health deadline expired; waiting for hardware reset\n")
+          output.write("boot health deadline expired; waiting for hardware reset\n")
         while True:
           time.sleep(WATCHDOG_TIMEOUT * 2)
       os.write(fd, b"\0")
       time.sleep(5)
   except Exception as exc:
     with WATCHDOG_LOG.open("a") as output:
-      output.write(f"trial watchdog failed: {type(exc).__name__}: {exc}\n")
+      output.write(f"boot watchdog failed: {type(exc).__name__}: {exc}\n")
     raise
   finally:
     if "fd" in locals() and fd >= 0:
@@ -154,40 +161,48 @@ def reconcile() -> None:
 
 
 def commit() -> None:
-  if not TRIAL_MARKER.exists():
+  trial = TRIAL_MARKER.exists()
+  if not trial and "vamos.watchdog=1" not in cmdline().split():
     return
   if not WATCHDOG_READY_MARKER.exists():
-    raise UpdateError("trial watchdog is not ready")
+    raise UpdateError("boot watchdog is not ready")
   if not STAGE1_MARKER.exists():
     raise UpdateError("runit stage 1 did not complete")
   if not os.path.ismount("/data"):
     raise UpdateError("persistent userdata is not mounted")
 
-  state = load_state()
-  active = current_slot()
-  target = state.get("target_slot")
-  previous = state.get("active_slot")
-  if state.get("state") != "booting" or target != active or previous not in ("a", "b"):
-    raise UpdateError("trial state does not match the running slot")
+  if trial:
+    state = load_state()
+    active = current_slot()
+    target = state.get("target_slot")
+    previous = state.get("active_slot")
+    if state.get("state") != "booting" or target != active or previous not in ("a", "b"):
+      raise UpdateError("trial state does not match the running slot")
 
-  version = str(state.get("version", ""))
-  actual_version = VERSION_FILE.read_text().strip()
-  if version not in ("", "unspecified") and version != actual_version:
-    raise UpdateError(f"running OS version {actual_version!r} does not match update {version!r}")
+    version = str(state.get("version", ""))
+    actual_version = VERSION_FILE.read_text().strip()
+    if version not in ("", "unspecified") and version != actual_version:
+      raise UpdateError(f"running OS version {actual_version!r} does not match update {version!r}")
 
   try:
     watchdog_pid = int(WATCHDOG_PID_FILE.read_text())
     os.kill(watchdog_pid, 0)
   except (FileNotFoundError, ValueError, ProcessLookupError) as exc:
-    raise UpdateError("trial watchdog process is not running") from exc
+    raise UpdateError("boot watchdog process is not running") from exc
 
+  # Keep the timer armed while persisting health. An I/O failure here must
+  # still reset an uncommitted trial instead of leaving it stuck indefinitely.
+  bootdiag.diagnose("healthy")
   HEALTHY_MARKER.touch()
   deadline = time.monotonic() + WATCHDOG_STOP_DEADLINE
   while time.monotonic() < deadline and not WATCHDOG_DISARMED_MARKER.exists():
     time.sleep(0.05)
   if not WATCHDOG_DISARMED_MARKER.exists():
     HEALTHY_MARKER.unlink(missing_ok=True)
-    raise UpdateError("trial watchdog did not disarm")
+    raise UpdateError("boot watchdog did not disarm")
+
+  if not trial:
+    return
 
   try:
     boot_generation = commit_boot(active, previous)
@@ -210,14 +225,18 @@ def commit() -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-  parser = argparse.ArgumentParser(description="vamOS trial-boot controller")
-  parser.add_argument("command", choices=("early", "watchdog", "reconcile", "commit"))
+  parser = argparse.ArgumentParser(description="vamOS boot supervision and diagnostics")
+  parser.add_argument("command", choices=("early", "watchdog", "diagnose", "status", "reconcile", "commit"))
   args = parser.parse_args(argv)
   try:
     if args.command == "early":
       start_watchdog()
     elif args.command == "watchdog":
       watchdog()
+    elif args.command == "diagnose":
+      bootdiag.diagnose("userspace")
+    elif args.command == "status":
+      print(json.dumps(bootdiag.status(), indent=2))
     elif args.command == "reconcile":
       reconcile()
     elif args.command == "commit":
