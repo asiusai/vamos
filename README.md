@@ -111,6 +111,20 @@ manager from reusing its previous connection.
 
 ## Dragon hardware policy
 
+`vamos-clock` restores the later of the image build time and the timestamp in
+`/data/vamos-clock/state.json` before workloads start. Asius v0 does not depend
+on an RTC or GPS. Board-supplied boot time is ignored, and no RTC is read or
+written. The service checkpoints every 30 seconds and at shutdown. An abrupt
+power cut can lose roughly the last checkpoint interval of running time.
+While switched off, elapsed time is unknown; the device catches up when NTP
+or an authorized app over Bluetooth or the network supplies the current time.
+Numeric NTP endpoints let recovery work without Tailscale DNS. Runtime
+corrections step forward or slow the clock when it is ahead; they never step
+backward. A recent NTP fix takes precedence over phone time.
+`sudo vamos-clock status` shows the last source, correction and saved timestamp.
+The runit service retains its `busybox-ntpd` name but runs `vamos-clock serve`.
+Validate the policy with `python3 -m unittest discover -s tools -p test_time_sync.py`.
+
 `vamos-hardware` owns Dragon-specific IRQ routing, GPU clocks and runtime power,
 thermal trip overrides, and diagnostic device permissions. Openpilot calls
 `sudo vamos-hardware initialize` from its hardware initialization hook and

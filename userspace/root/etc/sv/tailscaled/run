@@ -10,7 +10,7 @@ mkdir -p "$STATE_DIR" "$SOCKET_DIR"
 chmod 700 "$STATE_DIR"
 
 # Wait for actual synchronization, not just a lower bound on the year: a
-# corrupt RTC set to the far future also breaks TLS. NTP does not require DNS.
+# saved checkpoint cannot account for time spent powered off. NTP needs no DNS.
 # Still start after the bounded wait so offline devices can recover later.
 for _ in $(seq 1 120); do
   [ -e /run/vamos-time-synced ] && break

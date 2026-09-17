@@ -8,6 +8,8 @@ PATH=/usr/bin:/usr/sbin
 detect_container
 [ -r /etc/rc.conf ] && . /etc/rc.conf
 
+/usr/bin/vamos-clock checkpoint || echo "WARN: failed to save clock at shutdown"
+
 for f in /etc/runit/shutdown.d/*.sh; do
   [ -r "$f" ] && . "$f"
 done

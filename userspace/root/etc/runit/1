@@ -199,6 +199,9 @@ elif [ -f /ASIUS ]; then
     echo "WARN: A/B initialization incomplete; /data remains on the active rootfs"
 fi
 
+# Restore time after mounting persistent storage and before starting workloads.
+/usr/bin/vamos-clock restore || echo "WARN: failed to restore persistent clock"
+
 if [ -f /ASIUS ] && [ -x /usr/bin/vamos-boot ]; then
     /usr/bin/vamos-boot diagnose || echo "WARN: failed to persist boot diagnostics"
     /usr/bin/vamos-boot reconcile || echo "WARN: failed to reconcile vamOS boot state"
