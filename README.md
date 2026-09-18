@@ -194,8 +194,11 @@ Venus also requires Linux to boot at EL2. vamOS checks for `/dev/kvm` during
 boot and, when EL2 is unavailable, writes the Dragon UEFI one-shot
 `HypervisorOverride` variable. It reboots only after any A/B trial has been
 committed, and records the BIOS version so a failed override cannot cause a
-reboot loop. `vamos-hypervisor status` reports the current state, while
-`vamos-hypervisor enable` explicitly retries the override. The tested firmware
+reboot loop. The built-in Venus driver skips probing a Dragon that booted at
+EL1: stock firmware can otherwise reset the board before userspace reaches
+this recovery step. Venus initializes normally after the EL2 reboot, including
+when booting through stock UEFI. `vamos-hypervisor status` reports the current
+state, while `vamos-hypervisor enable` explicitly retries the override. The tested firmware
 makes EFI variables unavailable after Linux has booted at EL2; the helper exits
 before mounting efivarfs in that state. Dragon updates use the disk-resident
 selector described below and never require `BootNext`.
