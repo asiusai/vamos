@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Asius <dev@asius.ai>
+Date: Wed, 23 Sep 2026 18:15:00 +0000
+Subject: [PATCH] phy: qcom-qmp-combo: apply board TX calibration
+
+Apply an optional validated board transmit tap before releasing PHY reset,
+including after power loss. Keep the common SoC table and other PHY
+generations unchanged when the calibration is absent.
+
+Signed-off-by: Asius <dev@asius.ai>
+---
+diff --git a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -1841,6 +1841,8 @@
+ 	/* Offset from PCS to PCS_USB region */
+ 	unsigned int pcs_usb_offset;
+ 
++	/* Optional board calibration register in PCS; zero if unsupported. */
++	unsigned int tx_deemph_6db_offset;
+ };
+ 
+ struct qmp_combo {
+@@ -1877,6 +1879,8 @@
+ 	struct phy *usb_phy;
+ 	enum phy_mode phy_mode;
+ 	unsigned int usb_init_count;
++	bool has_tx_deemph_6db;
++	u32 tx_deemph_6db;
+ 
+ 	struct phy *dp_phy;
+ 	unsigned int dp_aux_cfg;
+@@ -2304,6 +2308,7 @@
+ 
+ static const struct qmp_phy_cfg sm8250_usb3dpphy_cfg = {
+ 	.offsets		= &qmp_combo_offsets_v3,
++	.tx_deemph_6db_offset	= QPHY_V4_PCS_G12S1_TXDEEMPH_M6DB,
+ 
+ 	.serdes_tbl		= sm8150_usb3_serdes_tbl,
+ 	.serdes_tbl_num		= ARRAY_SIZE(sm8150_usb3_serdes_tbl),
+@@ -3244,6 +3249,9 @@
+ 	if (pcs_usb)
+ 		qmp_configure(qmp->dev, pcs_usb, cfg->pcs_usb_tbl,
+ 			      cfg->pcs_usb_tbl_num);
++
++	if (qmp->has_tx_deemph_6db)
++		writel(qmp->tx_deemph_6db, pcs + cfg->tx_deemph_6db_offset);
+ 
+ 	if (cfg->has_pwrdn_delay)
+ 		usleep_range(10, 20);
+@@ -4236,6 +4244,18 @@
+ 	qmp->cfg = of_device_get_match_data(dev);
+ 	if (!qmp->cfg)
+ 		return -EINVAL;
++
++	if (of_property_present(dev->of_node, "qcom,tx-deemph-6db")) {
++		if (!qmp->cfg->tx_deemph_6db_offset)
++			return dev_err_probe(dev, -EINVAL,
++					     "TX calibration is unsupported on this PHY\n");
++		ret = of_property_read_u32(dev->of_node, "qcom,tx-deemph-6db",
++					   &qmp->tx_deemph_6db);
++		if (ret || qmp->tx_deemph_6db > 31)
++			return dev_err_probe(dev, -EINVAL,
++					     "invalid 6 dB TX calibration\n");
++		qmp->has_tx_deemph_6db = true;
++	}
+ 
+ 	mutex_init(&qmp->phy_mutex);
+ 
