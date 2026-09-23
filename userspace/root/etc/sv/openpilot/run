@@ -55,7 +55,8 @@ trap cleanup TERM INT HUP
 # Run as comma user with proper groups and PAM limits
 # The Asius MSM GPU runtime needs CAP_SYS_RAWIO for trusted command submission.
 if [ -f /ASIUS ]; then
-  RUN_AS_COMMA="/usr/sbin/setpriv --reuid=comma --regid=comma --init-groups --inh-caps=+sys_rawio --ambient-caps=+sys_rawio"
+  # Reset the login environment so GPU firmware and other caches use comma's home.
+  RUN_AS_COMMA="/usr/sbin/setpriv --reuid=comma --regid=comma --init-groups --inh-caps=+sys_rawio --ambient-caps=+sys_rawio --reset-env"
 else
   # sudo -u properly inherits groups and applies /etc/security/limits.conf
   RUN_AS_COMMA="sudo -u comma"
