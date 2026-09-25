@@ -1,0 +1,21 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] arm64: dts: qcom: enable Dragon external USB recovery
+
+Limit the AGNOS-derived host recovery and receiver-detection sequencing
+quirks to the external Dragon controller. The internal Wi-Fi/BT controller
+and the NCM gadget path retain their existing behavior.
+
+Signed-off-by: Asius <dev@asius.ai>
+---
+diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+--- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
++++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
+@@ -1326,6 +1326,8 @@
+ &usb_1 {
+ 	status = "okay";
+ 	dr_mode = "host";
++	snps,dis-rxdet-u3-quirk;
++	xhci-missing-cas-quirk;
+ };
+ 
+ &usb_1_dwc3_hs {
