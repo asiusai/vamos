@@ -1,0 +1,34 @@
+From: Stanley Jhu <stanleyjhu@google.com>
+Subject: [PATCH] scsi: ufs: core: Keep internal commands dispatchable during error handling
+
+Internal UFS commands use the pseudo SCSI device, which shares the host
+tagset. Error recovery must leave that queue dispatchable while normal
+LUNs remain quiesced, or its own NOP OUT request cannot complete.
+Balance the pseudo-device quiesce depth before resuming the tagset.
+
+Adapted from the upstream v3 proposal, not yet in Linux 7.2.7.
+Fixes: 08b12cda6c44 ("scsi: ufs: core: Switch to scsi_get_internal_cmd()")
+Link: https://lore.kernel.org/r/20260912131625.2301486-1-stanleyjhu@google.com
+---
+diff --git a/drivers/ufs/core/ufshcd.c b/drivers/ufs/core/ufshcd.c
+index 86f49c0522ec05a441f0bcfce13bcb8dfbd3c1cd..bc33da89af2679a55ce6d30a866197c2dca2b577 100644
+--- a/drivers/ufs/core/ufshcd.c
++++ b/drivers/ufs/core/ufshcd.c
+@@ -6748,11 +6748,17 @@ static void ufshcd_err_handling_prepare(struct ufs_hba *hba)
+ 	}
+ 	/* Wait for ongoing ufshcd_queuecommand() calls to finish. */
+ 	blk_mq_quiesce_tagset(&hba->host->tag_set);
++	/*
++	 * Internal commands are submitted on the pseudo SCSI device. Let them
++	 * through so that the error handler can recover the link.
++	 */
++	blk_mq_unquiesce_queue(hba->host->pseudo_sdev->request_queue);
+ 	cancel_work_sync(&hba->eeh_work);
+ }
+ 
+ static void ufshcd_err_handling_unprepare(struct ufs_hba *hba)
+ {
++	blk_mq_quiesce_queue_nowait(hba->host->pseudo_sdev->request_queue);
+ 	blk_mq_unquiesce_tagset(&hba->host->tag_set);
+ 	ufshcd_release(hba);
+ 	if (ufshcd_is_clkscaling_supported(hba))

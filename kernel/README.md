@@ -20,6 +20,8 @@ by subsystem. Original authors remain credited in patch headers and source.
 | 0021 | PCIe1 bandwidth/OPPs, from Xilin Wu; `sc7280.dtsi` is now `kodiak.dtsi` |
 | 0037 | RPMh resource/regulator readback, from Maulik Shah and Kamal Wadhwa (0037, 0038) |
 | 0042 | Removable UFS detection from Xilin Wu, plus device temperature support (0042, 0084) |
+| 0043 | Drain internal UFS commands before clock-scaling quiesce; fixes a 7.2.7 health-read deadlock |
+| 0044 | Keep internal UFS recovery commands dispatchable, from Stanley Jhu's upstream v3 proposal |
 | 0054 | Asius firmware memory map, peripherals, static USB wiring and recovery properties (0031, 0032, 0054, 0081-0083, 0092) |
 | 0055 | Dragon QSEECOM allowlist |
 | 0057 | OS04C10 sensor, VFE170 PIX/NV12 capture and camera clocks |
@@ -36,12 +38,21 @@ by subsystem. Original authors remain credited in patch headers and source.
 
 The upstream Dragon DTS uses a different firmware memory layout. Its board
 support replaces the old full-board addition, but the Asius carveouts and
-U-Boot/stock-EFI handoff remain necessary. Camera aliases are board-local; the
-second CCI1 bus now correctly maps to `cci1_i2c1`. Firmware gap reservations
-exclude named `no-map` regions: overlapping `/memreserve/` entries prevent
+U-Boot/stock-EFI handoff remain necessary. Camera aliases are board-local. Keep
+the established camera buses 16, 18 and 20: Openpilot identifies sensors by
+these names. Bus 20 explicitly maps to `cci1_i2c1`; the old duplicate bus-19
+alias for `cci1_i2c0` is removed. Firmware gap reservations exclude named
+`no-map` regions: overlapping `/memreserve/` entries prevent
 upstream remoteproc from requesting the DSP regions on 7.2. The complete
 firmware memory range remains reserved. The build checks the compiled DTB
 for these overlaps before packaging it.
+
+UFS internal commands now share the host tagset. Patch 0043 orders the
+clock-scaling write lock before queue quiescing, so a health read holding
+the read lock can finish. Patch 0044 separately preserves recovery command
+dispatch, following the [upstream proposal](https://lore.kernel.org/r/20260912131625.2301486-1-stanleyjhu@google.com).
+Retest concurrent health queries, I/O and frequency changes when replacing
+these patches with a later stable kernel. Neither patch disables scaling.
 
 ## Removed patches
 
@@ -76,6 +87,9 @@ modules must be deployed together when changing the kernel version.
 
 The optional RTL8169 Ethernet driver is a module so its PHY lookup runs after
 asynchronous PCIe host discovery, outside that asynchronous probe context.
+
+Keep `GPIO_CDEV_V1` enabled: Openpilot sensord uses the upstream v1 line-event
+ioctl for IMU interrupts. Linux 7.2 no longer enables that API by default.
 
 ## Video driver selection
 

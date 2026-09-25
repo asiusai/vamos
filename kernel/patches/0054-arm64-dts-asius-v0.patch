@@ -6,7 +6,7 @@ See kernel/README.md for provenance, scope and removed patches.
 
 ---
 diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
-index 696fef50f577b341186cf3d6335b1509ea2d34a7..39467d286cc0fc91a17cccc6cf2ee64ae42c8b6f 100644
+index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0d1659e1e 100644
 --- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
 +++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
 @@ -4,6 +4,15 @@
@@ -52,7 +52,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..39467d286cc0fc91a17cccc6cf2ee64a
 +		i2c16 = &cci0_i2c0;
 +		i2c17 = &cci0_i2c1;
 +		i2c18 = &cci1_i2c0;
-+		i2c19 = &cci1_i2c1;
++		i2c20 = &cci1_i2c1;
  	};
  
  	wcd938x: audio-codec {

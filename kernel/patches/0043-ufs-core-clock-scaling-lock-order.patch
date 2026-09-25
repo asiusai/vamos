@@ -1,0 +1,82 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] scsi: ufs: drain device commands before quiescing the tagset
+
+Internal commands now use the pseudo SCSI device on the host tagset. A
+health-descriptor read can hold clk_scaling_lock for reading while its
+request waits for dispatch. Quiescing the tagset before taking the write
+lock then deadlocks both the query and clock scaling, stopping all UFS I/O.
+
+Take the write lock before quiescing in both command-pausing paths, and
+unquiesce before releasing it. Keep write-booster serialization and queue
+quiescing intact. Reproduced with concurrent sysfs health reads and UFS
+frequency scaling on Dragon with Linux 7.2.7.
+
+Fixes: 08b12cda6c44 ("scsi: ufs: core: Switch to scsi_get_internal_cmd()")
+---
+diff --git a/drivers/ufs/core/ufshcd.c b/drivers/ufs/core/ufshcd.c
+index 86f49c0522ec05a441f0bcfce13bcb8dfbd3c1cd..c3505d766a90e3aa44340424147b147fb9f12d81 100644
+--- a/drivers/ufs/core/ufshcd.c
++++ b/drivers/ufs/core/ufshcd.c
+@@ -1358,13 +1358,13 @@ int ufshcd_pause_command_processing(struct ufs_hba *hba, u64 timeout_us)
+ 	int ret = 0;
+ 
+ 	mutex_lock(&hba->host->scan_mutex);
+-	blk_mq_quiesce_tagset(&hba->host->tag_set);
+ 	down_write(&hba->clk_scaling_lock);
++	blk_mq_quiesce_tagset(&hba->host->tag_set);
+ 
+ 	if (ufshcd_wait_for_pending_cmds(hba, timeout_us)) {
+ 		ret = -EBUSY;
+-		up_write(&hba->clk_scaling_lock);
+ 		blk_mq_unquiesce_tagset(&hba->host->tag_set);
++		up_write(&hba->clk_scaling_lock);
+ 		mutex_unlock(&hba->host->scan_mutex);
+ 	}
+ 
+@@ -1379,8 +1379,8 @@ int ufshcd_pause_command_processing(struct ufs_hba *hba, u64 timeout_us)
+  */
+ void ufshcd_resume_command_processing(struct ufs_hba *hba)
+ {
+-	up_write(&hba->clk_scaling_lock);
+ 	blk_mq_unquiesce_tagset(&hba->host->tag_set);
++	up_write(&hba->clk_scaling_lock);
+ 	mutex_unlock(&hba->host->scan_mutex);
+ }
+ 
+@@ -1451,19 +1451,22 @@ static int ufshcd_clock_scaling_prepare(struct ufs_hba *hba, u64 timeout_us)
+ 	int ret = 0;
+ 	/*
+ 	 * make sure that there are no outstanding requests when
+-	 * clock scaling is in progress
++	 * clock scaling is in progress. Device management commands hold
++	 * clk_scaling_lock for reading while waiting for their block requests.
++	 * Drain those readers before quiescing the shared tagset, otherwise
++	 * their requests cannot dispatch and neither side can make progress.
+ 	 */
+ 	mutex_lock(&hba->host->scan_mutex);
+-	blk_mq_quiesce_tagset(&hba->host->tag_set);
+ 	mutex_lock(&hba->wb_mutex);
+ 	down_write(&hba->clk_scaling_lock);
++	blk_mq_quiesce_tagset(&hba->host->tag_set);
+ 
+ 	if (!hba->clk_scaling.is_allowed ||
+ 	    ufshcd_wait_for_pending_cmds(hba, timeout_us)) {
+ 		ret = -EBUSY;
++		blk_mq_unquiesce_tagset(&hba->host->tag_set);
+ 		up_write(&hba->clk_scaling_lock);
+ 		mutex_unlock(&hba->wb_mutex);
+-		blk_mq_unquiesce_tagset(&hba->host->tag_set);
+ 		mutex_unlock(&hba->host->scan_mutex);
+ 		goto out;
+ 	}
+@@ -1477,9 +1480,9 @@ static int ufshcd_clock_scaling_prepare(struct ufs_hba *hba, u64 timeout_us)
+ 
+ static void ufshcd_clock_scaling_unprepare(struct ufs_hba *hba, int err)
+ {
++	blk_mq_unquiesce_tagset(&hba->host->tag_set);
+ 	up_write(&hba->clk_scaling_lock);
+ 	mutex_unlock(&hba->wb_mutex);
+-	blk_mq_unquiesce_tagset(&hba->host->tag_set);
+ 	mutex_unlock(&hba->host->scan_mutex);
+ 
+ 	/* Enable Write Booster if current gear requires it else disable it */
