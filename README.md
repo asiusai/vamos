@@ -137,6 +137,14 @@ time from a boot service. Openpilot still decides when to enter power save and
 retains its existing CPU policy. Install a system image containing this helper
 before updating to an Openpilot revision that delegates these operations to it.
 
+The external USB host uses comma's receiver-detection suspend sequencing and
+stuck-port recovery, adapted to Linux 6.18 in patches 0090-0092. Stock PHY
+transmit settings replace the experimental 6 dB override, which failed
+verified transfers on the stock Dragon USB-A port. These kernel changes alone
+did not fix Chestnut's reboot failures; the matching
+[Openpilot firmware](https://github.com/asiusai/openpilot/tree/master/openpilot/system/hardware/chestnut)
+adds autonomous bridge recovery. Normal reboot and shutdown are unchanged.
+
 ## Dragon NPU
 
 The Dragon image includes the pinned QCS6490 cDSP firmware userspace, FastRPC

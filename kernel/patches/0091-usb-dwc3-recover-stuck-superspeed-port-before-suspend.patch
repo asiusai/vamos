@@ -1,0 +1,141 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] usb: dwc3: recover stuck SuperSpeed ports before PHY suspend
+
+Adapt comma AGNOS kernel PR #130 (72f9324280eb) to Linux 6.18. Inspect
+the xHCI SuperSpeed port array rather than assuming a fixed PORTSC offset.
+Only controllers with the existing xhci-missing-cas-quirk property opt in.
+Use the normal root-hub resume and warm-reset path, not a controller reset.
+
+Link: https://github.com/commaai/agnos-kernel-sdm845/pull/130
+
+Signed-off-by: Asius <dev@asius.ai>
+---
+diff --git a/drivers/usb/dwc3/core.h b/drivers/usb/dwc3/core.h
+--- a/drivers/usb/dwc3/core.h
++++ b/drivers/usb/dwc3/core.h
+@@ -1642,9 +1642,12 @@
+ 
+ #if IS_ENABLED(CONFIG_USB_DWC3_HOST) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
+ int dwc3_host_init(struct dwc3 *dwc);
++int dwc3_host_check_suspend(struct dwc3 *dwc);
+ void dwc3_host_exit(struct dwc3 *dwc);
+ #else
+ static inline int dwc3_host_init(struct dwc3 *dwc)
++{ return 0; }
++static inline int dwc3_host_check_suspend(struct dwc3 *dwc)
+ { return 0; }
+ static inline void dwc3_host_exit(struct dwc3 *dwc)
+ { }
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -2456,6 +2456,12 @@
+ 			break;
+ 		}
+ 
++		if (PMSG_IS_AUTO(msg)) {
++			ret = dwc3_host_check_suspend(dwc);
++			if (ret)
++				return ret;
++		}
++
+ 		/* Let controller to suspend HSPHY before PHY driver suspends */
+ 		if (dwc->dis_u2_susphy_quirk ||
+ 		    dwc->dis_enblslpm_quirk) {
+diff --git a/drivers/usb/dwc3/host.c b/drivers/usb/dwc3/host.c
+--- a/drivers/usb/dwc3/host.c
++++ b/drivers/usb/dwc3/host.c
+@@ -13,9 +13,7 @@
+ #include <linux/usb.h>
+ #include <linux/usb/hcd.h>
+ 
+-#include "../host/xhci-port.h"
+-#include "../host/xhci-ext-caps.h"
+-#include "../host/xhci-caps.h"
++#include "../host/xhci.h"
+ #include "../host/xhci-plat.h"
+ #include "core.h"
+ 
+@@ -58,6 +56,51 @@
+ 	} else {
+ 		dev_err(dwc->dev, "xhci base reg invalid\n");
+ 	}
++}
++
++/* Keep PHY clocks available until a stuck SuperSpeed port can warm-reset. */
++int dwc3_host_check_suspend(struct dwc3 *dwc)
++{
++	struct usb_hcd *hcd;
++	struct xhci_hcd *xhci;
++	unsigned long flags;
++	bool stuck = false;
++	u32 portsc;
++	int i;
++
++	if (!dwc->xhci)
++		return 0;
++
++	hcd = platform_get_drvdata(dwc->xhci);
++	if (!hcd)
++		return 0;
++
++	xhci = hcd_to_xhci(hcd);
++	if (!(xhci->quirks & XHCI_MISSING_CAS) || !xhci->usb3_rhub.hcd)
++		return 0;
++
++	spin_lock_irqsave(&xhci->lock, flags);
++	for (i = 0; i < xhci->usb3_rhub.num_ports; i++) {
++		portsc = readl(xhci->usb3_rhub.ports[i]->addr);
++		if (portsc == ~0U || (portsc & PORT_CAS) ||
++		    ((portsc & PORT_CONNECT) && (portsc & PORT_PE)))
++			continue;
++
++		if ((portsc & PORT_PLS_MASK) == XDEV_POLLING ||
++		    (portsc & PORT_PLS_MASK) == XDEV_COMP_MODE) {
++			stuck = true;
++			break;
++		}
++	}
++	spin_unlock_irqrestore(&xhci->lock, flags);
++
++	if (!stuck)
++		return 0;
++
++	usb_hcd_resume_root_hub(xhci->usb3_rhub.hcd);
++	dev_info_ratelimited(dwc->dev,
++			     "SuperSpeed port stuck before suspend, resuming root hub\n");
++	return -EBUSY;
+ }
+ 
+ static void dwc3_xhci_plat_start(struct usb_hcd *hcd)
+diff --git a/drivers/usb/host/xhci-hub.c b/drivers/usb/host/xhci-hub.c
+--- a/drivers/usb/host/xhci-hub.c
++++ b/drivers/usb/host/xhci-hub.c
+@@ -1852,8 +1852,9 @@
+ 
+ 	portsc = readl(port->addr);
+ 
+-	/* if any of these are set we are not stuck */
+-	if (portsc & (PORT_CONNECT | PORT_CAS))
++	/* A connected but disabled link can still need a warm reset. */
++	if ((portsc & PORT_CAS) ||
++	    ((portsc & PORT_CONNECT) && (portsc & PORT_PE)))
+ 		return false;
+ 
+ 	if (((portsc & PORT_PLS_MASK) != XDEV_POLLING) &&
+diff --git a/Documentation/devicetree/bindings/usb/snps,dwc3-common.yaml b/Documentation/devicetree/bindings/usb/snps,dwc3-common.yaml
+--- a/Documentation/devicetree/bindings/usb/snps,dwc3-common.yaml
++++ b/Documentation/devicetree/bindings/usb/snps,dwc3-common.yaml
+@@ -28,6 +28,12 @@
+       $ref: usb-xhci.yaml#
+ 
+ properties:
++  xhci-missing-cas-quirk:
++    description:
++      Recover SuperSpeed ports stuck in Polling or Compliance without Cold
++      Attach Status before the host PHY is runtime suspended.
++    type: boolean
++
+   extcon:
+     maxItems: 1
+     deprecated: true
