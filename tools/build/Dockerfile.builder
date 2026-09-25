@@ -12,6 +12,7 @@ RUN apk add --no-cache \
     bison \
     build-base \
     ccache \
+    dtc \
     e2fsprogs \
     findutils \
     flex \
@@ -22,6 +23,7 @@ RUN apk add --no-cache \
     lz4-dev \
     openssl \
     openssl-dev \
+    patch \
     perl \
     python3 \
     util-linux-dev \

@@ -138,7 +138,7 @@ retains its existing CPU policy. Install a system image containing this helper
 before updating to an Openpilot revision that delegates these operations to it.
 
 The external USB host uses comma's receiver-detection suspend sequencing and
-stuck-port recovery, adapted to Linux 6.18 in patches 0090-0092. Stock PHY
+stuck-port recovery, adapted to Linux 7.2 in patch 0090 and the board DTS. Stock PHY
 transmit settings replace the experimental 6 dB override, which failed
 verified transfers on the stock Dragon USB-A port. These kernel changes alone
 did not fix Chestnut's reboot failures; the matching
@@ -308,6 +308,9 @@ Set `VAMOS_PUBLIC_URL` to the public R2 custom-domain origin, currently
 `https://updates.asius.ai`.
 
 ## Kernel Patches
+
+Linux 7.2.7, driver sources, retained patches and the upgrade audit are
+documented in [kernel/README.md](kernel/README.md).
 
 Patches in `kernel/patches/` are applied in order to the Linux kernel tree. They follow this naming convention:
 

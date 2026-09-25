@@ -5,7 +5,6 @@ set -euo pipefail
 # matched set. Keep these URLs and hashes pinned so a vamOS rebuild cannot pick
 # up an incompatible repository update.
 QCS_REPO=https://radxa-repo.github.io/qcs6490-noble/pool/main
-RADXA_REPO=https://radxa-repo.github.io/noble/pool/main
 
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
@@ -27,19 +26,19 @@ fetch qnn.deb \
   "$QCS_REPO/q/qcom-qairt/qcom-qnn-sdk-v68_0.1.0-2_all.deb" \
   306fd647b88902d170831980ca68a31d77d77923534e2070783fbeca132a6e54
 fetch fastrpc.deb \
-  "$QCS_REPO/f/fastrpc/fastrpc_1.0.7-2_arm64.deb" \
+  "https://github.com/radxa-pkg/fastrpc/releases/download/1.0.7-2/fastrpc_1.0.7-2_arm64.deb" \
   b14baf0800c934f4ca1d01f0ddded60c9c939fffff3817ec086eb2c2fc739b2c
 fetch libcdsprpc.deb \
-  "$QCS_REPO/f/fastrpc/libcdsprpc1_1.0.7-2_arm64.deb" \
+  "https://github.com/radxa-pkg/fastrpc/releases/download/1.0.7-2/libcdsprpc1_1.0.7-2_arm64.deb" \
   979b41e063674ed8e86ea4b7da40f15409758bb71731e9b7b28f9b0210ed9f3a
 fetch listener.deb \
-  "$QCS_REPO/f/fastrpc/libcdsp-default-listener1_1.0.7-2_arm64.deb" \
+  "https://github.com/radxa-pkg/fastrpc/releases/download/1.0.7-2/libcdsp-default-listener1_1.0.7-2_arm64.deb" \
   bacc3d6c0ed67ecac2a37038f1fde3314f319abefad8d7a48bb7ad5f8553cb1a
 fetch fastrpc-test.deb \
-  "$QCS_REPO/f/fastrpc/fastrpc-test_1.0.7-2_arm64.deb" \
+  "https://github.com/radxa-pkg/fastrpc/releases/download/1.0.7-2/fastrpc-test_1.0.7-2_arm64.deb" \
   884869fd8cd8b502c12f2d1f83f219c36800ac18eae091dfbf1dbf96bc8ae02a
 fetch firmware.deb \
-  "$RADXA_REPO/r/radxa-firmware/radxa-firmware-qcs6490_0.2.41_all.deb" \
+  "https://github.com/radxa-pkg/radxa-firmware/releases/download/0.2.41/radxa-firmware-qcs6490_0.2.41_all.deb" \
   8d53cc8da941bf748f3cd1fe7086da5fda73c680a6ffa96bfb77d95c9f1d9604
 
 for package in qnn fastrpc libcdsprpc listener fastrpc-test firmware; do

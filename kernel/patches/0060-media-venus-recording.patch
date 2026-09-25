@@ -1,0 +1,179 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] media: venus: retain realtime recording, scaling and EL1 recovery
+
+Rebased for Linux 7.2.7 from the existing VamOS patch series.
+See kernel/README.md for provenance, scope and removed patches.
+
+---
+diff --git a/drivers/media/platform/qcom/venus/core.c b/drivers/media/platform/qcom/venus/core.c
+index 243e342b0ae75336af17bf630712417e34caa96b..dcf9859e90d6ade999f85e052ae85a6d3e152f0d 100644
+--- a/drivers/media/platform/qcom/venus/core.c
++++ b/drivers/media/platform/qcom/venus/core.c
+@@ -24,6 +24,10 @@
+ #include <media/v4l2-mem2mem.h>
+ #include <media/v4l2-ioctl.h>
+ 
++#ifdef CONFIG_ARM64
++#include <asm/virt.h>
++#endif
++
+ #include "core.h"
+ #include "firmware.h"
+ #include "pm_helpers.h"
+@@ -383,6 +387,19 @@ static int venus_probe(struct platform_device *pdev)
+ 	struct venus_core *core;
+ 	int ret;
+ 
++#ifdef CONFIG_ARM64
++	/*
++	 * Stock Dragon UEFI can leave Linux under Gunyah at EL1. Starting
++	 * Venus in that mode resets the SoC before userspace can request the
++	 * firmware's EL2 override. Leave video unavailable for this boot so
++	 * the existing recovery service can complete that transition.
++	 */
++	if (of_machine_is_compatible("radxa,dragon-q6a") &&
++	    !is_hyp_mode_available())
++		return dev_err_probe(dev, -EOPNOTSUPP,
++				     "Dragon Venus requires an EL2 boot; skipping until firmware recovery\n");
++#endif
++
+ 	core = devm_kzalloc(dev, sizeof(*core), GFP_KERNEL);
+ 	if (!core)
+ 		return -ENOMEM;
+diff --git a/drivers/media/platform/qcom/venus/venc.c b/drivers/media/platform/qcom/venus/venc.c
+index 79acf7c1ec9a3a1b36f1a5e83af1f6c330802f08..53684aa622b28ef93265ec338fc2c99a438dfd70 100644
+--- a/drivers/media/platform/qcom/venus/venc.c
++++ b/drivers/media/platform/qcom/venus/venc.c
+@@ -200,8 +200,10 @@ venc_try_fmt_common(struct venus_inst *inst, struct v4l2_format *f)
+ 	pixmp->height = clamp(pixmp->height, frame_height_min(inst),
+ 			      frame_height_max(inst));
+ 
+-	pixmp->width = ALIGN(pixmp->width, 128);
+-	pixmp->height = ALIGN(pixmp->height, 32);
++	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
++		pixmp->width = ALIGN(pixmp->width, 128);
++		pixmp->height = ALIGN(pixmp->height, 32);
++	}
+ 
+ 	pixmp->width = ALIGN(pixmp->width, 2);
+ 	pixmp->height = ALIGN(pixmp->height, 2);
+@@ -273,6 +275,14 @@ static int venc_s_fmt(struct file *file, void *fh, struct v4l2_format *f)
+ 	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+ 		inst->out_width = format.fmt.pix_mp.width;
+ 		inst->out_height = format.fmt.pix_mp.height;
++		inst->crop.left = 0;
++		inst->crop.top = 0;
++		inst->crop.width = clamp(ALIGN(orig_pixmp.width, 2),
++					 frame_width_min(inst),
++					 frame_width_max(inst));
++		inst->crop.height = clamp(ALIGN(orig_pixmp.height, 2),
++					  frame_height_min(inst),
++					  frame_height_max(inst));
+ 		inst->colorspace = pixmp->colorspace;
+ 		inst->ycbcr_enc = pixmp->ycbcr_enc;
+ 		inst->quantization = pixmp->quantization;
+@@ -347,8 +357,8 @@ venc_g_selection(struct file *file, void *fh, struct v4l2_selection *s)
+ 		s->r.height = inst->out_height;
+ 		break;
+ 	case V4L2_SEL_TGT_CROP:
+-		s->r.width = inst->width;
+-		s->r.height = inst->height;
++		s->r.width = inst->crop.width;
++		s->r.height = inst->crop.height;
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -379,8 +389,8 @@ venc_s_selection(struct file *file, void *fh, struct v4l2_selection *s)
+ 	case V4L2_SEL_TGT_CROP:
+ 		s->r.top = 0;
+ 		s->r.left = 0;
+-		inst->width = s->r.width;
+-		inst->height = s->r.height;
++		inst->crop.width = s->r.width;
++		inst->crop.height = s->r.height;
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -679,6 +689,13 @@ static int venc_set_properties(struct venus_inst *inst)
+ 	if (ret)
+ 		return ret;
+ 
++	ptype = HFI_PROPERTY_CONFIG_REALTIME;
++	en.enable = 1;
++
++	ret = hfi_session_set_property(inst, ptype, &en);
++	if (ret)
++		return ret;
++
+ 	ptype = HFI_PROPERTY_CONFIG_FRAME_RATE;
+ 	frate.buffer_type = HFI_BUFFER_OUTPUT;
+ 	frate.framerate = inst->fps * (1 << 16);
+@@ -766,7 +783,8 @@ static int venc_set_properties(struct venus_inst *inst)
+ 		 * n > 1 - every n-th I-frame will be IDR frame
+ 		 */
+ 		ptype = HFI_PROPERTY_CONFIG_VENC_IDR_PERIOD;
+-		idrp.idr_period = 0;
++		idrp.idr_period = inst->fmt_cap->pixfmt == V4L2_PIX_FMT_H264 ?
++				    ctr->h264_i_period : 1;
+ 		ret = hfi_session_set_property(inst, ptype, &idrp);
+ 		if (ret)
+ 			return ret;
+@@ -1024,10 +1042,36 @@ static int venc_set_properties(struct venus_inst *inst)
+ 	return 0;
+ }
+ 
++static int venc_check_scaling(struct venus_inst *inst)
++{
++	u32 min_x = cap_min(inst, HFI_CAPABILITY_SCALE_X);
++	u32 max_x = cap_max(inst, HFI_CAPABILITY_SCALE_X);
++	u32 min_y = cap_min(inst, HFI_CAPABILITY_SCALE_Y);
++	u32 max_y = cap_max(inst, HFI_CAPABILITY_SCALE_Y);
++	u64 scaled_width = (u64)inst->width << 16;
++	u64 scaled_height = (u64)inst->height << 16;
++
++	if (!min_x || !max_x || !min_y || !max_y)
++		return (inst->crop.width == inst->width &&
++			inst->crop.height == inst->height) ? 0 : -EINVAL;
++
++	if (scaled_width < (u64)inst->crop.width * min_x ||
++	    scaled_width > (u64)inst->crop.width * max_x ||
++	    scaled_height < (u64)inst->crop.height * min_y ||
++	    scaled_height > (u64)inst->crop.height * max_y)
++		return -EINVAL;
++
++	return 0;
++}
++
+ static int venc_init_session(struct venus_inst *inst)
+ {
+ 	int ret;
+ 
++	ret = venc_check_scaling(inst);
++	if (ret)
++		return ret;
++
+ 	ret = venus_helper_session_init(inst);
+ 	if (ret == -EALREADY)
+ 		return 0;
+@@ -1039,8 +1083,8 @@ static int venc_init_session(struct venus_inst *inst)
+ 	if (ret)
+ 		goto deinit;
+ 
+-	ret = venus_helper_set_input_resolution(inst, inst->width,
+-						inst->height);
++	ret = venus_helper_set_input_resolution(inst, inst->crop.width,
++						inst->crop.height);
+ 	if (ret)
+ 		goto deinit;
+ 
+@@ -1453,6 +1497,10 @@ static void venc_inst_init(struct venus_inst *inst)
+ 	inst->height = ALIGN(720, 32);
+ 	inst->out_width = 1280;
+ 	inst->out_height = 720;
++	inst->crop.left = 0;
++	inst->crop.top = 0;
++	inst->crop.width = 1280;
++	inst->crop.height = 720;
+ 	inst->fps = 15;
+ 	inst->timeperframe.numerator = 1;
+ 	inst->timeperframe.denominator = 15;

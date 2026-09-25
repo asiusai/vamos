@@ -1,0 +1,185 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] platform: arm64: expose Asius SOM identity and boot LED trigger
+
+Rebased for Linux 7.2.7 from the existing VamOS patch series.
+See kernel/README.md for provenance, scope and removed patches.
+
+---
+diff --git a/drivers/leds/trigger/Kconfig b/drivers/leds/trigger/Kconfig
+index c11282a74b5ac3c9b6028cda12f79991a196adec..827d37e879f5154c1821ad9380b6513f41f884e1 100644
+--- a/drivers/leds/trigger/Kconfig
++++ b/drivers/leds/trigger/Kconfig
+@@ -19,6 +19,14 @@ config LEDS_TRIGGER_TIMER
+ 
+ 	  If unsure, say Y.
+ 
++config LEDS_TRIGGER_ASIUS_BOOT
++	bool "Asius synchronized camera boot trigger"
++	help
++	  Blink all camera-board status LEDs from one shared timer so every
++	  available board displays the same boot phase. LEDs using the
++	  "asius-boot" trigger blink blue every 500 milliseconds until
++	  userspace selects another trigger or sets brightness directly.
++
+ config LEDS_TRIGGER_ONESHOT
+ 	tristate "LED One-shot Trigger"
+ 	help
+diff --git a/drivers/leds/trigger/Makefile b/drivers/leds/trigger/Makefile
+index 3b3628889f6893acfb70d8806103d88b4872bdff..ee45f5cc8b4e8b97f2643aea453cf9df1028c7dc 100644
+--- a/drivers/leds/trigger/Makefile
++++ b/drivers/leds/trigger/Makefile
+@@ -1,5 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0
+ obj-$(CONFIG_LEDS_TRIGGER_TIMER)	+= ledtrig-timer.o
++obj-$(CONFIG_LEDS_TRIGGER_ASIUS_BOOT)	+= ledtrig-asius-boot.o
+ obj-$(CONFIG_LEDS_TRIGGER_ONESHOT)	+= ledtrig-oneshot.o
+ obj-$(CONFIG_LEDS_TRIGGER_DISK)		+= ledtrig-disk.o
+ obj-$(CONFIG_LEDS_TRIGGER_MTD)		+= ledtrig-mtd.o
+diff --git a/drivers/leds/trigger/ledtrig-asius-boot.c b/drivers/leds/trigger/ledtrig-asius-boot.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..9d9bb30d9cf23c3958c888db72165e642e6d1b03
+--- /dev/null
++++ b/drivers/leds/trigger/ledtrig-asius-boot.c
+@@ -0,0 +1,39 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Synchronized boot-status trigger for Asius camera-board LEDs.
++ */
++
++#include <linux/init.h>
++#include <linux/jiffies.h>
++#include <linux/leds.h>
++#include <linux/timer.h>
++
++#define ASIUS_BOOT_BLINK_MS	500
++#define ASIUS_BOOT_BRIGHTNESS	26
++
++static struct led_trigger *asius_boot_trigger;
++static struct timer_list asius_boot_timer;
++static enum led_brightness asius_boot_brightness = ASIUS_BOOT_BRIGHTNESS;
++
++static void asius_boot_blink(struct timer_list *timer)
++{
++	asius_boot_brightness = asius_boot_brightness == LED_OFF ?
++				ASIUS_BOOT_BRIGHTNESS : LED_OFF;
++	led_trigger_event(asius_boot_trigger, asius_boot_brightness);
++	mod_timer(timer, jiffies + msecs_to_jiffies(ASIUS_BOOT_BLINK_MS));
++}
++
++static int __init asius_boot_init(void)
++{
++	led_trigger_register_simple("asius-boot", &asius_boot_trigger);
++	if (!asius_boot_trigger)
++		return -ENOMEM;
++
++	led_trigger_event(asius_boot_trigger, asius_boot_brightness);
++	timer_setup(&asius_boot_timer, asius_boot_blink, 0);
++	mod_timer(&asius_boot_timer,
++		  jiffies + msecs_to_jiffies(ASIUS_BOOT_BLINK_MS));
++
++	return 0;
++}
++subsys_initcall(asius_boot_init);
+diff --git a/drivers/platform/arm64/Kconfig b/drivers/platform/arm64/Kconfig
+index e32e01b2a9bdd970d6f2b2bf6b051472c9a16103..b381cea7b9dba757d9f247c68e63458702a23b84 100644
+--- a/drivers/platform/arm64/Kconfig
++++ b/drivers/platform/arm64/Kconfig
+@@ -103,4 +103,12 @@ config EC_QCOM_HAMOA
+ 
+ 	  This driver currently supports Hamoa/Purwa/Glymur reference devices.
+ 
++config ASIUS_V0_SOM_ID
++	bool "Asius v0 SOM identity"
++	depends on ARCH_QCOM
++	default y
++	help
++	  Expose the Asius v0 model and the sysfs interface expected by
++	  openpilot hardware logging.
++
+ endif # ARM64_PLATFORM_DEVICES
+diff --git a/drivers/platform/arm64/Makefile b/drivers/platform/arm64/Makefile
+index 7681be4a46e94e7cb80e50bcc5b724cb0961357b..ce76bb1fd13b1401b7e1d8d92073ffb1797fff74 100644
+--- a/drivers/platform/arm64/Makefile
++++ b/drivers/platform/arm64/Makefile
+@@ -10,3 +10,4 @@ obj-$(CONFIG_EC_HUAWEI_GAOKUN)	+= huawei-gaokun-ec.o
+ obj-$(CONFIG_EC_LENOVO_YOGA_C630) += lenovo-yoga-c630.o
+ obj-$(CONFIG_EC_LENOVO_THINKPAD_T14S) += lenovo-thinkpad-t14s.o
+ obj-$(CONFIG_EC_QCOM_HAMOA) += qcom-hamoa-ec.o
++obj-$(CONFIG_ASIUS_V0_SOM_ID)	+= asius-v0-som-id.o
+diff --git a/drivers/platform/arm64/asius-v0-som-id.c b/drivers/platform/arm64/asius-v0-som-id.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..6c2c8e452e14e2c18cc3e14c13ff6bc06eb2abbb
+--- /dev/null
++++ b/drivers/platform/arm64/asius-v0-som-id.c
+@@ -0,0 +1,71 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <linux/device.h>
++#include <linux/err.h>
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/sysfs.h>
++
++static char asius_v0_model[] = "asius v0";
++static struct property asius_v0_model_property = {
++	.name = "model",
++	.length = sizeof(asius_v0_model),
++	.value = asius_v0_model,
++};
++
++static ssize_t som_id_show(struct device *dev,
++			   struct device_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "0\n");
++}
++static DEVICE_ATTR_RO(som_id);
++
++static int __init asius_v0_som_id_init(void)
++{
++	struct platform_device *som_id;
++	struct platform_device *vendor;
++	int ret;
++
++	if (!of_machine_is_compatible("radxa,dragon-q6a"))
++		return 0;
++
++	ret = of_update_property(of_root, &asius_v0_model_property);
++	if (ret)
++		return ret;
++
++	vendor = platform_device_register_simple("vendor", PLATFORM_DEVID_NONE,
++						 NULL, 0);
++	if (IS_ERR(vendor))
++		return PTR_ERR(vendor);
++
++	som_id = platform_device_alloc("vendor:gpio-som-id",
++				       PLATFORM_DEVID_NONE);
++	if (!som_id) {
++		ret = -ENOMEM;
++		goto unregister_vendor;
++	}
++	som_id->dev.parent = &vendor->dev;
++
++	ret = platform_device_add(som_id);
++	if (ret) {
++		platform_device_put(som_id);
++		goto unregister_vendor;
++	}
++
++	ret = device_create_file(&som_id->dev, &dev_attr_som_id);
++	if (ret) {
++		platform_device_unregister(som_id);
++		goto unregister_vendor;
++	}
++
++	return 0;
++
++unregister_vendor:
++	platform_device_unregister(vendor);
++	return ret;
++}
++device_initcall(asius_v0_som_id_init);
++
++MODULE_DESCRIPTION("Asius v0 hardware identity");
++MODULE_LICENSE("GPL");

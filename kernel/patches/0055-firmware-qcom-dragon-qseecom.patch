@@ -1,0 +1,19 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] firmware: qcom: allow QSEECOM on Dragon Q6A
+
+Rebased for Linux 7.2.7 from the existing VamOS patch series.
+See kernel/README.md for provenance, scope and removed patches.
+
+---
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index 26bf87247afa109e1ac3a2b2b851ae0e29476a58..ee07d28b229107408807798ecbe6f9dd4654950c 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -2316,6 +2316,7 @@ static const struct of_device_id qcom_scm_qseecom_allowlist[] __maybe_unused = {
+ 	{ .compatible = "qcom,mahua-crd" },
+ 	{ .compatible = "qcom,purwa-iot-evk" },
+ 	{ .compatible = "qcom,sc8180x-primus" },
++	{ .compatible = "radxa,dragon-q6a" },
+ 	{ .compatible = "qcom,x1e001de-devkit" },
+ 	{ .compatible = "qcom,x1e80100-crd" },
+ 	{ .compatible = "qcom,x1e80100-qcp" },

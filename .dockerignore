@@ -6,7 +6,6 @@ build
 firmware
 kernel
 !kernel/firmware
-!kernel/modules
 output
 
 **/.DS_Store

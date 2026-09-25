@@ -12,3 +12,6 @@ kernel/firmware/**/*.bin filter=lfs diff=lfs merge=lfs -text
 kernel/firmware/**/*.tlv filter=lfs diff=lfs merge=lfs -text
 
 firmware-dragon/** filter=lfs diff=lfs merge=lfs -text
+
+# Unified-diff context carries a leading space; check the applied source instead.
+kernel/patches/*.patch whitespace=-blank-at-eol,-space-before-tab

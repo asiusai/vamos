@@ -1,0 +1,33 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] drm: msm: support privileged A6xx compute submissions
+
+Rebased for Linux 7.2.7 from the existing VamOS patch series.
+See kernel/README.md for provenance, scope and removed patches.
+
+---
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+index e293b4ca808a468ebacaef233fc077c6bad32e53..33c31a968f6ca9a6b356e27c0004e0b35ac0bd2a 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+@@ -391,11 +391,21 @@ static void a6xx_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit)
+ 				break;
+ 			fallthrough;
+ 		case MSM_SUBMIT_CMD_BUF:
++			if (IS_ENABLED(CONFIG_DRM_MSM_GPU_SUDO) && submit->in_rb) {
++				OUT_PKT7(ring, CP_SET_PROTECTED_MODE, 1);
++				OUT_RING(ring, 0);
++			}
++
+ 			OUT_PKT7(ring, CP_INDIRECT_BUFFER, 3);
+ 			OUT_RING(ring, lower_32_bits(submit->cmd[i].iova));
+ 			OUT_RING(ring, upper_32_bits(submit->cmd[i].iova));
+ 			OUT_RING(ring, A5XX_CP_INDIRECT_BUFFER_2_IB_SIZE(submit->cmd[i].size));
+ 			ibs++;
++
++			if (IS_ENABLED(CONFIG_DRM_MSM_GPU_SUDO) && submit->in_rb) {
++				OUT_PKT7(ring, CP_SET_PROTECTED_MODE, 1);
++				OUT_RING(ring, 1);
++			}
+ 			break;
+ 		}
+ 

@@ -8,11 +8,16 @@ KERNEL_DIR="$DIR/kernel/linux"
 PATCHES_DIR="$DIR/kernel/patches"
 KBUILD_OUT="$DIR/build/kernel-out"
 OUT_DIR="$DIR/build"
+BUILD_JOBS="${VAMOS_BUILD_JOBS:-}"
+if [[ -n "$BUILD_JOBS" ]] && ! [[ "$BUILD_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "VAMOS_BUILD_JOBS must be a positive integer" >&2
+  exit 1
+fi
 
 BASE_DEFCONFIG="defconfig"
 CONFIG_FRAGMENT="$DIR/kernel/configs/vamos.config"
 
-# Dragon Q6A DTB, added to the kernel tree by the Dragon patch series.
+# Mainline Dragon Q6A DTB with the Asius board and firmware configuration.
 DTB_TARGET="qcom/qcs6490-radxa-dragon-q6a.dtb"
 
 HOST_OS="$(uname)"
@@ -66,6 +71,9 @@ kernel_workspace_ready() {
 if [ ! -f "$KERNEL_DIR/Makefile" ]; then
   "$DIR/vamos" setup
 fi
+if [ ! -f "$DIR/kernel/aic8800/debian/patches/series" ]; then
+  git -C "$DIR" submodule update --init kernel/aic8800
+fi
 
 KERNEL_REV="$(git -C "$KERNEL_DIR" rev-parse HEAD)"
 
@@ -77,6 +85,11 @@ docker build -f tools/build/Dockerfile.builder -t vamos-builder "$DIR" \
   --build-arg GID="$(id -g)"
 
 echo "Starting vamos-builder container"
+GIT_MOUNT_ARGS=()
+if [ -f "$DIR/.git" ]; then
+  GIT_COMMON_DIR="$(git -C "$DIR" rev-parse --path-format=absolute --git-common-dir)"
+  GIT_MOUNT_ARGS=(-v "$GIT_COMMON_DIR":"$GIT_COMMON_DIR")
+fi
 if [ "$HOST_OS" = "Darwin" ]; then
   if ! kernel_workspace_ready; then
     echo "Kernel workspace volume is missing, uninitialized, or out of date; reseeding"
@@ -88,16 +101,12 @@ if [ "$HOST_OS" = "Darwin" ]; then
     --ulimit nofile=65536:65536 \
     -u "$(id -u):$(id -g)" \
     -v "$DIR":"$DIR" \
+    "${GIT_MOUNT_ARGS[@]}" \
     -v "$KERNEL_LINUX_VOLUME:$KERNEL_DIR" \
     -v "$CCACHE_VOLUME:/ccache" \
     -w "$DIR" \
     vamos-builder)
 else
-  GIT_MOUNT_ARGS=()
-  if [ -f "$DIR/.git" ]; then
-    GIT_COMMON_DIR="$(git -C "$DIR" rev-parse --path-format=absolute --git-common-dir)"
-    GIT_MOUNT_ARGS=(-v "$GIT_COMMON_DIR":"$GIT_COMMON_DIR")
-  fi
   CONTAINER_ID=$(docker run -d \
     --ulimit nofile=65536:65536 \
     -u "$(id -u):$(id -g)" \
@@ -124,8 +133,8 @@ apply_patches() {
     echo "-- Applying patches --"
     for patch in "$PATCHES_DIR"/*.patch; do
       echo "Applying $(basename "$patch")"
-      git apply --check --whitespace=nowarn "$patch"
-      git apply --whitespace=nowarn "$patch"
+      git apply --check --whitespace=error-all "$patch"
+      git apply --whitespace=error-all "$patch"
     done
   fi
 }
@@ -154,7 +163,6 @@ build_kernel() {
 
   export KBUILD_BUILD_USER="vamos"
   export KBUILD_BUILD_HOST="vamos"
-  export KCFLAGS="-w"
   export LOCALVERSION="-vamos"
 
   cd "$KERNEL_DIR"
@@ -170,13 +178,17 @@ build_kernel() {
   echo "CONFIG_EXTRA_FIRMWARE_DIR=\"$DIR/kernel/firmware\"" >> "$KBUILD_OUT/.config"
   make "${make_args[@]}" olddefconfig
 
-  echo "-- Building kernel with $(nproc) cores --"
-  make -j"$(nproc)" "${make_args[@]}" Image Image.gz vmlinuz.efi "$DTB_TARGET"
+  local jobs="${BUILD_JOBS:-$(nproc)}"
+  echo "-- Building kernel with $jobs jobs --"
+  make -j"$jobs" "${make_args[@]}" Image Image.gz vmlinuz.efi "$DTB_TARGET"
+  python3 "$DIR/tools/build/check_kernel_dtb.py" "$KBUILD_OUT/arch/arm64/boot/dts/$DTB_TARGET"
 
   echo "-- Building and installing kernel modules --"
-  make -j"$(nproc)" "${make_args[@]}" modules
+  make -j"$jobs" "${make_args[@]}" modules
   rm -rf "$OUT_DIR/modules_install"
   make "${make_args[@]}" INSTALL_MOD_PATH="$OUT_DIR/modules_install" modules_install
+
+  VAMOS_BUILD_JOBS="$jobs" bash "$DIR/tools/build/build_aic8800.sh"
 
   mkdir -p "$OUT_DIR"
   cp "$KBUILD_OUT/arch/arm64/boot/Image" "$OUT_DIR/Image"
@@ -217,6 +229,7 @@ KERNEL_DIR='$KERNEL_DIR'
 PATCHES_DIR='$PATCHES_DIR'
 KBUILD_OUT='$KBUILD_OUT'
 OUT_DIR='$OUT_DIR'
+BUILD_JOBS='$BUILD_JOBS'
 
 git -C / config --global --add safe.directory '$DIR'
 git -C / config --global --add safe.directory '$KERNEL_DIR'

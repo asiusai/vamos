@@ -1,0 +1,38 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] ASoC: qcom: keep Panda MI2S links off the SoundWire path
+
+Rebased for Linux 7.2.7 from the existing VamOS patch series.
+See kernel/README.md for provenance, scope and removed patches.
+
+---
+diff --git a/sound/soc/qcom/sc8280xp.c b/sound/soc/qcom/sc8280xp.c
+index 98b15a527e37e1b41ca59d68ba5aa21361dc12d0..b80ca2690c88f13cab6c7ed5330f8852bb2506f6 100644
+--- a/sound/soc/qcom/sc8280xp.c
++++ b/sound/soc/qcom/sc8280xp.c
+@@ -35,7 +35,7 @@ static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
+ 	case PRIMARY_MI2S_RX...QUATERNARY_MI2S_TX:
+ 	case QUINARY_MI2S_RX...QUINARY_MI2S_TX:
+ 		snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_BP_FP);
+-		break;
++		return 0;
+ 	case WSA_CODEC_DMA_RX_0:
+ 	case WSA_CODEC_DMA_RX_1:
+ 		/*
+@@ -130,7 +130,16 @@ static void sc8280xp_add_be_ops(struct snd_soc_card *card)
+ 		if (link->no_pcm == 1) {
+ 			link->init = sc8280xp_snd_init;
+ 			link->be_hw_params_fixup = sc8280xp_be_hw_params_fixup;
+-			link->ops = &sc8280xp_be_ops;
++
++			switch (link->id) {
++			case PRIMARY_MI2S_RX...QUATERNARY_MI2S_TX:
++			case QUINARY_MI2S_RX...QUINARY_MI2S_TX:
++				/* MI2S does not use a SoundWire stream runtime. */
++				break;
++			default:
++				link->ops = &sc8280xp_be_ops;
++				break;
++			}
+ 		}
+ 	}
+ }

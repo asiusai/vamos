@@ -1,0 +1,379 @@
+From: Stephan Gerhold <stephan.gerhold@linaro.org>
+Subject: [PATCH] remoteproc: qcom: attach boot firmware and restart when available
+
+Rebased for Linux 7.2.7 from the existing VamOS patch series.
+See kernel/README.md for provenance, scope and removed patches.
+
+---
+diff --git a/drivers/remoteproc/qcom_q6v5.c b/drivers/remoteproc/qcom_q6v5.c
+index 241478ea29782a1cb0ad48a165798f82fccb7953..c1af6c4dd7ccef6d65cac35f1fb0cf798a7cadc7 100644
+--- a/drivers/remoteproc/qcom_q6v5.c
++++ b/drivers/remoteproc/qcom_q6v5.c
+@@ -202,8 +202,9 @@ int qcom_q6v5_request_stop(struct qcom_q6v5 *q6v5, struct qcom_sysmon *sysmon)
+ 
+ 	q6v5->running = false;
+ 
+-	/* A watchdog/fatal IRQ clears running; logical crashes still need a stop. */
+-	if (!was_running || qcom_sysmon_shutdown_acked(sysmon))
++	/* Boot firmware may have started a detached remote without setting running. */
++	if ((!was_running && q6v5->rproc->state != RPROC_DETACHED) ||
++	    qcom_sysmon_shutdown_acked(sysmon))
+ 		return 0;
+ 
+ 	qcom_smem_state_update_bits(q6v5->state,
+@@ -235,6 +236,35 @@ unsigned long qcom_q6v5_panic(struct qcom_q6v5 *q6v5)
+ }
+ EXPORT_SYMBOL_GPL(qcom_q6v5_panic);
+ 
++/**
++ * qcom_q6v5_read_smp2p_state() - check the initial state during boot using SMP2P
++ * @q6v5:	reference to qcom_q6v5 context
++ *
++ * Read the current state of the SMP2P interrupts and attempt to determine if
++ * the remoteproc is already running. If yes, the remoteproc state is set to
++ * RPROC_DETACHED. Drivers can use this to add support for attaching to
++ * remoteprocs during boot.
++ *
++ * There is a small chance for false-positives, so drivers should combine this
++ * with device-specific status information if possible.
++ */
++void qcom_q6v5_read_smp2p_state(struct qcom_q6v5 *q6v5)
++{
++	bool handover = false;
++	bool ready = false;
++	bool fatal = false;
++	bool stop = false;
++
++	irq_get_irqchip_state(q6v5->handover_irq, IRQCHIP_STATE_LINE_LEVEL, &handover);
++	irq_get_irqchip_state(q6v5->ready_irq, IRQCHIP_STATE_LINE_LEVEL, &ready);
++	irq_get_irqchip_state(q6v5->fatal_irq, IRQCHIP_STATE_LINE_LEVEL, &fatal);
++	irq_get_irqchip_state(q6v5->stop_irq, IRQCHIP_STATE_LINE_LEVEL, &stop);
++
++	if (ready && handover && !stop && !fatal)
++		q6v5->rproc->state = RPROC_DETACHED;
++}
++EXPORT_SYMBOL_GPL(qcom_q6v5_read_smp2p_state);
++
+ /**
+  * qcom_q6v5_init() - initializer of the q6v5 common struct
+  * @q6v5:	handle to be initialized
+diff --git a/drivers/remoteproc/qcom_q6v5.h b/drivers/remoteproc/qcom_q6v5.h
+index 5a859c41896e99d947e70e8d01c829d189cb0247..59970adb04b14f50218f0d37b9062c44ab2cc8de 100644
+--- a/drivers/remoteproc/qcom_q6v5.h
++++ b/drivers/remoteproc/qcom_q6v5.h
+@@ -47,6 +47,8 @@ int qcom_q6v5_init(struct qcom_q6v5 *q6v5, struct platform_device *pdev,
+ 		   void (*handover)(struct qcom_q6v5 *q6v5));
+ void qcom_q6v5_deinit(struct qcom_q6v5 *q6v5);
+ 
++void qcom_q6v5_read_smp2p_state(struct qcom_q6v5 *q6v5);
++
+ int qcom_q6v5_prepare(struct qcom_q6v5 *q6v5);
+ int qcom_q6v5_unprepare(struct qcom_q6v5 *q6v5);
+ int qcom_q6v5_request_stop(struct qcom_q6v5 *q6v5, struct qcom_sysmon *sysmon);
+diff --git a/drivers/remoteproc/qcom_q6v5_pas.c b/drivers/remoteproc/qcom_q6v5_pas.c
+index cb3e51d6f7cecbe5c2f5b72059001efab047f089..f0041610c921954ef0691709412152f3282f6fc4 100644
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -225,10 +225,13 @@ static int qcom_pas_load(struct rproc *rproc, const struct firmware *fw)
+ 	/* Store firmware handle to be used in qcom_pas_start() */
+ 	pas->firmware = fw;
+ 
+-	if (pas->lite_pas_id)
+-		qcom_scm_pas_shutdown(pas->lite_pas_id);
+-	if (pas->lite_dtb_pas_id)
+-		qcom_scm_pas_shutdown(pas->lite_dtb_pas_id);
++	/*
++	 * We don't support loading the "lite" firmware, so we don't need to
++	 * keep trying to shut it down. If it was running, it should have
++	 * already been stopped by adsp_stop().
++	 */
++	pas->lite_pas_id = 0;
++	pas->lite_dtb_pas_id = 0;
+ 
+ 	if (pas->dtb_pas_id) {
+ 		ret = request_firmware(&pas->dtb_firmware, pas->dtb_firmware_name, pas->dev);
+@@ -391,6 +394,28 @@ static void qcom_pas_handover(struct qcom_q6v5 *q6v5)
+ 	qcom_pas_pds_disable(pas, pas->proxy_pds, pas->proxy_pd_count);
+ }
+ 
++static int qcom_pas_shutdown(int pas_id, int lite_pas_id)
++{
++	int ret, lite_ret = -ENODEV;
++
++	/*
++	 * We don't know if the boot firmware started the "full" or "lite"
++	 * firmware, so we don't know if we need to shutdown the lite_pas_id or
++	 * the normal pas_id. Unfortunately, the return codes of the SCM calls
++	 * are also not helpful to figure that out. Since shutting down a
++	 * stopped remoteproc is a no-op, we just shutdown both and if one of
++	 * the calls succeeds, we assume it's okay.
++	 */
++	if (lite_pas_id)
++		lite_ret = qcom_scm_pas_shutdown(lite_pas_id);
++
++	ret = qcom_scm_pas_shutdown(pas_id);
++	if (ret && lite_ret)
++		return ret;
++
++	return 0;
++}
++
+ static int qcom_pas_stop(struct rproc *rproc)
+ {
+ 	struct qcom_pas *pas = rproc->priv;
+@@ -401,7 +426,7 @@ static int qcom_pas_stop(struct rproc *rproc)
+ 	if (ret == -ETIMEDOUT)
+ 		dev_err(pas->dev, "timed out on wait\n");
+ 
+-	ret = qcom_scm_pas_shutdown(pas->pas_id);
++	ret = qcom_pas_shutdown(pas->pas_id, pas->lite_pas_id);
+ 	if (ret && pas->decrypt_shutdown)
+ 		ret = qcom_pas_shutdown_poll_decrypt(pas);
+ 
+@@ -409,7 +434,7 @@ static int qcom_pas_stop(struct rproc *rproc)
+ 		dev_err(pas->dev, "failed to shutdown: %d\n", ret);
+ 
+ 	if (pas->dtb_pas_id) {
+-		ret = qcom_scm_pas_shutdown(pas->dtb_pas_id);
++		ret = qcom_pas_shutdown(pas->dtb_pas_id, pas->lite_dtb_pas_id);
+ 		if (ret)
+ 			dev_err(pas->dev, "failed to shutdown dtb: %d\n", ret);
+ 
+@@ -418,9 +443,11 @@ static int qcom_pas_stop(struct rproc *rproc)
+ 
+ 	qcom_pas_unmap_carveout(rproc, pas->mem_phys, pas->mem_size);
+ 
+-	handover = qcom_q6v5_unprepare(&pas->q6v5);
+-	if (handover)
+-		qcom_pas_handover(&pas->q6v5);
++	if (rproc->state != RPROC_DETACHED) {
++		handover = qcom_q6v5_unprepare(&pas->q6v5);
++		if (handover)
++			qcom_pas_handover(&pas->q6v5);
++	}
+ 
+ 	if (pas->smem_host_id)
+ 		ret = qcom_smem_bust_hwspin_lock_by_host(pas->smem_host_id);
+@@ -589,6 +616,13 @@ static const struct rproc_ops qcom_pas_minidump_ops = {
+ 	.attach = qcom_pas_attach,
+ };
+ 
++static const struct rproc_ops qcom_pas_ops_no_reset = {
++	.attach = qcom_pas_attach,
++	.da_to_va = qcom_pas_da_to_va,
++	.stop = qcom_pas_stop,
++	.panic = qcom_pas_panic,
++};
++
+ static int qcom_pas_init_clock(struct qcom_pas *pas)
+ {
+ 	pas->xo = devm_clk_get(pas->dev, "xo");
+@@ -824,6 +858,9 @@ static int qcom_pas_probe(struct platform_device *pdev)
+ 	if (desc->minidump_id)
+ 		ops = &qcom_pas_minidump_ops;
+ 
++	if (device_property_read_bool(&pdev->dev, "qcom,broken-reset"))
++		ops = &qcom_pas_ops_no_reset;
++
+ 	rproc = devm_rproc_alloc(&pdev->dev, desc->sysmon_name, ops, fw_name, sizeof(*pas));
+ 
+ 	if (!rproc) {
+@@ -833,6 +870,7 @@ static int qcom_pas_probe(struct platform_device *pdev)
+ 
+ 	rproc->has_iommu = of_property_present(pdev->dev.of_node, "iommus");
+ 	rproc->auto_boot = desc->auto_boot;
++	rproc->restart_detached = desc->auto_boot && ops->start;
+ 	rproc_coredump_set_elf_info(rproc, ELFCLASS32, EM_NONE);
+ 
+ 	pas = rproc->priv;
+@@ -885,6 +923,21 @@ static int qcom_pas_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		goto detach_proxy_pds;
+ 
++	/*
++	 * Unfortunately, the PAS interface does not provide a reliable way to
++	 * check if a certain pas_id is currently running. Reading the smp2p
++	 * state is the best we can do to check if the remoteproc is already
++	 * running during boot.
++	 */
++	qcom_q6v5_read_smp2p_state(&pas->q6v5);
++
++	if (rproc->state == RPROC_OFFLINE && !ops->start) {
++		dev_err(&pdev->dev, "reset broken and remoteproc not running during boot, exiting\n");
++		/* Release all resources, but return 0 so we don't block sync_state() */
++		ret = 0;
++		goto deinit_q6v5;
++	}
++
+ 	qcom_add_glink_subdev(rproc, &pas->glink_subdev, desc->ssr_name);
+ 	qcom_add_smd_subdev(rproc, &pas->smd_subdev);
+ 	qcom_add_pdm_subdev(rproc, &pas->pdm_subdev);
+@@ -930,6 +983,7 @@ static int qcom_pas_probe(struct platform_device *pdev)
+ 	qcom_remove_pdm_subdev(rproc, &pas->pdm_subdev);
+ 	qcom_remove_smd_subdev(rproc, &pas->smd_subdev);
+ 	qcom_remove_glink_subdev(rproc, &pas->glink_subdev);
++deinit_q6v5:
+ 	qcom_q6v5_deinit(&pas->q6v5);
+ detach_proxy_pds:
+ 	qcom_pas_pds_detach(pas, pas->proxy_pds, pas->proxy_pd_count);
+@@ -937,6 +991,7 @@ static int qcom_pas_probe(struct platform_device *pdev)
+ 	qcom_pas_unassign_memory_region(pas);
+ free_rproc:
+ 	device_init_wakeup(pas->dev, false);
++	pas->rproc = NULL;
+ 
+ 	return ret;
+ }
+@@ -945,6 +1000,9 @@ static void qcom_pas_remove(struct platform_device *pdev)
+ {
+ 	struct qcom_pas *pas = platform_get_drvdata(pdev);
+ 
++	if (!pas->rproc)
++		return;
++
+ 	rproc_del(pas->rproc);
+ 
+ 	qcom_q6v5_deinit(&pas->q6v5);
+diff --git a/drivers/remoteproc/remoteproc_core.c b/drivers/remoteproc/remoteproc_core.c
+index 527996e8ecdaaa840738b74b911a1192d769045c..56bc20df8b9638522e563fae8eb24454de7d4d56 100644
+--- a/drivers/remoteproc/remoteproc_core.c
++++ b/drivers/remoteproc/remoteproc_core.c
+@@ -1422,9 +1422,12 @@ static int rproc_fw_boot(struct rproc *rproc, const struct firmware *fw)
+ 	}
+ 
+ 	ret = rproc_start(rproc, fw);
+-	if (ret)
+-		goto clean_up_resources;
+-
++	if (ret) {
++		/* Some Qualcomm firmware needs a second start after handoff. */
++		ret = rproc_start(rproc, fw);
++		if (ret)
++			goto clean_up_resources;
++	}
+ 	return 0;
+ 
+ clean_up_resources:
+@@ -1679,7 +1682,8 @@ static int rproc_trigger_auto_boot(struct rproc *rproc)
+ {
+ 	int ret;
+ 
+-	if (rproc->state == RPROC_DETACHED) {
++	if (rproc->state == RPROC_DETACHED &&
++	    !rproc->restart_detached) {
+ 		schedule_work(&rproc->attach_work);
+ 		return 0;
+ 	}
+@@ -1706,8 +1710,9 @@ static int rproc_stop(struct rproc *rproc, bool crashed)
+ 	if (!rproc->ops->stop)
+ 		return -EINVAL;
+ 
+-	/* Stop any subdevices for the remote processor */
+-	rproc_stop_subdevices(rproc, crashed);
++	/* Stop any subdevices for the remote processor if it was attached */
++	if (rproc->state != RPROC_DETACHED)
++		rproc_stop_subdevices(rproc, crashed);
+ 
+ 	/* the installed resource table is no longer accessible */
+ 	ret = rproc_reset_rsc_table_on_stop(rproc);
+@@ -1724,7 +1729,8 @@ static int rproc_stop(struct rproc *rproc, bool crashed)
+ 		return ret;
+ 	}
+ 
+-	rproc_unprepare_subdevices(rproc);
++	if (rproc->state != RPROC_DETACHED)
++		rproc_unprepare_subdevices(rproc);
+ 
+ 	rproc->state = RPROC_OFFLINE;
+ 
+@@ -1911,9 +1917,9 @@ static void rproc_crash_handler_work(struct work_struct *work)
+  */
+ int rproc_boot(struct rproc *rproc)
+ {
+-	const struct firmware *firmware_p;
++	const struct firmware *firmware_p = NULL;
+ 	struct device *dev;
+-	int ret;
++	int ret, fw_ret = 1;
+ 
+ 	if (!rproc) {
+ 		pr_err("invalid rproc handle\n");
+@@ -1940,6 +1946,19 @@ int rproc_boot(struct rproc *rproc)
+ 		goto unlock_mutex;
+ 	}
+ 
++	/* Restart boot firmware only when a replacement image is available. */
++	if (rproc->restart_detached &&
++	    rproc->state == RPROC_DETACHED) {
++		fw_ret = request_firmware(&firmware_p, rproc->firmware, dev);
++		if (fw_ret == 0) {
++			dev_info(dev, "restarting %s with new firmware\n", rproc->name);
++
++			ret = rproc_stop(rproc, false);
++			if (ret)
++				goto downref_rproc;
++		}
++	}
++
+ 	if (rproc->state == RPROC_DETACHED) {
+ 		dev_info(dev, "attaching to %s\n", rproc->name);
+ 
+@@ -1947,19 +1966,20 @@ int rproc_boot(struct rproc *rproc)
+ 	} else {
+ 		dev_info(dev, "powering up %s\n", rproc->name);
+ 
+-		/* load firmware */
+-		ret = request_firmware(&firmware_p, rproc->firmware, dev);
+-		if (ret < 0) {
+-			dev_err(dev, "request_firmware failed: %d\n", ret);
++		/* load firmware (if not already happened above) */
++		if (fw_ret == 1)
++			fw_ret = request_firmware(&firmware_p, rproc->firmware, dev);
++		if (fw_ret < 0) {
++			dev_err(dev, "request_firmware failed: %d\n", fw_ret);
++			ret = fw_ret;
+ 			goto downref_rproc;
+ 		}
+ 
+ 		ret = rproc_fw_boot(rproc, firmware_p);
+-
+-		release_firmware(firmware_p);
+ 	}
+ 
+ downref_rproc:
++	release_firmware(firmware_p);
+ 	if (ret)
+ 		atomic_dec(&rproc->power);
+ unlock_mutex:
+@@ -2270,6 +2290,10 @@ static int rproc_validate(struct rproc *rproc)
+ 		return -EINVAL;
+ 	}
+ 
++	if (rproc->restart_detached &&
++	    (!rproc->ops->stop || !rproc->ops->start || !rproc->ops->attach))
++		return -EINVAL;
++
+ 	return 0;
+ }
+ 
+diff --git a/include/linux/remoteproc.h b/include/linux/remoteproc.h
+index de98462d58889232480e1546ed77afed366bb0ee..ae11f9f995baa7aeeb35c27c1f466b4bae21ee5e 100644
+--- a/include/linux/remoteproc.h
++++ b/include/linux/remoteproc.h
+@@ -272,6 +272,8 @@ enum rproc_features {
+  * @table_sz: size of @cached_table
+  * @has_iommu: flag to indicate if remote processor is behind an MMU
+  * @auto_boot: flag to indicate if remote processor should be auto-started
++ * @restart_detached: replace boot firmware when a new image is available;
++ *		    requires stop() to handle the detached state
+  * @sysfs_read_only: flag to make remoteproc sysfs files read only
+  * @dump_segments: list of segments in the firmware
+  * @nb_vdev: number of vdev currently handled by rproc
+@@ -316,6 +318,7 @@ struct rproc {
+ 	size_t table_sz;
+ 	bool has_iommu;
+ 	bool auto_boot;
++	bool restart_detached;
+ 	bool sysfs_read_only;
+ 	struct list_head dump_segments;
+ 	int nb_vdev;

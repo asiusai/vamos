@@ -1,0 +1,43 @@
+From: Xilin Wu <sophon@radxa.com>
+Subject: [PATCH] ufs: qcom: detect removable UFS and report temperature
+
+Rebased for Linux 7.2.7 from the existing VamOS patch series.
+See kernel/README.md for provenance, scope and removed patches.
+
+---
+diff --git a/drivers/ufs/host/ufs-qcom.c b/drivers/ufs/host/ufs-qcom.c
+index 291c4344876481461ab958f3048db5405bbead62..120ad7c3b0b3299509c19ba2565b2ab40e2ec982 100644
+--- a/drivers/ufs/host/ufs-qcom.c
++++ b/drivers/ufs/host/ufs-qcom.c
+@@ -1405,6 +1405,7 @@ static void ufs_qcom_set_caps(struct ufs_hba *hba)
+ 	hba->caps |= UFSHCD_CAP_WB_EN;
+ 	hba->caps |= UFSHCD_CAP_AGGR_POWER_COLLAPSE;
+ 	hba->caps |= UFSHCD_CAP_RPM_AUTOSUSPEND;
++	hba->caps |= UFSHCD_CAP_TEMP_NOTIF;
+ 
+ 	if (host->hw_ver.major >= 0x7)
+ 		hba->caps |= UFSHCD_CAP_TX_EQUALIZATION;
+@@ -2965,12 +2966,23 @@ static int ufs_qcom_probe(struct platform_device *pdev)
+ 	struct device *dev = &pdev->dev;
+ 	const struct ufs_hba_variant_ops *vops;
+ 	const struct ufs_qcom_drvdata *drvdata = device_get_match_data(dev);
++	struct gpio_desc *cd_gpio;
+ 
+ 	if (drvdata && drvdata->vops)
+ 		vops = drvdata->vops;
+ 	else
+ 		vops = &ufs_hba_qcom_vops;
+ 
++	cd_gpio = devm_gpiod_get_optional(dev, "cd", GPIOD_IN);
++	if (IS_ERR(cd_gpio))
++		return dev_err_probe(dev, PTR_ERR(cd_gpio),
++				     "failed to get card-detect GPIO\n");
++
++	if (cd_gpio && !gpiod_get_value_cansleep(cd_gpio)) {
++		dev_info(dev, "UFS module not present, skipping initialization\n");
++		return 0;
++	}
++
+ 	/* Perform generic probe */
+ 	err = ufshcd_pltfrm_init(pdev, vops);
+ 	if (err)

@@ -1,0 +1,220 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] usb: dwc3: preserve receiver detection and recover stuck SS ports
+
+Rebased for Linux 7.2.7 from the existing VamOS patch series.
+See kernel/README.md for provenance, scope and removed patches.
+
+---
+diff --git a/Documentation/devicetree/bindings/usb/snps,dwc3-common.yaml b/Documentation/devicetree/bindings/usb/snps,dwc3-common.yaml
+index 6c0b8b6538246adf746fe7ccd6df936131c61444..31dc77c4d5d2f619cd6cd3d4a170101e66c16c19 100644
+--- a/Documentation/devicetree/bindings/usb/snps,dwc3-common.yaml
++++ b/Documentation/devicetree/bindings/usb/snps,dwc3-common.yaml
+@@ -28,6 +28,12 @@ allOf:
+       $ref: usb-xhci.yaml#
+ 
+ properties:
++  xhci-missing-cas-quirk:
++    description:
++      Recover SuperSpeed ports stuck in Polling or Compliance without Cold
++      Attach Status before the host PHY is runtime suspended.
++    type: boolean
++
+   extcon:
+     maxItems: 1
+     deprecated: true
+@@ -165,6 +171,12 @@ properties:
+     description: Set if link entering into U2 needs to be disabled
+     type: boolean
+ 
++  snps,dis-rxdet-u3-quirk:
++    description:
++      Disable core receiver detection before runtime suspending the host USB3
++      PHY and restore it after resume to prevent false disconnects on U3 exit.
++    type: boolean
++
+   snps,dis_rxdet_inp3_quirk:
+     description:
+       When set core will disable receiver detection in PHY P3 power state.
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+index ceb49f2f8004188ca30008ae5b7596226485052d..915595d0f41d1cb1485270b10408aea52a81519c 100644
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -1840,6 +1840,8 @@ static void dwc3_get_properties(struct dwc3 *dwc)
+ 				"snps,dis-u2-entry-quirk");
+ 	dwc->dis_rxdet_inp3_quirk = device_property_read_bool(dev,
+ 				"snps,dis_rxdet_inp3_quirk");
++	dwc->dis_rxdet_u3_quirk = device_property_read_bool(dev,
++				"snps,dis-rxdet-u3-quirk");
+ 	dwc->dis_u2_freeclk_exists_quirk = device_property_read_bool(dev,
+ 				"snps,dis-u2-freeclk-exists-quirk");
+ 	dwc->dis_del_phy_power_chg_quirk = device_property_read_bool(dev,
+@@ -2504,6 +2506,12 @@ static int dwc3_suspend_common(struct dwc3 *dwc, pm_message_t msg)
+ 			break;
+ 		}
+ 
++		if (PMSG_IS_AUTO(msg)) {
++			ret = dwc3_host_check_suspend(dwc);
++			if (ret)
++				return ret;
++		}
++
+ 		/* Let controller to suspend HSPHY before PHY driver suspends */
+ 		if (dwc->dis_u2_susphy_quirk ||
+ 		    dwc->dis_enblslpm_quirk) {
+@@ -2518,6 +2526,15 @@ static int dwc3_suspend_common(struct dwc3 *dwc, pm_message_t msg)
+ 			usleep_range(5000, 6000);
+ 		}
+ 
++		/* Avoid false disconnects while the SuperSpeed PHY clocks are off. */
++		if (dwc->dis_rxdet_u3_quirk) {
++			for (i = 0; i < dwc->num_usb3_ports; i++) {
++				reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(i));
++				reg |= DWC3_GUSB3PIPECTL_DISRXDETU3;
++				dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(i), reg);
++			}
++		}
++
+ 		for (i = 0; i < dwc->num_usb2_ports; i++)
+ 			phy_pm_runtime_put_sync(dwc->usb2_generic_phy[i]);
+ 		for (i = 0; i < dwc->num_usb3_ports; i++)
+@@ -2586,6 +2603,15 @@ static int dwc3_resume_common(struct dwc3 *dwc, pm_message_t msg)
+ 			phy_pm_runtime_get_sync(dwc->usb2_generic_phy[i]);
+ 		for (i = 0; i < dwc->num_usb3_ports; i++)
+ 			phy_pm_runtime_get_sync(dwc->usb3_generic_phy[i]);
++
++		/* Restore receiver detection only after the PHY has resumed. */
++		if (dwc->dis_rxdet_u3_quirk) {
++			for (i = 0; i < dwc->num_usb3_ports; i++) {
++				reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(i));
++				reg &= ~DWC3_GUSB3PIPECTL_DISRXDETU3;
++				dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(i), reg);
++			}
++		}
+ 		break;
+ 	case DWC3_GCTL_PRTCAP_OTG:
+ 		/* nothing to do on runtime_resume */
+diff --git a/drivers/usb/dwc3/core.h b/drivers/usb/dwc3/core.h
+index e0dee9d2874010f02129644877591682f798587b..1ebbd70e30749433509fb7e2f2f1d0c533ec5823 100644
+--- a/drivers/usb/dwc3/core.h
++++ b/drivers/usb/dwc3/core.h
+@@ -327,6 +327,7 @@
+ #define DWC3_GUSB3PIPECTL_DISRXDETINP3	BIT(28)
+ #define DWC3_GUSB3PIPECTL_UX_EXIT_PX	BIT(27)
+ #define DWC3_GUSB3PIPECTL_REQP1P2P3	BIT(24)
++#define DWC3_GUSB3PIPECTL_DISRXDETU3	BIT(22)
+ #define DWC3_GUSB3PIPECTL_DEP1P2P3(n)	((n) << 19)
+ #define DWC3_GUSB3PIPECTL_DEP1P2P3_MASK	DWC3_GUSB3PIPECTL_DEP1P2P3(7)
+ #define DWC3_GUSB3PIPECTL_DEP1P2P3_EN	DWC3_GUSB3PIPECTL_DEP1P2P3(1)
+@@ -1137,6 +1138,7 @@ struct dwc3_glue_ops {
+  * @dis_u1_entry_quirk: set if link entering into U1 state needs to be disabled.
+  * @dis_u2_entry_quirk: set if link entering into U2 state needs to be disabled.
+  * @dis_rxdet_inp3_quirk: set if we disable Rx.Detect in P3
++ * @dis_rxdet_u3_quirk: disable receiver detection while the host PHY is suspended
+  * @async_callbacks: if set, indicate that async callbacks will be used.
+  *
+  * @dis_u2_freeclk_exists_quirk : set if we clear u2_freeclk_exists
+@@ -1394,6 +1396,7 @@ struct dwc3 {
+ 	unsigned		dis_u1_entry_quirk:1;
+ 	unsigned		dis_u2_entry_quirk:1;
+ 	unsigned		dis_rxdet_inp3_quirk:1;
++	unsigned		dis_rxdet_u3_quirk:1;
+ 	unsigned		dis_u2_freeclk_exists_quirk:1;
+ 	unsigned		dis_del_phy_power_chg_quirk:1;
+ 	unsigned		dis_tx_ipgap_linecheck_quirk:1;
+@@ -1652,10 +1655,13 @@ static inline void dwc3_pre_run_stop(struct dwc3 *dwc, bool is_on)
+ 
+ #if IS_ENABLED(CONFIG_USB_DWC3_HOST) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
+ int dwc3_host_init(struct dwc3 *dwc);
++int dwc3_host_check_suspend(struct dwc3 *dwc);
+ void dwc3_host_exit(struct dwc3 *dwc);
+ #else
+ static inline int dwc3_host_init(struct dwc3 *dwc)
+ { return 0; }
++static inline int dwc3_host_check_suspend(struct dwc3 *dwc)
++{ return 0; }
+ static inline void dwc3_host_exit(struct dwc3 *dwc)
+ { }
+ #endif
+diff --git a/drivers/usb/dwc3/host.c b/drivers/usb/dwc3/host.c
+index 96b588bd08cdce03302688949679fcf756c8ff2d..26b910f418d88f78a802300133a7c3a27f6bdc54 100644
+--- a/drivers/usb/dwc3/host.c
++++ b/drivers/usb/dwc3/host.c
+@@ -13,9 +13,7 @@
+ #include <linux/usb.h>
+ #include <linux/usb/hcd.h>
+ 
+-#include "../host/xhci-port.h"
+-#include "../host/xhci-ext-caps.h"
+-#include "../host/xhci-caps.h"
++#include "../host/xhci.h"
+ #include "../host/xhci-plat.h"
+ #include "core.h"
+ 
+@@ -63,6 +61,51 @@ static void dwc3_power_off_all_roothub_ports(struct dwc3 *dwc)
+ 	}
+ }
+ 
++/* Keep PHY clocks available until a stuck SuperSpeed port can warm-reset. */
++int dwc3_host_check_suspend(struct dwc3 *dwc)
++{
++	struct usb_hcd *hcd;
++	struct xhci_hcd *xhci;
++	unsigned long flags;
++	bool stuck = false;
++	u32 portsc;
++	int i;
++
++	if (!dwc->xhci)
++		return 0;
++
++	hcd = platform_get_drvdata(dwc->xhci);
++	if (!hcd)
++		return 0;
++
++	xhci = hcd_to_xhci(hcd);
++	if (!(xhci->quirks & XHCI_MISSING_CAS) || !xhci->usb3_rhub.hcd)
++		return 0;
++
++	spin_lock_irqsave(&xhci->lock, flags);
++	for (i = 0; i < xhci->usb3_rhub.num_ports; i++) {
++		portsc = readl(&xhci->usb3_rhub.ports[i]->port_reg->portsc);
++		if (portsc == ~0U || (portsc & PORT_CAS) ||
++		    ((portsc & PORT_CONNECT) && (portsc & PORT_PE)))
++			continue;
++
++		if ((portsc & PORT_PLS_MASK) == XDEV_POLLING ||
++		    (portsc & PORT_PLS_MASK) == XDEV_COMP_MODE) {
++			stuck = true;
++			break;
++		}
++	}
++	spin_unlock_irqrestore(&xhci->lock, flags);
++
++	if (!stuck)
++		return 0;
++
++	usb_hcd_resume_root_hub(xhci->usb3_rhub.hcd);
++	dev_info_ratelimited(dwc->dev,
++			     "SuperSpeed port stuck before suspend, resuming root hub\n");
++	return -EBUSY;
++}
++
+ static void dwc3_xhci_plat_start(struct usb_hcd *hcd)
+ {
+ 	struct platform_device *pdev;
+diff --git a/drivers/usb/host/xhci-hub.c b/drivers/usb/host/xhci-hub.c
+index b0264bd8577ae4b375fb401643c9394788a689d1..d325676ff3366ebc5480437519d4d6e4b4f83ce7 100644
+--- a/drivers/usb/host/xhci-hub.c
++++ b/drivers/usb/host/xhci-hub.c
+@@ -1823,8 +1823,9 @@ static bool xhci_port_missing_cas_quirk(struct xhci_port *port)
+ 
+ 	portsc = xhci_portsc_readl(port);
+ 
+-	/* if any of these are set we are not stuck */
+-	if (portsc & (PORT_CONNECT | PORT_CAS))
++	/* A connected but disabled link can still need a warm reset. */
++	if ((portsc & PORT_CAS) ||
++	    ((portsc & PORT_CONNECT) && (portsc & PORT_PE)))
+ 		return false;
+ 
+ 	if (((portsc & PORT_PLS_MASK) != XDEV_POLLING) &&

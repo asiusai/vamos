@@ -76,7 +76,7 @@ COPY ./kernel/firmware/qcom/vpu-2.0/venus.mbn /lib/firmware/qcom/vpu-2.0/venus.m
 COPY ./kernel/firmware/LICENSES/LICENSE.qcom ./kernel/firmware/LICENSES/NOTICE.qcom /usr/share/licenses/linux-firmware/
 
 # Kernel modules are installed after Docker export in build_system.sh
-# (in-tree from build/modules_install + out-of-tree prebuilt from kernel/modules/)
+# (in-tree and AIC8800 modules built together in build/modules_install)
 
 # Root filesystem overlay — all userspace files at their final paths
 COPY ./userspace/root/ /

@@ -1,0 +1,26 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] of: use the built-in root command line for an empty EFI entry
+
+Rebased for Linux 7.2.7 from the existing VamOS patch series.
+See kernel/README.md for provenance, scope and removed patches.
+
+---
+diff --git a/drivers/of/fdt.c b/drivers/of/fdt.c
+index 26f66046cc323c5672ad310e1d22023a2be533b5..9c3984a3e3da575d69f0acf5040f1ced0f9b42e0 100644
+--- a/drivers/of/fdt.c
++++ b/drivers/of/fdt.c
+@@ -1137,8 +1137,12 @@ int __init early_init_dt_scan_chosen(char *cmdline)
+ #elif defined(CONFIG_CMDLINE_FORCE)
+ 	strscpy(cmdline, CONFIG_CMDLINE, COMMAND_LINE_SIZE);
+ #else
+-	/* No arguments from boot loader, use kernel's  cmdl*/
+-	if (!((char *)cmdline)[0])
++	/*
++	 * Qualcomm's removable-media fallback may pass only the EFI image
++	 * path. This kernel has no initramfs, so such a command line is no
++	 * more bootable than an empty one.
++	 */
++	if (!((char *)cmdline)[0] || !strstr(cmdline, "root="))
+ 		strscpy(cmdline, CONFIG_CMDLINE, COMMAND_LINE_SIZE);
+ #endif
+ #endif /* CONFIG_CMDLINE */

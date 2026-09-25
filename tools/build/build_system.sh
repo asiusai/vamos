@@ -8,6 +8,14 @@ VOID_ROOTFS_SHA256="01a30f17ae06d4d5b322cd579ca971bc479e02cc284ec1e5a4255bea6bac
 # Make sure we're in the correct spot
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null && pwd)"
 cd "$DIR"
+KVER=$(cat "$DIR/build/kernel-out/include/config/kernel.release")
+KMOD_SRC="$DIR/build/modules_install/lib/modules/$KVER"
+for module in aic_load_fw/aic_load_fw aic8800_fdrv/aic8800_fdrv; do
+  if [ ! -f "$KMOD_SRC/extra/$module.ko" ]; then
+    echo "Missing matching AIC8800 modules for $KVER; run ./vamos build kernel first" >&2
+    exit 1
+  fi
+done
 . "$DIR/tools/build/openpilot_checkout.sh"
 
 update_openpilot_checkout
@@ -74,11 +82,13 @@ docker build -f tools/build/Dockerfile.builder -t vamos-builder "$DIR" \
   --build-arg GID="$(id -g)"
 
 echo "Starting builder container"
-# If vamOS is itself a git submodule, mount the outer superproject so that
-# nested .git gitfiles resolve inside the container.
+# Include Git metadata for both submodule and detached worktree checkouts.
 MOUNT_ROOT="$(git -C "$DIR" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
 [ -z "$MOUNT_ROOT" ] && MOUNT_ROOT="$DIR"
-MOUNT_CONTAINER_ID=$(docker run -d --ulimit nofile=65536:65536 --privileged -v /dev:/dev -v "$MOUNT_ROOT:$MOUNT_ROOT:z" vamos-builder)
+GIT_COMMON_DIR="$(git -C "$DIR" rev-parse --path-format=absolute --git-common-dir)"
+MOUNT_CONTAINER_ID=$(docker run -d --ulimit nofile=65536:65536 --privileged \
+  -v /dev:/dev -v "$MOUNT_ROOT:$MOUNT_ROOT:z" \
+  -v "$GIT_COMMON_DIR:$GIT_COMMON_DIR" vamos-builder)
 
 # Cleanup containers on possible exit
 trap "echo \"Cleaning up containers:\"; \
@@ -108,11 +118,7 @@ trap "exec_as_root umount -l $ROOTFS_DIR &> /dev/null || true; \
 echo \"Cleaning up containers:\"; \
 docker container rm -f $MOUNT_CONTAINER_ID" EXIT
 
-KVER=""
-if [ -f "$DIR/build/kernel-out/include/config/kernel.release" ]; then
-  KVER=$(cat "$DIR/build/kernel-out/include/config/kernel.release")
-  echo "Kernel version from build: $KVER"
-fi
+echo "Kernel version from build: $KVER"
 
 echo "Building and extracting vamos docker image"
 docker buildx build -f tools/build/Dockerfile --platform=linux/arm64 \
@@ -129,7 +135,7 @@ echo "Removing .dockerenv file"
 exec_as_root rm -f "$ROOTFS_DIR/.dockerenv"
 
 echo "Setting network stuff"
-GIT_HASH=${GIT_HASH:-$(git --git-dir="$DIR/.git" rev-parse HEAD)}
+GIT_HASH=${GIT_HASH:-$(git -C "$DIR" rev-parse HEAD)}
 DATETIME=$(date '+%Y-%m-%dT%H:%M:%S')
 BUILD_EPOCH=$(date +%s)
 exec_as_root sh -c "
@@ -156,25 +162,11 @@ exec_as_root sh -c "
   printf '%s\n%s\n' '$GIT_HASH' '$DATETIME' > BUILD
 "
 
-# Install kernel modules (in-tree + out-of-tree prebuilt)
-if [ -n "$KVER" ]; then
-  echo "Installing kernel modules for $KVER"
-  KMOD_SRC="$DIR/build/modules_install/lib/modules/$KVER"
-  exec_as_root mkdir -p "$ROOTFS_DIR/lib/modules"
-  if [ -d "$KMOD_SRC" ]; then
-    exec_as_root cp -a "$KMOD_SRC" "$ROOTFS_DIR/lib/modules/$KVER"
-  else
-    exec_as_root mkdir -p "$ROOTFS_DIR/lib/modules/$KVER"
-    exec_as_root sh -c "touch '$ROOTFS_DIR/lib/modules/$KVER/modules.order' '$ROOTFS_DIR/lib/modules/$KVER/modules.builtin' '$ROOTFS_DIR/lib/modules/$KVER/modules.builtin.modinfo'"
-  fi
-  exec_as_root mkdir -p "$ROOTFS_DIR/lib/modules/$KVER/extra"
-  for ko in aic_load_fw.ko aic8800_fdrv.ko aic_btusb.ko; do
-    if [ -f "$DIR/kernel/modules/$ko" ]; then
-      exec_as_root cp "$DIR/kernel/modules/$ko" "$ROOTFS_DIR/lib/modules/$KVER/extra/"
-    fi
-  done
-  exec_as_root depmod -b "$ROOTFS_DIR" -a "$KVER" 2>/dev/null || true
-fi
+# Install the in-tree and AIC8800 modules built together for this kernel.
+echo "Installing kernel modules for $KVER"
+exec_as_root mkdir -p "$ROOTFS_DIR/lib/modules"
+exec_as_root cp -a "$KMOD_SRC" "$ROOTFS_DIR/lib/modules/$KVER"
+exec_as_root depmod -b "$ROOTFS_DIR" -a "$KVER"
 
 # Use the same managed checkout packaged by build_disk to refresh the system
 # Python environment.
