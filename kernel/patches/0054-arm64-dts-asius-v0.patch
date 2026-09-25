@@ -6,7 +6,7 @@ See kernel/README.md for provenance, scope and removed patches.
 
 ---
 diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
-index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0d1659e1e 100644
+index 696fef50f577b341186cf3d6335b1509ea2d34a7..728e3885d03ca430cff4b69a7989e88d383b0427 100644
 --- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
 +++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
 @@ -4,6 +4,15 @@
@@ -489,7 +489,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
  			   <GCC_SEC_CTRL_CLK_SRC>,
  			   <GCC_WPSS_AHB_BDG_MST_CLK>,
  			   <GCC_WPSS_AHB_CLK>,
-@@ -467,7 +707,8 @@ &gpu {
+@@ -467,13 +707,13 @@ &gpu {
  };
  
  &gpu_zap_shader {
@@ -498,8 +498,16 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
 +	status = "disabled";
  };
  
- /* Pin 13, 15 in GPIO header */
-@@ -542,19 +783,18 @@ &pcie1 {
+-/* Pin 13, 15 in GPIO header */
++/* Asius uses GPIO0 as the IMU interrupt, not header I2C. */
+ &i2c0 {
+-	qcom,enable-gsi-dma;
+-	status = "okay";
++	status = "disabled";
+ };
+ 
+ /* Pin 27, 28 in GPIO header */
+@@ -542,19 +782,18 @@ &pcie1 {
  	perst-gpios = <&tlmm 2 GPIO_ACTIVE_LOW>;
  	wake-gpios = <&tlmm 3 GPIO_ACTIVE_HIGH>;
  
@@ -529,7 +537,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
  
  	status = "okay";
  };
-@@ -572,6 +812,14 @@ pm7325_adc_default: adc-default-state {
+@@ -572,6 +811,14 @@ pm7325_adc_default: adc-default-state {
  		function = PMIC_GPIO_FUNC_NORMAL;
  		bias-high-impedance;
  	};
@@ -544,7 +552,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
  };
  
  &pm7325_temp_alarm {
-@@ -662,23 +910,27 @@ channel@14a {
+@@ -662,23 +909,27 @@ channel@14a {
  };
  
  &pon_pwrkey {
@@ -578,7 +586,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
  		reg = <0>;
  
  		spi-max-frequency = <104000000>;
-@@ -703,7 +955,7 @@ &remoteproc_adsp {
+@@ -703,7 +954,7 @@ &remoteproc_adsp {
  };
  
  &remoteproc_cdsp {
@@ -587,7 +595,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
  	status = "okay";
  };
  
-@@ -715,7 +967,7 @@ &sdhc_1 {
+@@ -715,7 +966,7 @@ &sdhc_1 {
  	vmmc-supply = <&vreg_l7b_2p96>;
  	vqmmc-supply = <&vreg_l19b_1p8>;
  
@@ -596,7 +604,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
  };
  
  &sdhc_2 {
-@@ -726,27 +978,43 @@ &sdhc_2 {
+@@ -726,27 +977,43 @@ &sdhc_2 {
  	vqmmc-supply = <&vreg_l6c_2p96>;
  
  	cd-gpios = <&tlmm 91 GPIO_ACTIVE_LOW>;
@@ -646,7 +654,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
  		};
  
  		platform {
-@@ -754,15 +1022,15 @@ platform {
+@@ -754,15 +1021,15 @@ platform {
  		};
  	};
  
@@ -668,7 +676,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
  		};
  
  		platform {
-@@ -774,13 +1042,19 @@ platform {
+@@ -774,13 +1041,19 @@ platform {
  /* Pin 11, 29, 31, 32 in GPIO header */
  &spi7 {
  	qcom,enable-gsi-dma;
@@ -689,7 +697,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
  };
  
  /* Pin 22, 33, 36, 37 in GPIO header */
-@@ -953,6 +1227,21 @@ wcd_default: wcd-reset-n-active-state {
+@@ -953,6 +1226,21 @@ wcd_default: wcd-reset-n-active-state {
  		bias-disable;
  		output-low;
  	};
@@ -711,7 +719,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
  };
  
  &uart5 {
-@@ -1021,10 +1310,18 @@ &usb_2_hsphy {
+@@ -1021,10 +1309,18 @@ &usb_2_hsphy {
  };
  
  &venus {
@@ -731,7 +739,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..67cb5ae6f02a4211326b0b616463b9f0
  &pcie0_clkreq_n {
  	bias-pull-up;
  	drive-strength = <2>;
-@@ -1093,3 +1390,439 @@ &sdc2_data {
+@@ -1093,3 +1389,439 @@ &sdc2_data {
  	bias-pull-up;
  	drive-strength = <10>;
  };

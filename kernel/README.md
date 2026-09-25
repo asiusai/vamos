@@ -41,7 +41,10 @@ support replaces the old full-board addition, but the Asius carveouts and
 U-Boot/stock-EFI handoff remain necessary. Camera aliases are board-local. Keep
 the established camera buses 16, 18 and 20: Openpilot identifies sensors by
 these names. Bus 20 explicitly maps to `cci1_i2c1`; the old duplicate bus-19
-alias for `cci1_i2c0` is removed. Firmware gap reservations exclude named
+alias for `cci1_i2c0` is removed. Disable upstream header `i2c0`: it owns
+GPIO0, which Asius uses for the IMU interrupt. The IMU I2C controller remains
+`i2c6` through the existing userspace `/dev/i2c-1` link.
+Firmware gap reservations exclude named
 `no-map` regions: overlapping `/memreserve/` entries prevent
 upstream remoteproc from requesting the DSP regions on 7.2. The complete
 firmware memory range remains reserved. The build checks the compiled DTB
