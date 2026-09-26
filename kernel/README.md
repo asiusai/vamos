@@ -6,7 +6,9 @@ commit and merges `configs/vamos.config` over arm64 defconfig.
 
 Keep hardware policy in userspace and board wiring in the device tree. Retain
 driver changes only when the supported product needs behavior absent upstream.
-The external USB PHY uses the mainline lane mapping and stock transmit settings.
+The external USB PHY uses the mainline lane mapping. Transmit calibration is
+selected in the board device tree: mode 0 and QMP v4 tap 31 on the external
+Dragon port. The shared SoC defaults and internal USB controller are unchanged.
 
 ## Patch scope and provenance
 
@@ -22,7 +24,7 @@ by subsystem. Original authors remain credited in patch headers and source.
 | 0042 | Removable UFS detection from Xilin Wu, plus device temperature support (0042, 0084) |
 | 0043 | Drain internal UFS commands before clock-scaling quiesce; fixes a 7.2.7 health-read deadlock |
 | 0044 | Keep internal UFS recovery commands dispatchable, from Stanley Jhu's upstream v3 proposal |
-| 0054 | Asius firmware memory map, peripherals, static USB wiring and recovery properties (0031, 0032, 0054, 0081-0083, 0092) |
+| 0054 | Asius firmware memory map, peripherals, static USB wiring, TX calibration and recovery properties (0031, 0032, 0054, 0081-0083, 0092) |
 | 0055 | Dragon QSEECOM allowlist |
 | 0057 | OS04C10 sensor, VFE170 PIX/NV12 capture and camera clocks |
 | 0058 | Root command-line fallback for stock EFI boot |
@@ -34,6 +36,7 @@ by subsystem. Original authors remain credited in patch headers and source.
 | 0071 | SMP2P boot-firmware takeover and bounded entry handling, from Stephan Gerhold (0071-0075) |
 | 0077 | Stock-EFI device-tree peripheral setup (0077, 0079, 0080) |
 | 0078 | Panda MI2S audio routing |
+| 0086-0088 | Optional board USB transmit calibration: replace the DWC3 mode field and apply a validated QMP v4 tap before startup |
 | 0090 | DWC3 receiver detection and stuck SuperSpeed recovery (0090, 0091), adapted from the AGNOS behavior |
 
 The upstream Dragon DTS uses a different firmware memory layout. Its board
@@ -69,7 +72,6 @@ these patches with a later stable kernel. Neither patch disables scaling.
 | 0029 | QSPI flash remains disabled because Linux probing it resets the board; boot firmware owns it |
 | 0035 | Extra GENI `MODULE_FIRMWARE` metadata is unnecessary for the explicitly packaged/built-in firmware |
 | 0047, 0049, 0052 | Display/HDMI-only patches; Asius v0 is headless |
-| 0086-0088 | Unused USB transmit calibration experiments; stock PHY settings are retained |
 
 The unused ath10k firmware, IMX577 and KVM overlay files from the old board
 patch are also gone.
@@ -109,3 +111,28 @@ board. Use temporary test/log/cache directories under `/data`.
 
 Camera capture, Panda power/SPI, audio, IMU and full openpilot operation require
 the corresponding hardware. A bare-board pass does not establish those results.
+
+## USB transmit calibration
+
+The Dragon DTS selects DWC3 mode 0 and QMP v4 tap 31 on its external USB port.
+The equipped USB-C board with a 3 m cable and 7900 XTX passed model compilation,
+1,200 synthetic model frames, three 1,600-frame live-camera runs, three normal
+reboots, and an 8 GiB transfer test in each direction. Stock TX settings failed
+GPU initialization and model compilation in the same fixture.
+
+The second USB-C Dragon passed 2 GiB in each direction with both settings and
+clean GPU finalization. The calibrated run reported zero additional link errors;
+the stock run reported one. This short comparison does not establish a speed
+advantage. Mode 0 / tap 31 is selected because it passed on both tested boards.
+The equipped board still failed to enumerate after a cable flip with either
+setting, so the change is not a complete fix for orientation or attachment.
+Earlier stock USB-A tests favored stock settings; they are a different fixture.
+
+Patches 0086-0088 add an optional, validated board calibration without changing
+the common PHY table. Patch 0054 selects it for the external Dragon controller
+(`/soc@0/usb@a600000`) using `snps,tx_de_emphasis_quirk` and
+`snps,tx_de_emphasis = /bits/ 8 <0>`. Its PHY (`/soc@0/phy@88e8000`)
+uses `qcom,tx-deemph-6db = <31>`. Receiver EQ and VGA stay at their SoC defaults.
+The driver reapplies the tap before PHY startup, including after power loss.
+No userspace register writes are required. The custom Chestnut firmware remains
+unchanged by this calibration update.

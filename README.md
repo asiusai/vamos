@@ -138,12 +138,12 @@ retains its existing CPU policy. Install a system image containing this helper
 before updating to an Openpilot revision that delegates these operations to it.
 
 The external USB host uses comma's receiver-detection suspend sequencing and
-stuck-port recovery, adapted to Linux 7.2 in patch 0090 and the board DTS. Stock PHY
-transmit settings replace the experimental 6 dB override, which failed
-verified transfers on the stock Dragon USB-A port. These kernel changes alone
-did not fix Chestnut's reboot failures; the matching
-[Openpilot firmware](https://github.com/asiusai/openpilot/tree/master/openpilot/system/hardware/chestnut)
-adds autonomous bridge recovery. Normal reboot and shutdown are unchanged.
+stuck-port recovery, adapted to Linux 7.2 in patch 0090 and the board DTS.
+Dragon's external port selects TX mode 0 and QMP v4 tap 31; receiver calibration
+and the internal USB controller retain their existing settings. See
+[kernel/README.md](kernel/README.md) for the comparison and validation limits.
+The matching [Openpilot firmware](https://github.com/asiusai/openpilot/tree/master/openpilot/system/hardware/chestnut)
+provides autonomous bridge recovery. Normal reboot and shutdown are unchanged.
 
 ## Dragon NPU
 

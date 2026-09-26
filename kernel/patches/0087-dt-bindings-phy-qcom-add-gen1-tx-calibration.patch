@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Asius <dev@asius.ai>
+Date: Wed, 23 Sep 2026 18:15:00 +0000
+Subject: [PATCH] dt-bindings: phy: qcom: describe Gen1 TX calibration
+
+Describe optional board calibration of the QMP v4 6 dB transmit tap on
+SC7280 and SM8250. The USB controller selects the mode separately.
+
+Signed-off-by: Asius <dev@asius.ai>
+---
+diff --git a/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml b/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml
+--- a/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml
++++ b/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml
+@@ -88,6 +88,14 @@
+   mode-switch: true
+   orientation-switch: true
+ 
++  qcom,tx-deemph-6db:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    maximum: 31
++    description:
++      Board-calibrated five-bit tap value for the Gen1 6 dB transmit
++      de-emphasis setting. Overrides PCS G12S1_TXDEEMPH_M6DB before PHY
++      startup. The USB controller selects the de-emphasis mode separately.
++
+   ports:
+     $ref: /schemas/graph.yaml#/properties/ports
+ 
+@@ -184,6 +192,18 @@
+ 
+ allOf:
+   - $ref: /schemas/usb/usb-switch.yaml#
++  - if:
++      properties:
++        compatible:
++          not:
++            contains:
++              enum:
++                - qcom,sc7280-qmp-usb3-dp-phy
++                - qcom,sm8250-qmp-usb3-dp-phy
++    then:
++      properties:
++        qcom,tx-deemph-6db: false
++
+   - if:
+       properties:
+         compatible:

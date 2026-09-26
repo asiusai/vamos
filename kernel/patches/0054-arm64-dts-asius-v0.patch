@@ -6,7 +6,7 @@ See kernel/README.md for provenance, scope and removed patches.
 
 ---
 diff --git a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
-index 696fef50f577b341186cf3d6335b1509ea2d34a7..728e3885d03ca430cff4b69a7989e88d383b0427 100644
+index 696fef50f577..20058b7fca04 100644
 --- a/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
 +++ b/arch/arm64/boot/dts/qcom/qcs6490-radxa-dragon-q6a.dts
 @@ -4,6 +4,15 @@
@@ -739,7 +739,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..728e3885d03ca430cff4b69a7989e88d
  &pcie0_clkreq_n {
  	bias-pull-up;
  	drive-strength = <2>;
-@@ -1093,3 +1389,439 @@ &sdc2_data {
+@@ -1093,3 +1389,442 @@ &sdc2_data {
  	bias-pull-up;
  	drive-strength = <10>;
  };
@@ -778,6 +778,8 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..728e3885d03ca430cff4b69a7989e88d
 +	dr_mode = "host";
 +	snps,dis-rxdet-u3-quirk;
 +	xhci-missing-cas-quirk;
++	snps,tx_de_emphasis_quirk;
++	snps,tx_de_emphasis = /bits/ 8 <0>;
 +};
 +
 +&usb_1_dwc3_hs {
@@ -795,6 +797,7 @@ index 696fef50f577b341186cf3d6335b1509ea2d34a7..728e3885d03ca430cff4b69a7989e88d
 +&usb_1_qmpphy {
 +	vdda-phy-supply = <&vreg_l6b_1p2>;
 +	vdda-pll-supply = <&vreg_l1b_0p912>;
++	qcom,tx-deemph-6db = <31>;
 +
 +	/delete-property/ orientation-switch;
 +

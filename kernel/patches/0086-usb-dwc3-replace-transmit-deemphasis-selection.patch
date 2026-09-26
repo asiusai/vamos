@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Asius <dev@asius.ai>
+Date: Wed, 23 Sep 2026 18:15:00 +0000
+Subject: [PATCH] usb: dwc3: replace the transmit de-emphasis selection
+
+Clear TX_DEEPH before assigning the requested mode. ORing in zero cannot
+replace a firmware -3.5 dB selection with the requested 6 dB mode.
+
+Signed-off-by: Asius <dev@asius.ai>
+---
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+index ceb49f2f8004..05ba7b8960e4 100644
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -696,8 +696,10 @@ static int dwc3_ss_phy_setup(struct dwc3 *dwc, int index)
+ 	if (dwc->rx_detect_poll_quirk)
+ 		reg |= DWC3_GUSB3PIPECTL_RX_DETOPOLL;
+ 
+-	if (dwc->tx_de_emphasis_quirk)
++	if (dwc->tx_de_emphasis_quirk) {
++		reg &= ~DWC3_GUSB3PIPECTL_TX_DEEPH_MASK;
+ 		reg |= DWC3_GUSB3PIPECTL_TX_DEEPH(dwc->tx_de_emphasis);
++	}
+ 
+ 	if (dwc->dis_del_phy_power_chg_quirk)
+ 		reg &= ~DWC3_GUSB3PIPECTL_DEPOCHANGE;
