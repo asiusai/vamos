@@ -104,6 +104,15 @@ openpilot recording requires the Venus encoder and its product controls.
 
 ## Upgrade validation
 
+The camera LEDs use a synchronized, warm-white Knight Rider sweep during boot.
+Logical LEDs 1-6 sit at 0, 7.5, 15, 45, 52.5 and 60 mm. LEDs 2 and 5
+participate at 10% brightness.
+The three-second curve is sampled at 30 Hz without floating point in the kernel.
+`tools/build/generate_boot_led_pattern.py` generates the table in patch 0062.
+Patch 0054 maps each RGB trigger to its physical camera channel; logical 1 is
+wide-camera package 2 and logical 6 is road-camera package 0. Openpilot takes
+over the triggers and uses steady warm white once startup is complete.
+
 Keep the previous kernel, DTB, modules, and boot metadata recoverable before a
 trial. Compare boot recovery, USB host/NCM, Wi-Fi, Bluetooth, UFS throughput,
 CPU/Adreno performance, KVM, remote processors and video encoding on the same
