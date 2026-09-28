@@ -235,7 +235,7 @@ def main() -> None:
   parser = argparse.ArgumentParser(description="Package a signed-manifest-ready Asius v0 browser flash image")
   parser.add_argument(
     "--base-url",
-    default=os.environ.get("VAMOS_FLASH_BASE_URL", "https://updates.asius.ai/vamos/flash/objects"),
+    default=os.environ.get("VAMOS_FLASH_BASE_URL", "https://vamos.asius.ai/vamos/flash/objects"),
   )
   parser.add_argument("--image", type=Path, default=BUILD_DIR / "dragon.img")
   parser.add_argument("--layout", type=Path, default=BUILD_DIR / "factory-layout.json")

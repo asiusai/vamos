@@ -250,7 +250,7 @@ selected slot.
 Install a signed HTTP manifest:
 
 ```bash
-sudo vamos-update install https://updates.asius.ai/vamos/vamos.json --reboot
+sudo vamos-update install https://vamos.asius.ai/vamos/vamos.json --reboot
 ```
 
 Install local recovery files without a manifest:
@@ -287,6 +287,11 @@ sudo reboot
 
 ## OTA Publishing
 
+Published manifests are currently unused; migration of their old download URLs
+is deferred. Before enabling OTA updates or browser flashing, generate new signing
+keys, update the trusted public keys in VamOS and the flasher, and publish new
+manifests using `https://vamos.asius.ai`.
+
 The separate `build and publish vamOS images` workflow runs manually or for an
 exact `vamos-v<VERSION>` tag. It builds the kernel, system image, and ESP on
 ARM64, creates content-addressed XZ objects, signs `vamos.json`, and publishes
@@ -305,7 +310,7 @@ Configure these repository secrets:
 - `OPENPILOT_DEPLOY_KEY` (write deploy key for `asiusai/openpilot`)
 
 Set `VAMOS_PUBLIC_URL` to the public R2 custom-domain origin, currently
-`https://updates.asius.ai`.
+`https://vamos.asius.ai`.
 
 ## Kernel Patches
 

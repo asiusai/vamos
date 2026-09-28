@@ -91,7 +91,7 @@ def main() -> None:
   parser = argparse.ArgumentParser(description="Package a full vamOS A/B update")
   parser.add_argument(
     "--base-url",
-    default=os.environ.get("VAMOS_OTA_BASE_URL", "https://updates.asius.ai/vamos/objects"),
+    default=os.environ.get("VAMOS_OTA_BASE_URL", "https://vamos.asius.ai/vamos/objects"),
     help="public URL prefix containing the content-addressed image objects",
   )
   parser.add_argument(
