@@ -38,6 +38,7 @@ by subsystem. Original authors remain credited in patch headers and source.
 | 0078 | Panda MI2S audio routing |
 | 0086-0088 | Optional board USB transmit calibration: replace the DWC3 mode field and apply a validated QMP v4 tap before startup |
 | 0090 | DWC3 receiver detection and stuck SuperSpeed recovery (0090, 0091), adapted from the AGNOS behavior |
+| 0093 | Enforce the Dragon Panda SPI bus ceiling in the controller, including per-transfer userspace requests |
 
 The upstream Dragon DTS uses a different firmware memory layout. Its board
 support replaces the old full-board addition, but the Asius carveouts and
@@ -147,3 +148,20 @@ uses `qcom,tx-deemph-6db = <31>`. Receiver EQ and VGA stay at their SoC defaults
 The driver reapplies the tap before PHY startup, including after power loss.
 No userspace register writes are required. The custom Chestnut firmware remains
 unchanged by this calibration update.
+
+## Panda SPI clock
+
+The Dragon Panda controller has a 37 MHz request ceiling in the board DTS,
+which selects a 33.33 MHz GENI clock. The next clock step is unreliable through
+the board's level translator. Patch 0093 applies that limit to the controller,
+so the SPI core clamps both the spidev default and explicit transfer speeds.
+Host clients can request the upstream 50 MHz without a hardware-specific override.
+The Panda slave firmware does not set this clock. A child device's
+`spi-max-frequency` alone does not prevent spidev from requesting a faster clock.
+
+Validated on `asius-v0-2` with unchanged Panda firmware: 500 reads each at
+37 MHz, explicit 50 MHz, and a 50 MHz spidev default passed without additional
+SPI errors with conservative protocol pacing. The upstream Python client also
+passed 500 reads at 50 MHz without retries; 37 MHz comparison runs needed one
+and two retries. Native pandad remained healthy with the shared default at
+50 MHz. Install this kernel before using host clients without the Dragon override.
