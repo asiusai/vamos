@@ -104,7 +104,7 @@ openpilot recording requires the Venus encoder and its product controls.
 
 ## Upgrade validation
 
-The camera LEDs use a synchronized, warm-white Knight Rider sweep during boot.
+The camera LEDs smoothly fade warm white in and out together during boot.
 Logical LEDs 1-6 sit at 0, 7.5, 15, 45, 52.5 and 60 mm. LEDs 2 and 5
 participate at 10% brightness.
 The three-second curve is sampled at 30 Hz without floating point in the kernel.
