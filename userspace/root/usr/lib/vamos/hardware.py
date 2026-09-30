@@ -1,13 +1,48 @@
 """Dragon hardware policy, invoked by the workload when its power state changes."""
 
 import argparse
+import fcntl
 from pathlib import Path
 import subprocess
+import time
 
 
 SYS = Path("/sys")
 PROC = Path("/proc")
 DEV = Path("/dev")
+PANDA_RESET_LOCK = Path("/run/lock/vamos-panda-reset.lock")
+
+
+def reset_panda(bootloader: bool = False) -> None:
+  root = SYS / "class/gpio"
+  chip = next(c for c in root.glob("gpiochip*") if (c / "label").read_text().strip() == "f100000.pinctrl")
+  base = int((chip / "base").read_text())
+  # Panda v6: header pins 29/31 are TLMM 31/28. Both are active high;
+  # the board's reset transistor converts GPIO31 high into STM32 NRST low.
+  with PANDA_RESET_LOCK.open("w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    pins = []
+    for offset in (28, 31):
+      pin = root / f"gpio{base + offset}"
+      if not pin.exists():
+        (root / "export").write_text(str(base + offset))
+        deadline = time.monotonic() + 1.
+        while not (pin / "direction").exists():
+          if time.monotonic() >= deadline:
+            raise TimeoutError(f"GPIO{offset} did not export")
+          time.sleep(.01)
+      (pin / "direction").write_text("low")
+      pins.append(pin / "value")
+    boot, reset = pins
+    try:
+      reset.write_text("1")
+      boot.write_text("1" if bootloader else "0")
+      time.sleep(.02)
+      reset.write_text("0")
+      time.sleep(.02)
+    finally:
+      boot.write_text("0")
+      reset.write_text("0")
 
 
 def affine_irq(cpu: int, action: str) -> None:
@@ -78,11 +113,15 @@ def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   commands = parser.add_subparsers(dest="command", required=True)
   commands.add_parser("initialize")
+  panda = commands.add_parser("panda-reset")
+  panda.add_argument("--bootloader", action="store_true", help="enter the STM32 ROM bootloader")
   gpu = commands.add_parser("gpu-power-save")
   gpu.add_argument("state", choices=("on", "off"))
   args = parser.parse_args()
   if args.command == "initialize":
     initialize()
+  elif args.command == "panda-reset":
+    reset_panda(args.bootloader)
   else:
     set_gpu_power_save(args.state == "on")
   return 0

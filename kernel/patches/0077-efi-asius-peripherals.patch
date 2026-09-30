@@ -6,13 +6,14 @@ See kernel/README.md for provenance, scope and removed patches.
 
 ---
 diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
-index 23b3543d3041b07a35e658378d3e2d650f3c3bb1..fd0ba3c325b7cfa39873b05ddd3d44ee1c17854a 100644
 --- a/drivers/firmware/efi/libstub/fdt.c
 +++ b/drivers/firmware/efi/libstub/fdt.c
-@@ -27,6 +27,944 @@ static void fdt_update_cell_size(void *fdt)
- 	fdt_setprop_u32(fdt, offset, "#size-cells",    EFI_DT_SIZE_CELLS_DEFAULT);
- }
+@@ -25,6 +25,1000 @@
  
+ 	fdt_setprop_u32(fdt, offset, "#address-cells", EFI_DT_ADDR_CELLS_DEFAULT);
+ 	fdt_setprop_u32(fdt, offset, "#size-cells",    EFI_DT_SIZE_CELLS_DEFAULT);
++}
++
 +static void asius_enable_panda_spi(void *fdt)
 +{
 +	static const char spi12_path[] = "/soc@0/geniqup@ac0000/spi@a90000";
@@ -951,20 +952,75 @@ index 23b3543d3041b07a35e658378d3e2d650f3c3bb1..fd0ba3c325b7cfa39873b05ddd3d44ee
 +	efi_warn("Failed to configure Asius Dragon cameras: %d\n", status);
 +}
 +
++static void asius_enable_panda_ir(void *fdt)
++{
++	fdt32_t gpios[3], pwms[4];
++	u32 tlmm, pwm;
++	int node, status;
++
++	/* SPI14 shares header pin 22 with the IR enable signal. */
++	node = fdt_path_offset(fdt, "/soc@0/geniqup@ac0000/spi@a98000");
++	if (node >= 0) {
++		status = fdt_setprop_string(fdt, node, "status", "disabled");
++		if (status)
++			goto fail;
++	}
++	status = asius_fdt_node_phandle(fdt, ASIUS_TLMM_PATH, &tlmm);
++	if (status)
++		goto fail;
++	gpios[0] = cpu_to_fdt32(tlmm);
++	gpios[1] = cpu_to_fdt32(57);
++	gpios[2] = cpu_to_fdt32(0);
++	node = asius_fdt_get_or_add_subnode(fdt, 0, "pwm-ir");
++	if (node < 0) {
++		status = node;
++		goto fail;
++	}
++	status = fdt_setprop_string(fdt, node, "compatible", "pwm-gpio") ?:
++		 fdt_setprop_u32(fdt, node, "#pwm-cells", 3) ?:
++		 fdt_setprop(fdt, node, "gpios", gpios, sizeof(gpios)) ?:
++		 asius_fdt_node_phandle(fdt, "/pwm-ir", &pwm);
++	if (status)
++		goto fail;
++	pwms[0] = cpu_to_fdt32(pwm);
++	pwms[1] = cpu_to_fdt32(0);
++	pwms[2] = cpu_to_fdt32(1000000);
++	pwms[3] = cpu_to_fdt32(0);
++	node = asius_fdt_get_or_add_subnode(fdt, 0, "panda-ir-leds");
++	if (node < 0) {
++		status = node;
++		goto fail;
++	}
++	status = fdt_setprop_string(fdt, node, "compatible", "pwm-leds");
++	if (status)
++		goto fail;
++	node = asius_fdt_get_or_add_subnode(fdt, node, "led");
++	if (node < 0) {
++		status = node;
++		goto fail;
++	}
++	status = fdt_setprop_string(fdt, node, "label", "asius:ir") ?:
++		 fdt_setprop(fdt, node, "pwms", pwms, sizeof(pwms)) ?:
++		 fdt_setprop_u32(fdt, node, "max-brightness", 100) ?:
++		 fdt_setprop_string(fdt, node, "default-state", "off");
++fail:
++	if (status)
++		efi_warn("Failed to configure Asius Panda IR: %d\n", status);
+ }
+ 
  static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
- 			       void *fdt, int new_fdt_size, char *cmdline_ptr)
- {
-@@ -92,6 +1030,13 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+@@ -91,6 +1085,14 @@
+ 		if (status)
  			goto fdt_set_fail;
  	}
- 
++
 +	asius_enable_panda_spi(fdt);
 +	asius_enable_panda_imu_i2c(fdt);
 +	asius_keep_panda_som_alive(fdt);
 +	asius_configure_panda_audio(fdt);
 +	asius_repurpose_power_key(fdt);
 +	asius_enable_dragon_cameras(fdt);
-+
++	asius_enable_panda_ir(fdt);
+ 
  	/* Add FDT entries for EFI runtime services in chosen node. */
  	node = fdt_subnode_offset(fdt, 0, "chosen");
- 	fdt_val64 = cpu_to_fdt64((u64)(unsigned long)efi_system_table);

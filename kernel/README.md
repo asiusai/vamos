@@ -48,6 +48,11 @@ these names. Bus 20 explicitly maps to `cci1_i2c1`; the old duplicate bus-19
 alias for `cci1_i2c0` is removed. Disable upstream header `i2c0`: it owns
 GPIO0, which Asius uses for the IMU interrupt. The IMU I2C controller remains
 `i2c6` through the existing userspace `/dev/i2c-1` link.
+Disable header `spi14` too: GPIO57 drives the Panda v6 IR current sink.
+Mainline `pwm-gpio` and `pwm-leds` expose `asius:ir` at 1 kHz with brightness
+0-100 and a default-off state. The EFI peripheral setup supplies the same
+wiring for a stock firmware device tree. GPIO29 supplies the Panda button's
+`KEY_PROG1` input through `gpio-keys`.
 Firmware gap reservations exclude named
 `no-map` regions: overlapping `/memreserve/` entries prevent
 upstream remoteproc from requesting the DSP regions on 7.2. The complete

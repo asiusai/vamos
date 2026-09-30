@@ -109,6 +109,14 @@ with `DRAGON_DOCK_USB2_HUB` and `DRAGON_DOCK_USB3_HUB`. The host tool assigns
 `192.168.42.50/24` directly when a new random NCM MAC prevents the network
 manager from reusing its previous connection.
 
+## Device name
+
+At boot, the console hostname comes from `/data/params/d/DeviceName`, normalized
+to lowercase ASCII letters, digits and hyphens (maximum 63 characters). Missing
+or entirely non-ASCII/punctuation names use `asius-v0`. Openpilot keeps the
+hostname synchronized with subsequent parameter changes. The original display
+name remains unchanged in the app and Bluetooth.
+
 ## Dragon hardware policy
 
 `vamos-clock` restores the later of the image build time and the timestamp in

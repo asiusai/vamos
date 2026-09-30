@@ -88,6 +88,39 @@ class HardwarePolicyTest(unittest.TestCase):
     hardware.raise_thermal_limits()
     self.assertEqual([p.read_text() for p in temps], ["100000", "105000", "100000", "90000", "85000"])
 
+  def panda_pins(self, base):
+    root = hardware.SYS / "class/gpio"
+    self.write(root / f"gpiochip{base}/label", "f100000.pinctrl\n")
+    self.write(root / f"gpiochip{base}/base", str(base))
+    for offset in (28, 31):
+      self.write(root / f"gpio{base + offset}/direction", "in")
+      self.write(root / f"gpio{base + offset}/value", "0")
+    return [root / f"gpio{base + offset}/value" for offset in (28, 31)]
+
+  def test_panda_reset_and_rom_entry_with_dynamic_gpio_base(self):
+    for base, bootloader in ((547, False), (512, True)):
+      with self.subTest(base=base, bootloader=bootloader):
+        boot, reset = self.panda_pins(base)
+        levels = []
+        def delay(_):
+          levels.append((boot.read_text(), reset.read_text()))
+        with patch.object(hardware, "PANDA_RESET_LOCK", self.root / "panda.lock"), \
+             patch.object(hardware.time, "sleep", side_effect=delay):
+          hardware.reset_panda(bootloader)
+        self.assertEqual(levels, [(str(int(bootloader)), "1"), (str(int(bootloader)), "0")])
+        self.assertEqual((boot.read_text(), reset.read_text()), ("0", "0"))
+        self.assertFalse((boot.parent.parent / f"gpio{base + 27}").exists())
+        # Do not leave two matching chips for the next subtest.
+        (boot.parent.parent / f"gpiochip{base}/label").write_text("other-controller")
+
+  def test_panda_recovery_releases_both_pins_on_failure(self):
+    boot, reset = self.panda_pins(547)
+    with patch.object(hardware, "PANDA_RESET_LOCK", self.root / "panda.lock"), \
+         patch.object(hardware.time, "sleep", side_effect=RuntimeError("interrupted")):
+      with self.assertRaisesRegex(RuntimeError, "interrupted"):
+        hardware.reset_panda(True)
+    self.assertEqual((boot.read_text(), reset.read_text()), ("0", "0"))
+
 
 if __name__ == "__main__":
   unittest.main()
