@@ -8,7 +8,7 @@ See kernel/README.md for provenance, scope and removed patches.
 diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
 --- a/drivers/firmware/efi/libstub/fdt.c
 +++ b/drivers/firmware/efi/libstub/fdt.c
-@@ -25,6 +25,1000 @@
+@@ -25,6 +25,1003 @@
  
  	fdt_setprop_u32(fdt, offset, "#address-cells", EFI_DT_ADDR_CELLS_DEFAULT);
  	fdt_setprop_u32(fdt, offset, "#size-cells",    EFI_DT_SIZE_CELLS_DEFAULT);
@@ -511,6 +511,7 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +{
 +	char child_name[] = "led@1";
 +	char label[sizeof("asius:cam1:green:0")];
++	char trigger[sizeof("asius-boot-6-b")];
 +	int controller;
 +	int child;
 +	int status;
@@ -556,10 +557,12 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +		if (status)
 +			return status;
 +
-+		if ((i % 3) == 2 && camera_number != 1) {
++		if (camera_number != 1) {
++			snprintf(trigger, sizeof(trigger), "asius-boot-%d-%c",
++				 6 - ((camera_number - 2) * 3 + i / 3), "rgb"[i % 3]);
 +			status = fdt_setprop_string(fdt, child,
 +						   "linux,default-trigger",
-+						   "asius-boot") ?:
++						   trigger) ?:
 +				 asius_fdt_delprop_optional(fdt, child,
 +							    "led-pattern");
 +		} else {
