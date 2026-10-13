@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""A leased, local-only Wi-Fi access point for authenticated app video sessions."""
+import fcntl
+import ctypes
+import hashlib
+import json
+import os
+from pathlib import Path
+import secrets
+import select
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+ROOT = Path('/run/vamos-local-video')
+SOCKET = ROOT / 'control.sock'
+INTERFACE = 'wlan0'
+ADDRESS = '192.168.43.1'
+LEASE_SECONDS = 120
+
+
+def command(*args, check=True):
+  result = subprocess.run(args, capture_output=True, text=True, timeout=15)
+  if check and result.returncode:
+    raise RuntimeError(f'Local video Wi-Fi: {args[0]} failed')
+  return result.stdout.strip()
+
+
+def stop_with_parent():
+  # Access-point processes must not outlive a killed lease daemon.
+  ctypes.CDLL(None).prctl(1, signal.SIGTERM)
+  if os.getppid() == 1:
+    os._exit(1)
+
+
+class AccessPoint:
+  def __init__(self):
+    self.children = []
+    self.restore = None
+
+  def start(self, ssid, password):
+    if not Path(f'/sys/class/net/{INTERFACE}').exists():
+      raise RuntimeError('Device Wi-Fi is unavailable')
+    try:
+      # AIC8800 cannot reliably run the extra AP interface alongside its station.
+      # Temporarily borrow wlan0; retain every saved NetworkManager profile.
+      managed = command('nmcli', '-g', 'GENERAL.NM-MANAGED', 'device', 'show', INTERFACE)
+      if managed != 'yes':
+        raise RuntimeError('Device Wi-Fi is already controlled by another service')
+      uuid = command('nmcli', '-g', 'GENERAL.CON-UUID', 'device', 'show', INTERFACE)
+      self.restore = {'uuid': uuid if uuid != '--' else ''}
+      (ROOT / 'restore.json').write_text(json.dumps(self.restore))
+      command('nmcli', 'device', 'disconnect', INTERFACE, check=False)
+      command('nmcli', 'device', 'set', INTERFACE, 'managed', 'no')
+      time.sleep(1)
+      command('ip', 'address', 'add', ADDRESS + '/24', 'dev', INTERFACE)
+      config = ROOT / 'hostapd.conf'
+      config.write_text('\n'.join([
+        f'interface={INTERFACE}', 'driver=nl80211', f'ssid={ssid}',
+        'hw_mode=a', 'channel=36', 'ieee80211n=1', 'ieee80211ac=1', 'wmm_enabled=1',
+        'ht_capab=[HT40+]', 'vht_oper_chwidth=1', 'vht_oper_centr_freq_seg0_idx=42',
+        'auth_algs=1', 'wpa=2', 'wpa_key_mgmt=WPA-PSK',
+        'rsn_pairwise=CCMP', f'wpa_passphrase={password}', '',
+      ]))
+      config.chmod(0o600)
+      with (ROOT / 'hostapd.log').open('w') as output:
+        self.children.append(subprocess.Popen(['hostapd', str(config)], stdout=output, stderr=output, preexec_fn=stop_with_parent))
+      with (ROOT / 'dnsmasq.log').open('w') as output:
+        self.children.append(subprocess.Popen([
+        'dnsmasq', '--keep-in-foreground', '--conf-file=/dev/null', '--port=0', '--bind-interfaces',
+        f'--interface={INTERFACE}', '--dhcp-range=192.168.43.10,192.168.43.50,255.255.255.0,5m',
+        '--dhcp-option=3', '--dhcp-option=6', '--dhcp-authoritative',
+        f'--dhcp-leasefile={ROOT / "leases"}', f'--pid-file={ROOT / "dnsmasq.pid"}',
+        ], stdout=output, stderr=output, preexec_fn=stop_with_parent))
+      time.sleep(1)
+      if not self.healthy():
+        raise RuntimeError('The device could not start local video Wi-Fi')
+    except Exception:
+      self.stop()
+      raise
+
+  def healthy(self):
+    return len(self.children) == 2 and all(child.poll() is None for child in self.children)
+
+  def stop(self):
+    for child in self.children:
+      if child.poll() is None:
+        child.terminate()
+        try:
+          child.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+          child.kill()
+          child.wait()
+    self.children.clear()
+    if self.restore is not None:
+      command('ip', 'address', 'del', ADDRESS + '/24', 'dev', INTERFACE, check=False)
+      command('ip', 'link', 'set', INTERFACE, 'down', check=False)
+      command('iw', 'dev', INTERFACE, 'set', 'type', 'managed', check=False)
+      command('nmcli', 'device', 'set', INTERFACE, 'managed', 'yes')
+      if self.restore['uuid']:
+        command('nmcli', '--wait', '0', 'connection', 'up', 'uuid', self.restore['uuid'], check=False)
+      self.restore = None
+      (ROOT / 'restore.json').unlink(missing_ok=True)
+    for name in ('hostapd.conf', 'leases', 'dnsmasq.pid'):
+      (ROOT / name).unlink(missing_ok=True)
+
+
+class Session:
+  def __init__(self, ap):
+    self.ap = ap
+    self.owner = None
+    self.details = None
+    self.expires = 0
+
+  def stop(self):
+    self.ap.stop()
+    self.owner = self.details = None
+    self.expires = 0
+
+  def expire(self):
+    if self.details and (time.monotonic() >= self.expires or not self.ap.healthy()):
+      self.stop()
+
+  def request(self, body):
+    self.expire()
+    action, owner = body.get('action'), body.get('owner')
+    if not isinstance(owner, str) or not 1 <= len(owner) <= 128:
+      raise ValueError('Invalid local video owner')
+    if action == 'start':
+      if self.owner and self.owner != owner:
+        raise ValueError('Another app is using local video Wi-Fi')
+      if not self.details:
+        # Android can remember consent for this access point across sessions.
+        suffix = hashlib.sha256(Path(f'/sys/class/net/{INTERFACE}/address').read_bytes()).hexdigest()[:6]
+        details = {'ssid': 'Asius-Live-' + suffix, 'password': secrets.token_urlsafe(18),
+                   'lease': secrets.token_hex(24), 'address': ADDRESS}
+        self.ap.start(details['ssid'], details['password'])
+        self.owner, self.details = owner, details
+      self.expires = time.monotonic() + LEASE_SECONDS
+      return self.details
+    if not self.details or self.owner != owner or not secrets.compare_digest(str(body.get('lease', '')), self.details['lease']):
+      raise ValueError('Local video session expired. Connect video again.')
+    if action == 'stop':
+      self.stop()
+    elif action in ('renew', 'check'):
+      self.expires = time.monotonic() + LEASE_SECONDS
+    else:
+      raise ValueError('Unknown local video command')
+    return {'success': 1, 'address': ADDRESS}
+
+
+def serve():
+  daemon_lock = (ROOT / 'daemon.lock').open('w')
+  try:
+    fcntl.flock(daemon_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+  except BlockingIOError:
+    daemon_lock.close()
+    return
+  session = Session(AccessPoint())
+  if (ROOT / 'restore.json').exists():
+    session.ap.restore = json.loads((ROOT / 'restore.json').read_text())
+    session.ap.stop()
+  # SIGTERM must release the radio just like a normal session close.
+  def shutdown(_signal, _frame):
+    raise SystemExit()
+  signal.signal(signal.SIGTERM, shutdown)
+  signal.signal(signal.SIGINT, shutdown)
+  with socket.socket(socket.AF_UNIX) as server:
+    SOCKET.unlink(missing_ok=True)
+    server.bind(str(SOCKET))
+    SOCKET.chmod(0o600)
+    server.listen(4)
+    idle_until = time.monotonic() + LEASE_SECONDS
+    try:
+      while session.details or time.monotonic() < idle_until:
+        session.expire()
+        if not select.select([server], [], [], 1)[0]:
+          continue
+        with server.accept()[0] as client:
+          client.settimeout(3)
+          try:
+            with client.makefile('rb') as incoming:
+              body = json.loads(incoming.readline(4096))
+            reply = session.request(body)
+            idle_until = time.monotonic() + 5
+          except Exception as error:
+            reply = {'error': str(error)}
+          try:
+            client.sendall(json.dumps(reply).encode() + b'\n')
+          except OSError:
+            pass
+    finally:
+      try:
+        session.stop()
+      finally:
+        SOCKET.unlink(missing_ok=True)
+
+
+def main():
+  os.umask(0o077)
+  ROOT.mkdir(mode=0o700, exist_ok=True)
+  if len(sys.argv) == 2 and sys.argv[1] == 'serve':
+    serve()
+    return
+  body = json.loads(sys.stdin.readline(4096))
+  with (ROOT / 'lock').open('w') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    running = False
+    with socket.socket(socket.AF_UNIX) as probe:
+      try:
+        probe.connect(str(SOCKET))
+        running = True
+      except (FileNotFoundError, ConnectionRefusedError):
+        pass
+    if not running:
+      if body.get('action') != 'start':
+        raise ValueError('Local video session expired')
+      subprocess.Popen([sys.executable, str(Path(__file__).resolve()), 'serve'],
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+      time.sleep(.2)
+    with socket.socket(socket.AF_UNIX) as client:
+      client.settimeout(40)
+      for attempt in range(50):
+        try:
+          client.connect(str(SOCKET))
+          break
+        except (FileNotFoundError, ConnectionRefusedError):
+          if attempt == 49:
+            raise RuntimeError('Local video Wi-Fi did not start') from None
+          time.sleep(.1)
+      client.sendall(json.dumps(body).encode() + b'\n')
+      with client.makefile('rb') as incoming:
+        print(incoming.readline(4096).decode().strip())
+
+
+if __name__ == '__main__':
+  try:
+    main()
+  except Exception as error:
+    print(json.dumps({'error': str(error)}))
+    sys.exit(1)
