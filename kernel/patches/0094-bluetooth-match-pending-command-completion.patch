@@ -1,0 +1,47 @@
+From: Asius <peeter@asius.ai>
+Subject: [PATCH] Bluetooth: match pending command completions
+
+An iPhone can request its saved LTK before remote features arrive. The LTK
+reply completion currently wakes the remote-features waiter. Its completion
+callback drops the only connection reference while the link is BT_CONFIG.
+The host disconnects immediately, and BlueZ retains a stale connected peer.
+
+Only complete the matching request opcode. Preserve waits for later events,
+including successful Command Complete events. Command credits still advance.
+
+The later-event wait follows Chengfeng Ye's upstream proposal:
+https://lore.kernel.org/linux-bluetooth/20260821164512.2842464-1-nicoyip.dev@gmail.com/
+This scoped backport also checks the opcode for interleaved LTK replies.
+
+diff --git a/net/bluetooth/hci_event.c b/net/bluetooth/hci_event.c
+--- a/net/bluetooth/hci_event.c
++++ b/net/bluetooth/hci_event.c
+@@ -4298,13 +4298,21 @@
+ 
+ 	handle_cmd_cnt_and_timer(hdev, ev->ncmd);
+ 
+-	hci_req_cmd_complete(hdev, *opcode, *status, req_complete,
+-			     req_complete_skb);
+-
+-	if (hci_dev_test_flag(hdev, HCI_CMD_PENDING)) {
+-		bt_dev_err(hdev,
+-			   "unexpected event for opcode 0x%4.4x", *opcode);
+-		return;
++	/* An asynchronous reply, such as LE LTK Reply, must not complete a
++	 * different command-sync request waiting for remote features. Keep
++	 * successful commands pending when their caller requested a later event.
++	 */
++	if (!hdev->req_skb ||
++	    (hci_skb_opcode(hdev->req_skb) == *opcode &&
++	     (*status || !hci_skb_event(hdev->req_skb)))) {
++		hci_req_cmd_complete(hdev, *opcode, *status, req_complete,
++				     req_complete_skb);
++
++		if (hci_dev_test_flag(hdev, HCI_CMD_PENDING)) {
++			bt_dev_err(hdev,
++				   "unexpected event for opcode 0x%4.4x", *opcode);
++			return;
++		}
+ 	}
+ 
+ 	if (atomic_read(&hdev->cmd_cnt) && !skb_queue_empty(&hdev->cmd_q))

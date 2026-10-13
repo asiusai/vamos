@@ -1,0 +1,28 @@
+From: Asius <peeter@asius.ai>
+Subject: [PATCH] Bluetooth: do not drop the LE setup reference on encryption
+
+A bonded iPhone can finish encryption before remote features arrive. The
+BT_CONFIG path in hci_encrypt_cfm confirms the connection and drops a setup
+reference. For LE, that reference belongs to hci_le_read_remote_features.
+Its completion drops the same reference again, scheduling a disconnect
+four seconds later despite an active ATT socket.
+
+Keep the existing connection confirmation. Only drop the classic ACL setup
+reference here. The LE features request retains ownership of its reference.
+
+diff --git a/include/net/bluetooth/hci_core.h b/include/net/bluetooth/hci_core.h
+--- a/include/net/bluetooth/hci_core.h
++++ b/include/net/bluetooth/hci_core.h
+@@ -2190,7 +2190,11 @@ static inline void hci_encrypt_cfm(struct hci_conn *conn, __u8 status)
+ 			conn->state = BT_CONNECTED;
+ 
+ 		hci_connect_cfm(conn, status);
+-		hci_conn_drop(conn);
++		/* LE setup is held by the remote-features request. Its
++		 * completion releases that reference, even after encryption.
++		 */
++		if (conn->type == ACL_LINK)
++			hci_conn_drop(conn);
+ 		return;
+ 	}
+ 

@@ -39,6 +39,8 @@ by subsystem. Original authors remain credited in patch headers and source.
 | 0086-0088 | Optional board USB transmit calibration: replace the DWC3 mode field and apply a validated QMP v4 tap before startup |
 | 0090 | DWC3 receiver detection and stuck SuperSpeed recovery (0090, 0091), adapted from the AGNOS behavior |
 | 0093 | Enforce the Dragon Panda SPI bus ceiling in the controller, including per-transfer userspace requests |
+| 0094 | Match Bluetooth command completions and preserve waits for later events during bonded phone reconnection |
+| 0095 | Preserve the LE setup reference when encryption completes before remote features |
 
 The upstream Dragon DTS uses a different firmware memory layout. Its board
 support replaces the old full-board addition, but the Asius carveouts and
@@ -65,6 +67,18 @@ the read lock can finish. Patch 0044 separately preserves recovery command
 dispatch, following the [upstream proposal](https://lore.kernel.org/r/20260912131625.2301486-1-stanleyjhu@google.com).
 Retest concurrent health queries, I/O and frequency changes when replacing
 these patches with a later stable kernel. Neither patch disables scaling.
+
+Patch 0094 prevents an LE LTK Reply from completing a pending remote-features
+request. On Asius 1, this race disconnected a bonded iPhone during connection
+setup. BlueZ then retained a stale connection. The patch preserves command
+credits and completion errors. Retest bonded Android and iOS reconnection when
+replacing it with an upstream fix.
+
+Patch 0095 fixes the next stage of the same reconnect sequence. Encryption
+completion must not release the LE remote-features request's reference.
+Releasing it twice disconnects an active ATT connection four seconds later.
+The patched kernel builds. Device validation is pending because Asius 1 went
+offline before transfer completed.
 
 ## Removed patches
 
