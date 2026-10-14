@@ -1,0 +1,30 @@
+From: Asius <peeter@asius.ai>
+Subject: [PATCH] Bluetooth: validate LE keys in Secure Connections Only mode
+
+The shared encryption-change handler applies hci_conn_check_link_mode to
+LE links. Its SC-only check requires a BR/EDR P-256 combination key type.
+LE never sets that field, so a valid authenticated LE Secure Connections
+link is disconnected immediately after encryption starts.
+
+Check LE level 4, a full 16-byte key, and active AES-CCM encryption.
+The SMP LTK path assigns level 4 only to authenticated P-256 keys.
+Keep the existing BR/EDR checks and reject lower-security LE links.
+
+--- a/net/bluetooth/hci_conn.c
++++ b/net/bluetooth/hci_conn.c
+@@ -2500,6 +2500,15 @@
+ 	 * using a P-256 authenticated combination key.
+ 	 */
+ 	if (hci_dev_test_flag(conn->hdev, HCI_SC_ONLY)) {
++		/* LE security is derived from its LTK, not the BR/EDR link
++		 * key type. Level 4 requires an authenticated P-256 LTK.
++		 */
++		if (conn->type == LE_LINK)
++			return conn->sec_level == BT_SECURITY_FIPS &&
++			       conn->enc_key_size == 16 &&
++			       test_bit(HCI_CONN_ENCRYPT, &conn->flags) &&
++			       test_bit(HCI_CONN_AES_CCM, &conn->flags);
++
+ 		if (!hci_conn_sc_enabled(conn) ||
+ 		    !test_bit(HCI_CONN_AES_CCM, &conn->flags) ||
+ 		    conn->key_type != HCI_LK_AUTH_COMBINATION_P256)

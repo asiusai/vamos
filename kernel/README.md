@@ -41,6 +41,9 @@ by subsystem. Original authors remain credited in patch headers and source.
 | 0093 | Enforce the Dragon Panda SPI bus ceiling in the controller, including per-transfer userspace requests |
 | 0094 | Match Bluetooth command completions and preserve waits for later events during bonded phone reconnection |
 | 0095 | Preserve the LE setup reference when encryption completes before remote features |
+| 0096 | Use Bluetooth address types and on-air peer addresses in Secure Connections authentication |
+| 0097 | Check authenticated LE encryption separately from BR/EDR link keys in SC-only mode |
+| 0098 | Resolve AIC8800D80 private Bluetooth addresses in Linux to preserve the pairing address transcript |
 
 The upstream Dragon DTS uses a different firmware memory layout. Its board
 support replaces the old full-board addition, but the Asius carveouts and
@@ -77,8 +80,36 @@ replacing it with an upstream fix.
 Patch 0095 fixes the next stage of the same reconnect sequence. Encryption
 completion must not release the LE remote-features request's reference.
 Releasing it twice disconnects an active ATT connection four seconds later.
-The patched kernel builds. Device validation is pending because Asius 1 went
-offline before transfer completed.
+Initial Pixel and iPhone pairing and reconnection passed on Asius 1. Repeat pairing required patch 0098 below.
+
+Patch 0096 corrects the address transcript used for LE Secure Connections.
+The controller reports resolved identity address types. SMP needs the public/random
+address type and the peer's on-air address. The wrong transcript caused matching
+comparison numbers to fail the DHKey check on the Pixel.
+
+Patch 0097 checks LE security with its security level, key size and encryption flags.
+The previous SC-only check required a BR/EDR link-key type that LE does not set.
+It disconnected the Pixel immediately after successful encryption.
+LE still requires authenticated Secure Connections, a 16-byte key and active AES-CCM encryption.
+BR/EDR checks are unchanged. The host regression compiles the actual patched checks:
+`python3 -m unittest tools/test_bluetooth_security.py`.
+
+Patch 0098 disables controller-side address resolution on USB device `a69c:8d81`.
+The AIC8800D80 reports a resolved identity but omits the peer's on-air private address.
+After removing an iPhone bond, repeat pairing fails its DHKey check despite matching comparison digits.
+Linux resolves private addresses with saved IRKs instead. Secure Connections, Numeric Comparison and authenticated GATT remain required.
+The regression tests check the privacy capability and the security checks together.
+
+Kernel `#285` passed real Linux Chrome enrollment and two reconnect tests on Asius 1.
+The iPhone passed enrollment, reconnection and another enrollment after removing both authorizations and bonds.
+The second enrollment used the same device boot without a Bluetooth controller reset.
+Tests compared independently calculated digits and injected a fresh three-second Panda input hold after a 12-second listening delay.
+Microphone recordings confirmed the spoken comparison and success announcement on the PC and iPhone tests.
+The Pixel was unavailable for this repeat-pairing test. Clean-flash validation remains pending.
+The default 1.28-second advertisement interval caused second-client connection timeouts with the iPhone already connected.
+Asius bluetoothd now requests a 100-150 ms interval through BlueZ.
+Fresh Linux Chrome enrollment and repeated authenticated reconnects passed while the iPhone remained connected.
+The iPhone also passed reconnection while Chrome remained connected. Both clients retained independent encrypted sessions.
 
 ## Removed patches
 

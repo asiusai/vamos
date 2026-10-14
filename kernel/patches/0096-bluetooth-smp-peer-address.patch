@@ -1,0 +1,92 @@
+From: Asius <peeter@asius.ai>
+Subject: [PATCH] Bluetooth: use on-air peer addresses for LE SMP
+
+The Asius controller reports a public peer with HCI address type 0x02.
+le_conn_update_addr copies this HCI-only type into the SMP transcript.
+Numeric Comparison matches, but f5/f6 use a different address type from
+Android. The responder rejects its DHKey check before local confirmation.
+
+Normalize resolved identity types for SMP. When the enhanced connection
+event supplies a peer RPA, use that random on-air address for SMP instead
+of the resolved identity. Preserve the identity address for peer lookup.
+
+--- a/net/bluetooth/hci_event.c
++++ b/net/bluetooth/hci_event.c
+@@ -5665,12 +5665,24 @@
+ }
+ 
+ static void le_conn_update_addr(struct hci_conn *conn, bdaddr_t *bdaddr,
+-				u8 bdaddr_type, bdaddr_t *local_rpa)
+-{
++				u8 bdaddr_type, bdaddr_t *local_rpa,
++				bdaddr_t *peer_rpa)
++{
++	bdaddr_t *peer_addr = bdaddr;
++	u8 peer_type = ev_bdaddr_type(conn->hdev, bdaddr_type, NULL);
++
++	/* SMP authenticates the address used over the air, not the
++	 * controller's resolved identity or its HCI-only address type.
++	 */
++	if (peer_rpa && bacmp(peer_rpa, BDADDR_ANY)) {
++		peer_addr = peer_rpa;
++		peer_type = ADDR_LE_DEV_RANDOM;
++	}
++
+ 	if (conn->out) {
+ 		conn->dst_type = bdaddr_type;
+-		conn->resp_addr_type = bdaddr_type;
+-		bacpy(&conn->resp_addr, bdaddr);
++		conn->resp_addr_type = peer_type;
++		bacpy(&conn->resp_addr, peer_addr);
+ 
+ 		/* Check if the controller has set a Local RPA then it must be
+ 		 * used instead or hdev->rpa.
+@@ -5704,8 +5716,8 @@
+ 			bacpy(&conn->resp_addr, &conn->hdev->bdaddr);
+ 		}
+ 
+-		conn->init_addr_type = bdaddr_type;
+-		bacpy(&conn->init_addr, bdaddr);
++		conn->init_addr_type = peer_type;
++		bacpy(&conn->init_addr, peer_addr);
+ 
+ 		/* For incoming connections, set the default minimum
+ 		 * and maximum connection interval. They will be used
+@@ -5719,7 +5731,8 @@
+ 
+ static void le_conn_complete_evt(struct hci_dev *hdev, u8 status,
+ 				 bdaddr_t *bdaddr, u8 bdaddr_type,
+-				 bdaddr_t *local_rpa, u8 role, u16 handle,
++				 bdaddr_t *local_rpa, bdaddr_t *peer_rpa,
++				 u8 role, u16 handle,
+ 				 u16 interval, u16 latency,
+ 				 u16 supervision_timeout)
+ {
+@@ -5798,7 +5811,7 @@
+ 		goto unlock;
+ 	}
+ 
+-	le_conn_update_addr(conn, bdaddr, bdaddr_type, local_rpa);
++	le_conn_update_addr(conn, bdaddr, bdaddr_type, local_rpa, peer_rpa);
+ 
+ 	/* Lookup the identity address from the stored connection
+ 	 * address and address type.
+@@ -5890,7 +5903,7 @@
+ 	bt_dev_dbg(hdev, "status 0x%2.2x", ev->status);
+ 
+ 	le_conn_complete_evt(hdev, ev->status, &ev->bdaddr, ev->bdaddr_type,
+-			     NULL, ev->role, le16_to_cpu(ev->handle),
++			     NULL, NULL, ev->role, le16_to_cpu(ev->handle),
+ 			     le16_to_cpu(ev->interval),
+ 			     le16_to_cpu(ev->latency),
+ 			     le16_to_cpu(ev->supervision_timeout));
+@@ -5904,7 +5917,8 @@
+ 	bt_dev_dbg(hdev, "status 0x%2.2x", ev->status);
+ 
+ 	le_conn_complete_evt(hdev, ev->status, &ev->bdaddr, ev->bdaddr_type,
+-			     &ev->local_rpa, ev->role, le16_to_cpu(ev->handle),
++			     &ev->local_rpa, &ev->peer_rpa, ev->role,
++			     le16_to_cpu(ev->handle),
+ 			     le16_to_cpu(ev->interval),
+ 			     le16_to_cpu(ev->latency),
+ 			     le16_to_cpu(ev->supervision_timeout));

@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+exec 2>&1
+umask 077
+mkdir -p /data/etc/ssh /var/chroot/ssh
+
+# Install the interface guard before accepting any connections.
+/usr/comma/set_ssh.sh
+
+# Wait for the kernel CSPRNG before OpenSSH creates any missing host keys.
+dd if=/dev/random of=/dev/null bs=32 count=1 status=none
+ssh-keygen -A -f /data
+exec /usr/bin/sshd -D

@@ -52,15 +52,15 @@ storage target. This work happens once per image build; `flash system` reuses
 the prepared chunks for every device. Set `VAMOS_SKIP_FLASH_BUNDLE=1` only when
 building a disk artifact that will not be flashed locally.
 
-Fresh devices authorize the intentionally shared `tools/ssh/comma_setup.b64` key
-once when no SSH keys have been provisioned, allowing initial access over USB
-NCM at `192.168.42.2` or a reachable Wi-Fi network path. The boot firmware
+Fresh devices accept `comma/comma` through physical USB NCM at `192.168.42.2` and UART.
+Remote SSH requires an individual authorized key. There is no shared bootstrap key.
+Users can change their password with `passwd`. Normal OS updates preserve this change.
+The boot firmware
 selects the external controller's role before Linux starts; use
 `vamos-update usb-mode host|ncm` to persist the other role and reboot without
 unsafe live switching.
-Host tools use that checked-in key by default; set `DRAGON_SSH_KEY` or pass a
-tool-specific identity option to use an operator key. The bootstrap key can be
-replaced in `/data/params/d/GithubSshKeys`.
+Host tools use `~/.ssh/asius_operator_ed25519` by default. Set `DRAGON_SSH_KEY` to select another operator key.
+Add its public key through local access or the app. Authorized keys are stored in `/data/params/d/GithubSshKeys`.
 
 A running Dragon can enter Qualcomm EDL without the hardware button:
 
@@ -124,11 +124,12 @@ name remains unchanged in the app and Bluetooth.
 on an RTC or GPS. Board-supplied boot time is ignored, and no RTC is read or
 written. The service checkpoints every 30 seconds and at shutdown. An abrupt
 power cut can lose roughly the last checkpoint interval of running time.
-While switched off, elapsed time is unknown; the device catches up when NTP
-or an authorized app over Bluetooth or the network supplies the current time.
-Numeric NTP endpoints let recovery work without Tailscale DNS. Runtime
+While switched off, elapsed time is unknown. Chrony uses public NTS services to recover authenticated internet time.
+An authorized app can also supply time through Bluetooth or the network.
+NTS bootstrap skips certificate dates until the first clock update. It still checks certificate chains, signatures and hostnames.
+Normal TLS connections always check certificate dates. Runtime
 corrections step forward or slow the clock when it is ahead; they never step
-backward. A recent NTP fix takes precedence over phone time.
+backward. A recent NTS fix takes precedence over phone time.
 `sudo vamos-clock status` shows the last source, correction and saved timestamp.
 The runit service retains its `busybox-ntpd` name but runs `vamos-clock serve`.
 Validate the policy with `python3 -m unittest discover -s tools -p test_time_sync.py`.

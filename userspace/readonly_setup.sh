@@ -17,6 +17,8 @@ ln -s /data/etc/netplan/ /etc/netplan
 
 # setup /usr/default for defaults
 mkdir -p /usr/default/
+# Keep shadow as a normal file. PAM replaces it atomically during passwd.
+# Its comma entry is saved on userdata after each password change.
 
 rm -rf /var/cache/*
 mv /var /usr/default && mkdir /var
@@ -30,3 +32,6 @@ rm -rf /tmp && mkdir /tmp
 rm -rf /cache && mkdir /cache
 rm -rf /systemrw && mkdir /systemrw
 mkdir -p /rwtmp
+
+# Factory images must not clone host entropy state.
+rm -f /usr/default/var/lib/random-seed /usr/default/var/lib/urandom/random-seed

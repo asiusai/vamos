@@ -1,0 +1,60 @@
+From: Asius <peeter@asius.ai>
+Subject: [PATCH] Bluetooth: resolve AIC8800D80 private addresses in the host
+
+The AIC8800D80 (a69c:8d81) reports a resolved peer identity with a zero
+Peer_Resolvable_Private_Address. After removing an iPhone bond, the
+controller can still resolve its rotating address. Numeric Comparison
+matches, but the SMP DHKey check uses the wrong address and fails before
+physical confirmation. Resetting the controller clears this state.
+
+Disable controller-side address resolution only for this USB controller.
+Linux still resolves peer RPAs using stored IRKs. Preserve the actual
+on-air address for SMP, including repeat pairing without a radio reset.
+Do not change Secure Connections, Numeric Comparison, or GATT security.
+
+--- a/include/net/bluetooth/hci.h
++++ b/include/net/bluetooth/hci.h
+@@ -374,6 +374,12 @@
+ 	 * This quirk must be set before hci_register_dev is called.
+ 	 */
+ 	HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE,
++
++	/* Resolve private addresses in the host when the controller omits
++	 * the on-air peer RPA from resolved connection-complete events.
++	 * Set this before hci_register_dev.
++	 */
++	HCI_QUIRK_BROKEN_LL_PRIVACY,
+ 
+ 	__HCI_NUM_QUIRKS,
+ };
+--- a/include/net/bluetooth/hci_core.h
++++ b/include/net/bluetooth/hci_core.h
+@@ -1990,7 +1990,9 @@
+ #define scan_coded(dev) (((dev)->le_tx_def_phys & HCI_LE_SET_PHY_CODED) || \
+ 			 ((dev)->le_rx_def_phys & HCI_LE_SET_PHY_CODED))
+ 
+-#define ll_privacy_capable(dev) ((dev)->le_features[0] & HCI_LE_LL_PRIVACY)
++#define ll_privacy_capable(dev) (((dev)->le_features[0] & HCI_LE_LL_PRIVACY) && \
++			       !hci_test_quirk((dev), \
++					       HCI_QUIRK_BROKEN_LL_PRIVACY))
+ #define ll_privacy_enabled(dev) (le_enabled(dev) && ll_privacy_capable(dev))
+ 
+ #define privacy_mode_capable(dev) (ll_privacy_capable(dev) && \
+--- a/drivers/bluetooth/btusb.c
++++ b/drivers/bluetooth/btusb.c
+@@ -4288,6 +4288,15 @@
+ 			goto err_disable_wakeup;
+ 	}
+ 
++	/* AIC8800D80 resolves peer RPAs but reports an all-zero peer_rpa
++	 * in LE Enhanced Connection Complete. SMP then authenticates the
++	 * identity address instead of the on-air address and rejects f6.
++	 * Keep host-side resolution and authenticated Secure Connections.
++	 */
++	if (le16_to_cpu(data->udev->descriptor.idVendor) == 0xa69c &&
++	    le16_to_cpu(data->udev->descriptor.idProduct) == 0x8d81)
++		hci_set_quirk(hdev, HCI_QUIRK_BROKEN_LL_PRIVACY);
++
+ 	if (id->driver_info & BTUSB_CW6622)
+ 		hci_set_quirk(hdev, HCI_QUIRK_BROKEN_STORED_LINK_KEY);
+ 

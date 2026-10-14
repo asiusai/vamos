@@ -6,10 +6,8 @@ import fcntl
 import json
 import math
 import os
-import secrets
 import signal
-import socket
-import struct
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -19,9 +17,6 @@ RUNTIME = Path('/run/vamos-clock.json')
 SYNCED = Path('/run/vamos-time-synced')
 BUILD = Path('/etc/vamos-build-time')
 BOOT_ID = Path('/proc/sys/kernel/random/boot_id')
-NTP_SERVERS = ('162.159.200.1', '162.159.200.123')
-NTP_EPOCH = 2208988800
-ERA = 2 ** 32
 TEN_YEARS = 315576000
 
 
@@ -112,7 +107,7 @@ def synchronize(target, source):
   runtime = read_json(RUNTIME)
   mono = time.monotonic()
   # A phone with an incorrect clock must not override a recent NTP fix.
-  if source == 'app' and runtime.get('source') == 'ntp' and 0 <= mono - runtime.get('monotonic', -1000) < 600:
+  if source == 'app' and runtime.get('source') == 'nts' and 0 <= mono - runtime.get('monotonic', -1000) < 600:
     return {'accepted': False, 'correction': 'network-clock-current'}
   offset = target - time.time()
   if offset > 0.25:
@@ -131,41 +126,28 @@ def synchronize(target, source):
   return {'accepted': True, 'correction': correction}
 
 
-def ntp_seconds(raw, reference):
-  seconds, fraction = struct.unpack('!II', raw)
-  base = seconds - NTP_EPOCH
-  return base + round((reference - base) / ERA) * ERA + fraction / ERA
+def parse_chrony_tracking(text, now):
+  # chronyc CSV: reference ID, address, stratum, reference UTC, correction, ...,
+  # root delay, root dispersion, update interval, leap status.
+  fields = text.strip().split(',')
+  if len(fields) != 14 or fields[13] != 'Normal' or fields[0] == '00000000':
+    raise ValueError('Authenticated time is not synchronized')
+  stratum = int(fields[2])
+  reference, correction = float(fields[3]), float(fields[4])
+  delay, dispersion = float(fields[10]), float(fields[11])
+  target = now - correction
+  if not all(math.isfinite(value) for value in (reference, correction, delay, dispersion)):
+    raise ValueError('Invalid authenticated time sample')
+  if not 1 <= stratum <= 15 or not 0 <= target - reference <= 180 or not 0 <= delay / 2 + dispersion <= 2:
+    raise ValueError('Stale or unreliable authenticated time sample')
+  return target
 
 
-def parse_ntp(packet, token, elapsed, reference):
-  if len(packet) < 48 or packet[24:32] != token:
-    raise ValueError('NTP response does not match this request')
-  if packet[0] >> 6 == 3 or ((packet[0] >> 3) & 7) not in (3, 4) or packet[0] & 7 != 4 or not 1 <= packet[1] <= 15:
-    raise ValueError('NTP server is not synchronized')
-  if packet[32:40] == bytes(8) or packet[40:48] == bytes(8):
-    raise ValueError('Missing NTP timestamps')
-  received = ntp_seconds(packet[32:40], reference)
-  sent = ntp_seconds(packet[40:48], reference)
-  processing = sent - received
-  dispersion = struct.unpack('!I', packet[8:12])[0] / 65536
-  if not 0 <= elapsed <= 2 or not -0.001 <= processing <= elapsed + 0.001 or dispersion > 5:
-    raise ValueError('Unreliable NTP sample')
-  return sent + max(0, elapsed - processing) / 2
-
-
-def query_ntp(server):
-  token = secrets.token_bytes(8)
-  request = bytearray(48)
-  request[0] = 0x23  # NTPv4 client, with an unpredictable echoed request token.
-  request[40:48] = token
-  with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-    sock.settimeout(2)
-    sock.connect((server, 123))  # Kernel filters responses by source IP and port.
-    started = time.monotonic()
-    sock.send(request)
-    response = sock.recv(512)
-    finished = time.monotonic()
-  return parse_ntp(response, token, finished - started, time.time()), finished
+def query_nts():
+  # Chrony measures time without changing CLOCK_REALTIME. This helper retains
+  # the existing forward-step/backward-slew policy for both NTS and app samples.
+  result = subprocess.run(['chronyc', '-h', '/run/chrony/chronyd.sock', '-c', 'tracking'], capture_output=True, text=True, timeout=3, check=True)
+  return parse_chrony_tracking(result.stdout, time.time())
 
 
 def serve():
@@ -180,16 +162,14 @@ def serve():
     now = time.monotonic()
     if now >= next_poll:
       success = False
-      for server in NTP_SERVERS:
-        try:
-          target, sampled = query_ntp(server)
-          with locked():
-            synchronize(target + time.monotonic() - sampled, 'ntp')
-          success = True
-          break
-        except (OSError, ValueError) as error:
-          print(f'clock: NTP {server}: {error}', flush=True)
-      next_poll = time.monotonic() + (60 if success else 10)
+      try:
+        target = query_nts()
+        with locked():
+          synchronize(target, 'nts')
+        success = True
+      except (OSError, ValueError, subprocess.SubprocessError) as error:
+        print(f'clock: NTS not ready: {type(error).__name__}', flush=True)
+      next_poll = time.monotonic() + (15 if success else 2)
     if now >= next_save:
       try:
         with locked():

@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+exec 2>&1
+install -d -m 750 -o chrony -g chrony /data/chrony /run/chrony
+# Clock writes belong to vamos-clock, which never steps time backward.
+exec /usr/bin/chronyd -n -x -u chrony -f /etc/chrony.conf

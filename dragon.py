@@ -70,9 +70,7 @@ DOCK_USB3_HUB = os.environ.get("DRAGON_DOCK_USB3_HUB", "2-1")
 HEALTH_SCRIPT = os.path.join(SCRIPT_DIR, "dragon_health.py")
 REMOTE_HEALTH_SCRIPT = "/tmp/dragon_health.py"
 SSH_HOSTKEY_OPTS = [
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "UserKnownHostsFile=/dev/null",
-    "-o", "GlobalKnownHostsFile=/dev/null",
+    "-o", "StrictHostKeyChecking=accept-new",
     "-o", "LogLevel=ERROR",
 ]
 SSH_HEALTH_OPTS = [

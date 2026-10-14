@@ -36,6 +36,7 @@ xbps-install -y \
   busybox \
   bluez \
   clang \
+  chrony \
   cmake \
   dfu-util \
   dhcpcd \

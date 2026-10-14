@@ -2,7 +2,7 @@
 # See the sshd_config(5) manpage for details
 
 # Comma
-StrictModes no
+StrictModes yes
 AuthorizedKeysFile /data/params/d/GithubSshKeys
 PermitRootLogin no
 
@@ -15,7 +15,6 @@ Port 22
 Protocol 2
 # HostKeys for protocol version 2
 HostKey /data/etc/ssh/ssh_host_rsa_key
-HostKey /data/etc/ssh/ssh_host_dsa_key
 HostKey /data/etc/ssh/ssh_host_ecdsa_key
 HostKey /data/etc/ssh/ssh_host_ed25519_key
 
@@ -90,3 +89,8 @@ Subsystem sftp /usr/libexec/sftp-server
 # PAM authentication, then enable this but set PasswordAuthentication
 # and ChallengeResponseAuthentication to 'no'.
 UsePAM yes
+
+# Password access is only for USB NCM. The sshd service installs the ingress
+# firewall before listening, so a packet addressed here on Wi-Fi is rejected.
+Match LocalAddress 192.168.42.2 User comma
+    PasswordAuthentication yes

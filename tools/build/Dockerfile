@@ -150,10 +150,9 @@ RUN mkdir -p /root/.config
 # Enable the minimal Dragon services. Comma hardware services for its screen,
 # modem, and SDM845 remote processors remain disabled.
 RUN for svc in \
-  sshd rsyslogd busybox-ntpd nftables dnsmasq \
+  sshd rsyslogd chronyd vamos-clock nftables dnsmasq \
   avahi-ssh-publish ssh-param-watcher varwatch power_monitor \
   tailscaled \
-  keygen \
   bluetoothd \
   github-runner \
   openpilot init-qcom sound vamos-boot-commit vamos-hypervisor-reboot \
@@ -168,7 +167,7 @@ RUN rm -f /etc/runit/runsvdir/default/udevd
 RUN sed -i 's/FileCreateMode 0640/FileCreateMode 0644/' /etc/rsyslog.conf
 
 # Set executable permissions
-RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/bin/journalctl /usr/bin/systemctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/bin/vamos-hypervisor /usr/bin/vamos-wifi /usr/bin/vamos-hardware /usr/local/bin/qnn-smoke /etc/sv/keygen/run /etc/sv/bluetoothd/run /etc/sv/dnsmasq/run /etc/sv/tailscaled/run /etc/sv/vamos-boot-commit/run /etc/sv/vamos-hypervisor-reboot/run
+RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/bin/journalctl /usr/bin/systemctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/bin/vamos-hypervisor /usr/bin/vamos-wifi /usr/bin/vamos-hardware /usr/local/bin/qnn-smoke /etc/sv/bluetoothd/run /etc/sv/dnsmasq/run /etc/sv/tailscaled/run /etc/sv/vamos-boot-commit/run /etc/sv/vamos-hypervisor-reboot/run
 RUN chmod +x /etc/runit/1 /etc/runit/2 /etc/runit/3
 
 # Shutdown wrappers - send wall broadcast like systemd does on Ubuntu
@@ -239,26 +238,18 @@ RUN find /usr/share/locale -maxdepth 1 -mindepth 1 ! -name en_US ! -name en -exe
 RUN echo ttyS0 >> /etc/securetty
 RUN echo ttyMSM0 >> /etc/securetty
 
-# DEBUG: fix comma password (chpasswd fails under QEMU)
-# Use pre-computed hash for reliability: password is "comma"
-RUN usermod -p '$6$vamosdev$NmMcideymvdAilEr.m7OeTX.fnt3H4UmcgheKB39rkrmebVfvZIUE17zjgtOxi7K07uGicamzFFbkFLE3EjQj/' comma && \
-    usermod -p '$6$vamosdev$NmMcideymvdAilEr.m7OeTX.fnt3H4UmcgheKB39rkrmebVfvZIUE17zjgtOxi7K07uGicamzFFbkFLE3EjQj/' root
+# Save successful local password changes without changing sudo policy.
+RUN chmod +x /usr/comma/persist-password && \
+    printf '\npassword required pam_exec.so seteuid /usr/comma/persist-password\n' >> /etc/pam.d/passwd && \
+    printf '\npassword required pam_exec.so seteuid /usr/comma/persist-password\n' >> /etc/pam.d/system-auth
 
 # DEBUG: SSH setup - sshd_config expects keys in /data/etc/ssh/
 # The /data partition is mounted at runtime from /dev/sda12
 # We need to create the ssh directory structure on first boot
 RUN mkdir -p /var/chroot/ssh
 
-# DEBUG: Custom sshd run script - /data is mounted in runit stage 1
-RUN echo '#!/bin/sh' > /etc/sv/sshd/run && \
-    echo 'exec 2>&1' >> /etc/sv/sshd/run && \
-    echo '# Create ssh host keys if needed (on first boot)' >> /etc/sv/sshd/run && \
-    echo 'mkdir -p /data/etc/ssh' >> /etc/sv/sshd/run && \
-    echo 'if [ ! -s /data/etc/ssh/ssh_host_ed25519_key ] || [ ! -s /data/etc/ssh/ssh_host_rsa_key ] || [ ! -s /data/etc/ssh/ssh_host_ecdsa_key ]; then' >> /etc/sv/sshd/run && \
-    echo '  rm -f /data/etc/ssh/ssh_host_*' >> /etc/sv/sshd/run && \
-    echo '  ssh-keygen -A -f /data' >> /etc/sv/sshd/run && \
-    echo 'fi' >> /etc/sv/sshd/run && \
-    echo 'exec /usr/bin/sshd -D' >> /etc/sv/sshd/run
+# The repository-owned service installs the USB ingress guard before listening.
+RUN chmod +x /etc/sv/sshd/run
 
 RUN ldconfig
 

@@ -22,7 +22,7 @@ map_unit() {
   case "${1%.service}" in
     comma) echo openpilot ;;
     ssh) echo sshd ;;
-    systemd-timesyncd) echo busybox-ntpd ;;
+    systemd-timesyncd) echo vamos-clock ;;
     ssh-param-watcher.path|ssh-param-watcher) echo ssh-param-watcher ;;
     *) echo "${1%.service}" ;;
   esac

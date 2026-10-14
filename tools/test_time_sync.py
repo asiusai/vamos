@@ -1,6 +1,5 @@
 """Exercise boot recovery, NTP freshness and corrections without setting host time."""
 import importlib.util
-import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,14 +48,14 @@ class ClockTest(unittest.TestCase):
 
   def test_backwards_samples_slew_instead_of_step(self):
     with patch.object(clock.time, 'time', return_value=BUILD + 300), patch.object(clock.time, 'clock_settime') as step, patch.object(clock, 'slew') as slew:
-      self.assertEqual(clock.synchronize(BUILD + 100, 'ntp')['correction'], 'slew')
+      self.assertEqual(clock.synchronize(BUILD + 100, 'nts')['correction'], 'slew')
     step.assert_not_called()
     slew.assert_called_once_with(-200)
     self.assertTrue(clock.SYNCED.exists())
 
   def test_forward_sample_and_phone_cannot_override_recent_ntp(self):
     with patch.object(clock.time, 'time', return_value=BUILD), patch.object(clock.time, 'clock_settime') as step, patch.object(clock, 'slew'):
-      self.assertTrue(clock.synchronize(BUILD + 100, 'ntp')['accepted'])
+      self.assertTrue(clock.synchronize(BUILD + 100, 'nts')['accepted'])
       self.assertFalse(clock.synchronize(BUILD + 500, 'app')['accepted'])
     step.assert_called_once_with(clock.time.CLOCK_REALTIME, BUILD + 100)
 
@@ -75,30 +74,15 @@ class ClockTest(unittest.TestCase):
     step.assert_not_called()
     slew.assert_not_called()
 
-  def packet(self):
-    packet = bytearray(48)
-    packet[0] = 0x24
-    packet[1] = 2
-    packet[24:32] = b'12345678'
-    packet[32:40] = packet[40:48] = struct.pack('!II', BUILD + clock.NTP_EPOCH, 0)
-    return packet
-
-  def test_ntp_matches_fresh_request_and_compensates_delay(self):
-    self.assertAlmostEqual(clock.parse_ntp(self.packet(), b'12345678', .1, BUILD), BUILD + .05)
-    with self.assertRaises(ValueError):
-      clock.parse_ntp(self.packet(), b'oldtoken', .1, BUILD)
-    for index, value in [(0, 0xe4), (0, 0x23), (1, 0), (1, 16)]:
-      packet = self.packet()
-      packet[index] = value
+  def test_authenticated_tracking_freshness(self):
+    sample = f'01020304,1.2.3.4,3,{BUILD},-100,0,0,0,0,0,0.02,0.01,16,Normal'
+    self.assertEqual(clock.parse_chrony_tracking(sample, BUILD - 100), BUILD)
+    for invalid in (sample.replace('Normal', 'Not synchronised'), sample.replace('01020304', '00000000'),
+                    sample.replace('-100', 'nan'), sample.replace(',0.01,', ',10,')):
       with self.assertRaises(ValueError):
-        clock.parse_ntp(packet, b'12345678', .1, BUILD)
+        clock.parse_chrony_tracking(invalid, BUILD - 100)
     with self.assertRaises(ValueError):
-      clock.parse_ntp(self.packet(), b'12345678', 3, BUILD)
-
-  def test_ntp_era_rollover(self):
-    after_rollover = 2208988800  # 2040
-    raw = struct.pack('!II', (after_rollover + clock.NTP_EPOCH) % clock.ERA, 0)
-    self.assertEqual(clock.ntp_seconds(raw, after_rollover), after_rollover)
+      clock.parse_chrony_tracking(sample, BUILD + 1000)
 
 
 if __name__ == '__main__':
