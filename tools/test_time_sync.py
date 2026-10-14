@@ -1,4 +1,4 @@
-"""Exercise boot recovery, NTP freshness and corrections without setting host time."""
+"""Exercise boot recovery, authenticated time and corrections without setting host time."""
 import importlib.util
 import tempfile
 import unittest
@@ -75,14 +75,30 @@ class ClockTest(unittest.TestCase):
     slew.assert_not_called()
 
   def test_authenticated_tracking_freshness(self):
-    sample = f'01020304,1.2.3.4,3,{BUILD},-100,0,0,0,0,0,0.02,0.01,16,Normal'
+    sample = f'01020304,1.2.3.4,3,{BUILD},100,0,0,0,0,0,0.02,0.01,16,Normal'
     self.assertEqual(clock.parse_chrony_tracking(sample, BUILD - 100), BUILD)
     for invalid in (sample.replace('Normal', 'Not synchronised'), sample.replace('01020304', '00000000'),
-                    sample.replace('-100', 'nan'), sample.replace(',0.01,', ',10,')):
+                    sample.replace(',100,', ',nan,'), sample.replace(',0.01,', ',10,')):
       with self.assertRaises(ValueError):
         clock.parse_chrony_tracking(invalid, BUILD - 100)
     with self.assertRaises(ValueError):
       clock.parse_chrony_tracking(sample, BUILD + 1000)
+
+  def test_real_chrony_slow_clock_sample_advances_time(self):
+    # Captured after Asius-1 reboot. Chronyc reports 14.893 seconds slow.
+    sample = 'A29FC87B,162.159.200.123,4,1791994582.681614496,14.893366814,0.000320654,0.003796908,35.991,0.259,11.466,0.013530743,0.001582239,16.3,Normal'
+    now = 1791994581.3006172
+    self.assertAlmostEqual(clock.parse_chrony_tracking(sample, now), now + 14.893366814)
+
+  def test_fast_clock_sample_reduces_target_without_backwards_step(self):
+    sample = f'01020304,1.2.3.4,3,{BUILD},-100,0,0,0,0,0,0.02,0.01,16,Normal'
+    now = BUILD + 100
+    target = clock.parse_chrony_tracking(sample, now)
+    self.assertEqual(target, BUILD)
+    with patch.object(clock.time, 'time', return_value=now), patch.object(clock.time, 'clock_settime') as step, patch.object(clock, 'slew') as slew:
+      clock.synchronize(target, 'nts')
+    step.assert_not_called()
+    slew.assert_called_once_with(-100)
 
 
 if __name__ == '__main__':

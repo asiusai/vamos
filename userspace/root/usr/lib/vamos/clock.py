@@ -135,7 +135,9 @@ def parse_chrony_tracking(text, now):
   stratum = int(fields[2])
   reference, correction = float(fields[3]), float(fields[4])
   delay, dispersion = float(fields[10]), float(fields[11])
-  target = now - correction
+  # Chrony's CSV correction is positive when CLOCK_REALTIME is slow.
+  # Last offset uses the opposite convention; it is not this field.
+  target = now + correction
   if not all(math.isfinite(value) for value in (reference, correction, delay, dispersion)):
     raise ValueError('Invalid authenticated time sample')
   if not 1 <= stratum <= 15 or not 0 <= target - reference <= 180 or not 0 <= delay / 2 + dispersion <= 2:
