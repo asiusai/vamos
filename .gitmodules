@@ -4,9 +4,11 @@
 [submodule "bootloader/u-boot"]
 	path = bootloader/u-boot
 	url = https://source.denx.de/u-boot/u-boot.git
+	ignore = dirty
 [submodule "bootloader/qtestsign"]
 	path = bootloader/qtestsign
 	url = https://github.com/msm8916-mainline/qtestsign.git
+	ignore = dirty
 [submodule "kernel/aic8800"]
 	path = kernel/aic8800
 	url = https://github.com/radxa-pkg/aic8800.git

@@ -109,6 +109,10 @@ the host command refuses malformed metadata without attempting filesystem repair
 Normal NCM enumeration is checked after reset. A stored USB host role does not
 expose NCM and must be changed separately if USB networking is wanted.
 
+The build applies the tracked patches under `bootloader/patches/` to both upstream checkouts.
+Normal Git status hides their worktree changes. Patch edits and submodule revision changes remain visible.
+Use `git status --ignore-submodules=none` to inspect the patched checkouts.
+
 ## Boot watchdog and diagnostics
 
 U-Boot starts the Qualcomm hardware watchdog after relocation, before USB and
