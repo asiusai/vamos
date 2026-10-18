@@ -802,13 +802,25 @@ index eadcb2f7e3aaa1e8c6bf5e939339769aa55e7018..c5464fde7904c402be42cd1c106225b6
  	u8 reset_done;
  	int i;
  
-@@ -368,6 +468,11 @@ static irqreturn_t csid_isr(int irq, void *dev)
+@@ -368,6 +468,23 @@ static irqreturn_t csid_isr(int irq, void *dev)
  	val = readl_relaxed(csid->base + CSID_CSI2_RX_IRQ_STATUS);
  	writel_relaxed(val, csid->base + CSID_CSI2_RX_IRQ_CLEAR);
  
++	/* Preserve receiver faults in the route's kernel log before they clear. */
++	if (val & (GENMASK(24, 11) | BIT(26)))
++		dev_warn_ratelimited(csid->camss->dev,
++			"csid%u RX error status=0x%08x (CRC=%u ECC=%u)\n",
++			csid->id, val, !!(val & BIT(19)),
++			!!(val & (BIT(14) | BIT(20))));
++
 +	if (!csid_is_lite(csid)) {
 +		ipp_irq = readl_relaxed(csid->base + CSID_IPP_IRQ_STATUS);
 +		writel_relaxed(ipp_irq, csid->base + CSID_IPP_IRQ_CLEAR);
++		if (ipp_irq & (BIT(2) | BIT(13) | BIT(14)))
++			dev_warn_ratelimited(csid->camss->dev,
++				"csid%u PIX error status=0x%08x (FIFO=%u pixels=%u lines=%u)\n",
++				csid->id, ipp_irq, !!(ipp_irq & BIT(2)),
++				!!(ipp_irq & BIT(13)), !!(ipp_irq & BIT(14)));
 +	}
 +
  	/* Read and clear IRQ status for each enabled RDI channel */
