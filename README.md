@@ -58,7 +58,8 @@ identity and recording recovery access. Retain the old key privately when needed
 Normal writes remain blocked by the read-only mount; root can deliberately
 unlock it. This is not a hardware fuse or protection against physical EDL access.
 Older five-partition installations need factory provisioning and explicit key
-import once. Never write a raw full-disk image over an existing identity.
+import once. OTA manifests require updater version 3, so earlier updaters refuse
+the release before changing a slot. Never write a raw full-disk image over an existing identity.
 
 Factory OS flashing keeps the connected SOM's stock UEFI. The optional
 `flash uboot` path first reads and content-addresses that board's XBL backup,

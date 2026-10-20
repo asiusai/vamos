@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import BinaryIO, Callable, Iterator, Sequence
 
 
-UPDATER_VERSION = 2
+UPDATER_VERSION = 3
 MANIFEST_VERSION = 1
 PRODUCT = "asius-v0"
 LEGACY_PRODUCTS = {"radxa-dragon-q6a"}
