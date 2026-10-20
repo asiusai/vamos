@@ -282,15 +282,15 @@ jobs:
       - name: publish manifest to openpilot
         run: |
           set -euo pipefail
-          destination=openpilot/openpilot/system/hardware/v1
+          destination=openpilot/openpilot/system/hardware/v0
           cp build/ota/vamos.json "$destination/vamos.json"
           cp build/ota/vamos.json.sig "$destination/vamos.json.sig"
           cd openpilot
-          if [ -z "$(git status --porcelain -- openpilot/system/hardware/v1/vamos.json openpilot/system/hardware/v1/vamos.json.sig)" ]; then
+          if [ -z "$(git status --porcelain -- openpilot/system/hardware/v0/vamos.json openpilot/system/hardware/v0/vamos.json.sig)" ]; then
             echo "openpilot already contains this manifest"
             exit 0
           fi
-          git add openpilot/system/hardware/v1/vamos.json openpilot/system/hardware/v1/vamos.json.sig
+          git add openpilot/system/hardware/v0/vamos.json openpilot/system/hardware/v0/vamos.json.sig
           git -c user.name="github-actions[bot]" \
             -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             commit -m "Update vamOS manifest to $VAMOS_VERSION"

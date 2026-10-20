@@ -28,6 +28,8 @@ XBL_SIZE=$((6 * 1024 * 1024))
 SUPPORTED_STOCK_SHA256=(
   62e35c5aa2b564ed0f604debee94d284c5842b9db46f35194948c41717a0ded5
   76a5964746253aaead8c77ed20987c430d05f80fe6e3dbe6c94c34474308c5cd
+  # Radxa 260916, including Firehose sector padding and erased partition tail.
+  92df74530e9a6228f88f19d936aa1ca699bd4905ec36f3af033bcbc4fb3798af
 )
 restore=0
 

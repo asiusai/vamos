@@ -1,0 +1,48 @@
+From: Asius <contact@asius.ai>
+Subject: [PATCH] firmware: qcom: tzmem: share Dragon EL2 buffers with their caller
+
+Dragon U-Boot uses Secure Launch to enter EL2. A bridge granting only HLOS
+access is accepted, but storage SMC calls return SMC_ERR_BUF_PTR_NOT_NS.
+A self-owner-only bridge allows INIT but GET_INFO still fails. Granting
+both HLOS and the current caller access makes GET_INFO work.
+
+Limit this firmware quirk to Dragon boots with EL2 available. Keep the
+existing HLOS mapping and grant read/write, without execute permission.
+The default behavior remains unchanged for stock EL1 boots and other
+boards. The storage interface and its transfer limit remain separate
+upstream-derived patches.
+
+--- a/drivers/firmware/qcom/qcom_tzmem.c
++++ b/drivers/firmware/qcom/qcom_tzmem.c
+@@ -72,7 +72,13 @@
+ #include <linux/firmware/qcom/qcom_scm.h>
+ #include <linux/of.h>
+ 
++#ifdef CONFIG_ARM64
++#include <asm/virt.h>
++#endif
++
+ #define QCOM_SHM_BRIDGE_NUM_VM_SHIFT 9
++#define QCOM_SHM_BRIDGE_SELF_OWNER BIT(1)
++#define QCOM_SHM_BRIDGE_SELF_OWNER_PERM_SHIFT 2
+ 
+ static bool qcom_tzmem_using_shm_bridge;
+ 
+@@ -134,6 +140,17 @@
+ 	pfn_and_ns_perm = paddr | QCOM_SCM_PERM_RW;
+ 	ipfn_and_s_perm = paddr | QCOM_SCM_PERM_RW;
+ 	size_and_flags = size | (1 << QCOM_SHM_BRIDGE_NUM_VM_SHIFT);
++
++#ifdef CONFIG_ARM64
++	/*
++	 * Dragon Secure Launch replaces Gunyah with our EL2 boot context.
++	 * TrustZone then checks caller access as well as HLOS access for
++	 * nested storage buffers. Keep HLOS and add the current owner.
++	 */
++	if (of_machine_is_compatible("radxa,dragon-q6a") && is_hyp_mode_available())
++		size_and_flags |= QCOM_SHM_BRIDGE_SELF_OWNER |
++			((u64)QCOM_SCM_PERM_RW << QCOM_SHM_BRIDGE_SELF_OWNER_PERM_SHIFT);
++#endif
+ 
+ 	ret = qcom_scm_shm_bridge_create(pfn_and_ns_perm, ipfn_and_s_perm,
+ 					 size_and_flags, QCOM_SCM_VMID_HLOS,

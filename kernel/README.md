@@ -44,6 +44,8 @@ by subsystem. Original authors remain credited in patch headers and source.
 | 0096 | Use Bluetooth address types and on-air peer addresses in Secure Connections authentication |
 | 0097 | Check authenticated LE encryption separately from BR/EDR link keys in SC-only mode |
 | 0098 | Resolve AIC8800D80 private Bluetooth addresses in Linux to preserve the pairing address transcript |
+| 0099-0101 | TrustZone SPI NOR access through SCM and MTD, from Junhao Xie and Armbian; limit transfers to 64 KiB |
+| 0102 | Give Dragon EL2 shared buffers access for both the current caller and HLOS |
 
 The upstream Dragon DTS uses a different firmware memory layout. Its board
 support replaces the old full-board addition, but the Asius carveouts and
@@ -144,8 +146,35 @@ modules must be deployed together when changing the kernel version.
 The optional RTL8169 Ethernet driver is a module so its PHY lookup runs after
 asynchronous PCIe host discovery, outside that asynchronous probe context.
 
+The AIC8800 source is pinned to Radxa release `5.0+git20260123.5f7be68d-10`.
+Its firmware-path fix replaces overlapping `sprintf` calls with bounded appends.
+The D80 firmware blobs and in-tree Bluetooth driver are unchanged.
+
 Keep `GPIO_CDEV_V1` enabled: Openpilot sensord uses the upstream v1 line-event
 ioctl for IMU interrupts. Linux 7.2 no longer enables that API by default.
+
+## Boot firmware storage
+
+Patches 0099-0101 provide the proposed upstream SCM storage interface and its MTD driver.
+They come from [Armbian's QCS6490 series](https://github.com/armbian/build/commit/1ecbaf6c93d3c026eaf3d6f6e91a3d842a8dac60).
+The [64 KiB transfer limit](https://github.com/armbian/build/commit/91b98a0a28966eaa1dab76271860064ba0ee5fdb) keeps each allocation within the SCM memory pool.
+
+Dragon U-Boot uses Secure Launch to enter EL2.
+On this path, HLOS-only shared buffers cause SMC error `-8`.
+Self-owner-only buffers permit initialization but fail the storage-information query.
+Patch 0102 grants read/write access to both, only on Dragon boots with EL2 available.
+Other boards and stock EL1 boots retain the existing behavior.
+
+The `qcom_scm_storage` module exposes NOR through MTD.
+Load it with `sudo modprobe qcom_scm_storage`.
+Find the device by its `qcom_scm_storage` name; its device number can change.
+Direct QSPI remains disabled because it resets this board.
+This interface supports explicit firmware maintenance over SSH.
+Automatic U-Boot and firmware installation through OS or openpilot updates is not implemented.
+Preserve a verified device-specific backup before writing boot firmware.
+Asius 1 passed full NOR reads and erase/write/restore tests in unallocated space.
+Replacing an active boot-firmware partition through this interface remains untested.
+One EDL return failed before Linux started. See the bootloader README for this unresolved boot limitation.
 
 ## Video driver selection
 

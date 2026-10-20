@@ -1,5 +1,21 @@
 # Dragon Q6A U-Boot
 
+The selected firmware baseline is Radxa `dragon-q6a_flat_build_wp_260916`.
+Use [this pinned package](https://dl.radxa.com/dragon/q6a/images/dragon-q6a_flat_build_wp_260916.zip).
+Its SHA256 is `f736fdd6744cbbcce6d5b76feb813d6cd02593493b3a1213e8b3c7deb1f9d1fc`.
+The bundled Firehose programmer has SHA256 `a35ca2f9e30e10c0d16fb7e9d7508d00c0f03717bca565950f00ddc7ed7a35eb`.
+This programmer is also used by the OS flasher.
+
+Validation used VamOS U-Boot, Linux 7.2.7, and UFS on Asius 1.
+It covered cameras, Panda, USB NCM, Adreno compute, and hardware video encoding and decoding.
+Stock EDK2 operation with this release remains untested.
+One EDL return entered crash-dump mode before Linux started.
+The stored boot stage was `loading`. Recovery succeeded without changing NOR.
+The exact cause remains unresolved; repeated successful boots do not establish full reboot reliability.
+Normal OS updates do not replace SPI NOR firmware.
+`flash uboot` replaces XBL on the existing firmware base; it does not upgrade the other NOR partitions.
+Preserve a complete device-specific NOR backup before a full firmware upgrade.
+
 Dragon Q6A does not use RB3 Gen 2's separate `uefi_a`/`uefi_b` layout. Its EDK2
 core is a 0x9f000000 load segment inside the SPI NOR `XBL` image; `ImageFv` is
 only a data firmware volume and is not the APPSBL entry point. vamOS patches
