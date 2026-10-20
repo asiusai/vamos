@@ -9,8 +9,9 @@ This programmer is also used by the OS flasher.
 Validation used VamOS U-Boot, Linux 7.2.7, and UFS on Asius 1.
 It covered cameras, Panda, USB NCM, Adreno compute, and hardware video encoding and decoding.
 Stock EDK2 operation with this release remains untested.
-One EDL return entered crash-dump mode before Linux started.
-The stored boot stage was `loading`. Recovery succeeded without changing NOR.
+Two EDL returns entered crash-dump mode before Linux started.
+Both stored boot stages were `loading`. Recovery succeeded without changing NOR.
+Both firmware logs contain XPU protection errors in trusted-app memory.
 The exact cause remains unresolved; repeated successful boots do not establish full reboot reliability.
 Normal OS updates do not replace SPI NOR firmware.
 `flash uboot` replaces XBL on the existing firmware base; it does not upgrade the other NOR partitions.
