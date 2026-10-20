@@ -6,8 +6,9 @@ entries, adjacent sector contents and A/B trial state remain intact.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import struct
-import subprocess
 import tempfile
 import uuid
 import zlib
@@ -16,6 +17,7 @@ from pathlib import Path
 from userspace.root.usr.lib.vamos.update import (
     BOOT_PHASE_RANK, GRUB_ENV_SIZE, decode_boot_control, encode_boot_control,
 )
+from tools.flash.edl_session import FirehoseSession
 
 
 def require(condition: bool, message: str) -> None:
@@ -24,26 +26,63 @@ def require(condition: bool, message: str) -> None:
 
 
 class EdlDisk:
-    def __init__(self, loader: str, memory: str):
+    def __init__(self, loader: str, memory: str, max_payload: int | None = None):
         require(memory in ("Ufs", "Nvme"), "normal boot requires Ufs or Nvme")
         self.sector_size = 4096 if memory == "Ufs" else 512
-        self.command = ["sudo", "edl-ng", "--maxpayload=65536",
-                        f"--memory={memory}", "--slot=0", f"--loader={loader}"]
+        payload = int(os.environ.get("VAMOS_EDL_MAX_PAYLOAD", "65536")) if max_payload is None else max_payload
+        require(payload >= 4096, "Firehose payload must be at least 4096 bytes")
+        executable = Path(__file__).resolve().parents[1] / "bin/edl-ng-dist/edl-ng"
+        self.command = ["sudo", "-n", str(executable), f"--maxpayload={payload}",
+                        "--vid=05c6", "--pid=9008", f"--memory={memory}",
+                        "--slot=0", f"--loader={loader}"]
+        self.session: FirehoseSession | None = None
 
-    def _run(self, *args: str) -> None:
-        result = subprocess.run([*self.command, *args], stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, timeout=45)
-        if result.returncode:
-            raise RuntimeError(f"Firehose {args[0]} failed:\n{result.stdout}")
+    def __enter__(self):
+        # Refuse to select an arbitrary board when multiple EDL devices exist.
+        devices = []
+        for path in Path("/sys/bus/usb/devices").glob("*"):
+            try:
+                if (path / "idVendor").read_text().strip() == "05c6" and \
+                   (path / "idProduct").read_text().strip() == "9008":
+                    devices.append(path)
+            except FileNotFoundError:
+                pass
+        require(len(devices) == 1, f"expected one EDL device, found {len(devices)}")
+        self.session = FirehoseSession(self.command)
+        try:
+            require(self.session.geometry["sector_size"] == self.sector_size,
+                    "Firehose storage sector size mismatch")
+        except BaseException:
+            self.close()
+            raise
+        return self
+
+    def close(self) -> None:
+        if self.session:
+            self.session.close()
+            self.session = None
+
+    def __exit__(self, *_):
+        self.close()
+
+    def _request(self, operation: str, **arguments) -> dict:
+        require(self.session is not None, "open EdlDisk with a context manager")
+        return self.session.request(operation, **arguments)
+
+    def _verify(self, condition: bool, message: str) -> None:
+        if not condition:
+            self.close()
+            raise ValueError(message)
 
     def read(self, offset: int, length: int) -> bytes:
+        require(offset >= 0 and length > 0, "invalid Firehose read range")
         first = offset // self.sector_size
         count = (offset % self.sector_size + length + self.sector_size - 1) // self.sector_size
         with tempfile.TemporaryDirectory(prefix="vamos-edl-read-") as temporary:
             path = Path(temporary) / "sectors.bin"
-            self._run("read-sector", str(first), str(count), str(path), "--lun=0")
+            self._request("read", sector=first, count=count, path=str(path))
             data = path.read_bytes()
-        require(len(data) == count * self.sector_size, "short Firehose sector read")
+        self._verify(len(data) == count * self.sector_size, "short Firehose sector read")
         start = offset % self.sector_size
         return data[start:start + length]
 
@@ -53,11 +92,35 @@ class EdlDisk:
         with tempfile.TemporaryDirectory(prefix="vamos-edl-write-") as temporary:
             path = Path(temporary) / "sectors.bin"
             path.write_bytes(data)
-            self._run("write-sector", str(offset // self.sector_size), str(path), "--lun=0")
-        require(self.read(offset, len(data)) == data, "Firehose boot-control readback mismatch")
+            self._request("write", sector=offset // self.sector_size,
+                          count=len(data) // self.sector_size, path=str(path))
+        self._verify(self.read(offset, len(data)) == data, "Firehose boot-control readback mismatch")
+
+    def write_file_verified(self, offset: int, path: Path) -> None:
+        """Stream large images and compare a fresh full readback without caching."""
+        path = path.resolve()
+        size = path.stat().st_size
+        require(offset >= 0 and size > 0 and offset % self.sector_size == 0
+                and size % self.sector_size == 0, "unaligned Firehose image write")
+        sector, count = offset // self.sector_size, size // self.sector_size
+        with path.open("rb") as stream:
+            expected = hashlib.file_digest(stream, "sha256").digest()
+        self._request("write", sector=sector, count=count, path=str(path))
+        with tempfile.TemporaryDirectory(prefix="vamos-edl-verify-") as temporary:
+            readback = Path(temporary) / "readback.img"
+            self._request("read", sector=sector, count=count, path=str(readback))
+            self._verify(readback.stat().st_size == size, "short Firehose image readback")
+            with readback.open("rb") as stream:
+                self._verify(hashlib.file_digest(stream, "sha256").digest() == expected,
+                             "Firehose image readback checksum mismatch")
+
+    def erase(self, offset: int, length: int) -> None:
+        require(offset >= 0 and length > 0 and offset % self.sector_size == 0
+                and length % self.sector_size == 0, "unaligned Firehose erase")
+        self._request("erase", sector=offset // self.sector_size, count=length // self.sector_size)
 
     def reset(self, delay: int) -> None:
-        self._run("reset", f"--delay={delay}")
+        self._request("reset", delay=delay)
 
 
 def esp_partitions(disk: EdlDisk) -> list[tuple[int, int]]:

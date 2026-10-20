@@ -545,12 +545,12 @@ def cmd_normal(args):
     detach_qcserial()
     from tools.flash.edl_normal import EdlDisk, request_normal
 
-    disk = EdlDisk(EDL_LOADER, memory)
     try:
-        print(f"[normal] requesting one normal boot through {memory} Firehose", flush=True)
-        state = request_normal(disk)
-        print(f"[normal] verified both boot records at generation {state['generation']}", flush=True)
-        disk.reset(args.delay)
+        with EdlDisk(EDL_LOADER, memory) as disk:
+            print(f"[normal] requesting one normal boot through {memory} Firehose", flush=True)
+            state = request_normal(disk)
+            print(f"[normal] verified both boot records at generation {state['generation']}", flush=True)
+            disk.reset(args.delay)
     except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
         print(f"[normal] {exc}", file=sys.stderr)
         return 2

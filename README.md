@@ -35,6 +35,9 @@ unsupported backend, so it cannot safely probe multiple storage types in one
 EDL session.
 CLI transfers default to conservative 64 KiB USB payloads; override that with
 `VAMOS_EDL_MAX_PAYLOAD` when benchmarking a known-stable link.
+System factory flashing and `dragon.py normal` reuse one Firehose connection.
+Writes retain full readback verification. Failed operations stop the session
+without automatic retries. See [the host tool](tools/flash/edl-ng/README.md).
 Factory disks use a 64 GB minimum geometry and target-specific GPTs;
 `VAMOS_STORAGE_BYTES` remains available for builds that intentionally target a
 different minimum capacity. On first boot,

@@ -1,0 +1,133 @@
+diff --git a/QCEDL.CLI/Commands/SessionCommand.cs b/QCEDL.CLI/Commands/SessionCommand.cs
+new file mode 100644
+index 0000000..1e995c7
+--- /dev/null
++++ b/QCEDL.CLI/Commands/SessionCommand.cs
+@@ -0,0 +1,114 @@
++using System.CommandLine;
++using System.Text.Json;
++using QCEDL.CLI.Core;
++using Qualcomm.EmergencyDownload.Layers.APSS.Firehose;
++using Qualcomm.EmergencyDownload.Layers.APSS.Firehose.Xml.Elements;
++
++namespace QCEDL.CLI.Commands;
++
++// One sequential JSON request per line. A failed operation ends the session;
++// reconnecting and replaying a write after an uncertain result is unsafe.
++internal static class SessionCommand
++{
++    public static Command Create(GlobalOptionsBinder options)
++    {
++        var command = new Command("session", "Keep one Firehose connection for sequential JSON requests on stdin.");
++        command.SetHandler(ExecuteAsync, options);
++        return command;
++    }
++
++    private static async Task<int> ExecuteAsync(GlobalOptionsBinder options)
++    {
++        var output = Console.Out;
++        Console.SetOut(Console.Error); // Keep existing transport logs off the protocol stream.
++        try
++        {
++            if (options.MemoryType == null)
++            {
++                throw new InvalidOperationException("An explicit --memory is required.");
++            }
++            using var manager = new EdlManager(options);
++            var geometry = await manager.GetStorageGeometryAsync(0);
++            if (geometry.TotalSectors is not > 0)
++            {
++                throw new InvalidOperationException("Storage capacity is unknown.");
++            }
++            await output.WriteLineAsync(FormattableString.Invariant(
++                $"{{\"ok\":true,\"sector_size\":{geometry.SectorSize},\"sectors\":{geometry.TotalSectors}}}"));
++            await output.FlushAsync();
++            while (await Console.In.ReadLineAsync() is { } line)
++            {
++                using var document = JsonDocument.Parse(line);
++                var request = document.RootElement;
++                var operation = request.GetProperty("operation").GetString();
++                if (operation == "close")
++                {
++                    await output.WriteLineAsync("{\"ok\":true}");
++                    await output.FlushAsync();
++                    return 0;
++                }
++                if (operation == "reset")
++                {
++                    var delay = request.GetProperty("delay").GetUInt32();
++                    if (delay < 1 || delay > 60 || manager.IsHostDeviceMode ||
++                        !manager.Firehose.Reset(PowerValue.Reset, delay))
++                    {
++                        throw new InvalidOperationException("Reset failed or delay is invalid.");
++                    }
++                    await output.WriteLineAsync("{\"ok\":true}");
++                    await output.FlushAsync();
++                    return 0;
++                }
++
++                if (operation is not ("read" or "write" or "erase"))
++                {
++                    throw new InvalidOperationException("Unknown session operation.");
++                }
++                var sector = request.GetProperty("sector").GetUInt64();
++                var count = request.GetProperty("count").GetUInt64();
++                if (count == 0 || sector > uint.MaxValue || count > uint.MaxValue ||
++                    checked(sector + count) > geometry.TotalSectors ||
++                    checked(sector + count - 1) > uint.MaxValue)
++                {
++                    throw new InvalidOperationException("Sector range is outside storage.");
++                }
++                var bytes = checked((long)count * geometry.SectorSize);
++                switch (operation)
++                {
++                    case "read":
++                        await using (var file = File.Create(request.GetProperty("path").GetString()!))
++                        {
++                            await manager.ReadSectorsToStreamAsync(0, sector, count, file);
++                            if (file.Length != bytes) { throw new IOException("Short sector read."); }
++                        }
++                        break;
++                    case "write":
++                        await using (var file = File.OpenRead(request.GetProperty("path").GetString()!))
++                        {
++                            if (file.Length != bytes) { throw new IOException("Write size is not the exact sector range."); }
++                            await manager.WriteSectorsFromStreamAsync(0, sector, file, bytes, false, file.Name);
++                        }
++                        break;
++                    case "erase":
++                        await manager.EraseSectorsAsync(0, sector, count);
++                        break;
++                    default:
++                        throw new InvalidOperationException("Unknown operation.");
++                }
++                await output.WriteLineAsync("{\"ok\":true}");
++                await output.FlushAsync();
++            }
++            return 0;
++        }
++        catch (Exception error)
++        {
++            await output.WriteLineAsync($"{{\"ok\":false,\"error\":\"{JsonEncodedText.Encode(error.Message)}\"}}");
++            await output.FlushAsync();
++            return 1;
++        }
++        finally
++        {
++            Console.SetOut(output);
++        }
++    }
++}
+diff --git a/QCEDL.CLI/Program.cs b/QCEDL.CLI/Program.cs
+index db8944e..1ec3cd6 100644
+--- a/QCEDL.CLI/Program.cs
++++ b/QCEDL.CLI/Program.cs
+@@ -139,7 +139,7 @@ rootCommand.AddCommand(ErasePartitionCommand.Create(globalOptionsBinder));
+ rootCommand.AddCommand(EraseSectorCommand.Create(globalOptionsBinder));
+ rootCommand.AddCommand(ProvisionCommand.Create(globalOptionsBinder));
+ rootCommand.AddCommand(RawProgramCommand.Create(globalOptionsBinder));
+-// ... etc ...
++rootCommand.AddCommand(SessionCommand.Create(globalOptionsBinder));
+ 
+ // --- Default Handler (Show Help if no command given) ---
+ rootCommand.SetHandler(async _ => await rootCommand.InvokeAsync(["--help"]));

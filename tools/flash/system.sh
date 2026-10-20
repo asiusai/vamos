@@ -68,43 +68,12 @@ fi
 detach_qcserial
 
 detect_edl_storage "$LOADER"
-EDL=(sudo edl-ng "${EDL_TRANSPORT_ARGS[@]}" "${EDL_STORAGE_ARGS[@]}" --loader="$LOADER")
-FLASH_SECTOR_SIZE="$(jq -r '.sector_size' "$MANIFEST")"
-case "$FLASH_SECTOR_SIZE" in
-  512|4096) ;;
-  *) echo "ERROR: unsupported flash sector size: $FLASH_SECTOR_SIZE" >&2; exit 1 ;;
+options=()
+[ "$choice" = openpilot ] || options+=(--without-openpilot)
+[ "${VAMOS_NO_RESET:-}" != "1" ] || options+=(--no-reset)
+case "${storage,,}" in
+  ufs) memory=Ufs ;;
+  nvme) memory=Nvme ;;
 esac
-
-flash_payload() {
-  local payload="$1"
-  local output="$RAWPROGRAM_DIR/$payload"
-  python3 "$DIR/tools/flash/prepare_rawprogram.py" "$MANIFEST" "$output" --payload "$payload"
-
-  local query
-  if [ "$payload" = base ]; then
-    query='.base.operations[] | select(.operation == "erase") | [.offset, .size] | @tsv'
-  else
-    query='.optional_payloads.openpilot.operations[] | select(.operation == "erase") | [.offset, .size] | @tsv'
-  fi
-  while IFS=$'\t' read -r offset size; do
-    [ -n "$offset" ] || continue
-    echo "== Erasing $payload range at byte $offset ($size bytes) =="
-    "${EDL[@]}" erase-sector \
-      "$((offset / FLASH_SECTOR_SIZE))" "$((size / FLASH_SECTOR_SIZE))"
-  done < <(jq -r "$query" "$MANIFEST")
-
-  if grep -q '<program ' "$output/rawprogram0.xml"; then
-    echo "== Programming $payload ranges =="
-    "${EDL[@]}" rawprogram "$output/rawprogram0.xml"
-  fi
-}
-
-flash_payload base
-if [ "$choice" = openpilot ]; then
-  flash_payload openpilot
-fi
-
-if [ "${VAMOS_NO_RESET:-}" != "1" ]; then
-  echo "== Resetting device =="
-  "${EDL[@]}" reset
-fi
+python3 -m tools.flash.flash_factory "$MANIFEST" "$RAWPROGRAM_DIR" \
+  --loader "$LOADER" --memory "$memory" "${options[@]}"
