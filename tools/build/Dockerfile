@@ -24,11 +24,11 @@ ARG USERNAME=comma
 COPY ./userspace/base_setup.sh /tmp/vamos/
 RUN /tmp/vamos/base_setup.sh
 
-# Qualcomm QCS6490 FastRPC and QAIRT v68 runtime. The installer fetches pinned,
-# checksum-verified Radxa packages and installs only the cDSP runtime pieces.
+# Qualcomm DSP firmware remains necessary for audio and board initialization.
+# Model inference uses the GPU; no QNN or FastRPC userspace runtime is installed.
 COPY ./userspace/audio/QCS6490-Asius-Panda-tplg.bin /tmp/vamos/audio/
-COPY ./userspace/install_qnn_runtime.sh ./userspace/dsp_firmware.sh /tmp/vamos/
-RUN /tmp/vamos/install_qnn_runtime.sh && rm -rf /tmp/vamos/install_qnn_runtime.sh /tmp/vamos/audio
+COPY ./userspace/install_dsp_firmware.sh ./userspace/dsp_firmware.sh /tmp/vamos/
+RUN /tmp/vamos/install_dsp_firmware.sh && rm -rf /tmp/vamos/install_dsp_firmware.sh /tmp/vamos/audio
 
 # ################### #
 # ###### vamOS ###### #
@@ -90,7 +90,7 @@ RUN chmod 755 /usr/comma/setup /usr/comma/reset && \
     rm -f /usr/comma/installer /usr/comma/varwatch.py
 
 # Remove SDM845 display/modem/Android compatibility payloads that no v1 runtime
-# loads. QCS6490 TinyMesa (MSM) and the pinned FastRPC/QNN libraries remain.
+# loads. QCS6490 TinyMesa (MSM) and the DSP firmware remain.
 RUN rm -rf \
       /etc/init.d /etc/initscripts \
       /etc/sv/adsp /etc/sv/cdsp /etc/sv/fs_setup /etc/sv/gpio \
@@ -119,6 +119,7 @@ RUN rm -rf \
       /usr/lib/libhardware.so* /usr/lib/libhdcp1prov.so* /usr/lib/libhdcp2p2prov.so* \
       /usr/lib/liblmclient.so /usr/lib/liblog.so* /usr/lib/liblogwrap.so* \
       /usr/lib/libmdsprpc.so /usr/lib/libmincrypt.so* \
+      /usr/lib/libcdsprpc.so* /usr/lib/libcdsp_default_listener.so* \
       /usr/lib/libpcre.so.1 /usr/lib/libpcre.so.1.2.6 \
       /usr/lib/libpdmapper.so* /usr/lib/libpdnotifier.so* /usr/lib/libplatformconfig.so* \
       /usr/lib/libqdMetaData.so /usr/lib/libqmi.so* /usr/lib/libqmi_cci.so* \
@@ -131,12 +132,6 @@ RUN rm -rf \
       /usr/lib/libsync.so* /usr/lib/libsysutils.so* /usr/lib/libtime_genoff.so* \
       /usr/lib/libunwind.so.0 /usr/lib/libunwind.so.0.0.0 \
       /usr/lib/libutils.so* /usr/lib/libxml.so*
-
-# The overlay still carries legacy FastRPC development blobs. Keep the names
-# for compatibility, but point them at the matched Radxa 1.0.6 runtime.
-RUN ln -sfn libcdsprpc.so.1 /usr/lib/libcdsprpc.so && \
-    ln -sfn libcdsp_default_listener.so.1 /usr/lib/libcdsp_default_listener.so && \
-    ldconfig
 
 COPY ./build/BOOTAA64.EFI /usr/share/vamos/BOOTAA64.EFI
 COPY ./build/EDLAA64.EFI /usr/share/vamos/EDLAA64.EFI
@@ -167,7 +162,7 @@ RUN rm -f /etc/runit/runsvdir/default/udevd
 RUN sed -i 's/FileCreateMode 0640/FileCreateMode 0644/' /etc/rsyslog.conf
 
 # Set executable permissions
-RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/bin/journalctl /usr/bin/systemctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/bin/vamos-hypervisor /usr/bin/vamos-wifi /usr/bin/vamos-hardware /usr/local/bin/qnn-smoke /etc/sv/bluetoothd/run /etc/sv/dnsmasq/run /etc/sv/tailscaled/run /etc/sv/vamos-boot-commit/run /etc/sv/vamos-hypervisor-reboot/run
+RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/bin/journalctl /usr/bin/systemctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/bin/vamos-hypervisor /usr/bin/vamos-wifi /usr/bin/vamos-hardware /etc/sv/bluetoothd/run /etc/sv/dnsmasq/run /etc/sv/tailscaled/run /etc/sv/vamos-boot-commit/run /etc/sv/vamos-hypervisor-reboot/run
 RUN chmod +x /etc/runit/1 /etc/runit/2 /etc/runit/3
 RUN chmod +x /usr/lib/vamos/root-init && \
     ln -sfn /usr/lib/vamos/root-init /usr/bin/init

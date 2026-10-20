@@ -26,7 +26,7 @@ Q6A. This comparison uses AGNOS 19.5 on a comma four and the public
 | Display | DRM display service, backlight, UI | intentionally absent; v1 is screenless and always reports zero screen brightness |
 | User feedback | display and audio | device LEDs and the Asius app |
 | Remote access extras | none by default | Tailscale and GitHub runner are opt-in and remain down until persistently configured |
-| Model acceleration | Qualcomm GPU/OpenCL on comma hardware | validated tinygrad MSM (`MODELD_DEV=QCOM`, default) or experimental HTP/NPU (`MODELD_DEV=QNN`), with no OpenCL runtime |
+| Model acceleration | Qualcomm GPU/OpenCL on comma hardware | tinygrad Qualcomm GPU (`QCOM`) or Chestnut (`USB+AMD:LLVM`), with no OpenCL or QNN runtime |
 
 The headless setup and reset behavior intentionally differs from AGNOS. A
 screenless device must not format away its only installer and then wait for UI
@@ -39,8 +39,8 @@ its current commit, and state outside that checkout is erased.
 The final image excludes services, firmware, and libraries that only support
 comma's SDM845 display, modem, audio, Android compatibility layer, or remote
 processor layout. In particular, it does not ship the ADB or OpenCL runtime.
-The Dragon's current QCS6490 FastRPC/QAIRT runtime and `libtinymesa.so` remain:
-they are required by the QNN and tinygrad MSM model backends respectively.
+The Dragon retains DSP firmware for board initialization and audio, and `libtinymesa.so` for GPU inference.
+The unused QNN/QAIRT and FastRPC userspace libraries are removed.
 
 The image also omits inactive compiler payloads that are not used by openpilot's
 on-device build (`gnat1`, `c-index-test`, GDB's generic ARM simulator, and
@@ -52,8 +52,8 @@ environment remain available for normal development.
 Image-only validation is necessary but not sufficient. Before a VamOS release
 is installed in a car:
 
-- Build the complete system image and confirm QNN imports, HTP provider loading,
-  tinygrad MSM loading, compiler availability, log rotation, service links, and
+- Build the complete system image and confirm tinygrad MSM loading,
+  compiler availability, log rotation, service links, and
   dynamic-library dependencies from the resulting rootfs.
 - On a bench Dragon, verify Wi-Fi, Bluetooth, NCM/SSH, time sync, Avahi,
   ignition-off power save, clean boot logs, both A/B trial and rollback paths,
@@ -61,11 +61,8 @@ is installed in a car:
 - In the car, run openpilot's `test_onroad`, ignition cycles, all three camera
   streams, CAN/panda integration, video encoding, thermal behavior, and route
   logging/upload.
-- Replay the same captured route through QNN and MSM modeld builds. Record model
-  output differences, frame latency, dropped frames, total process CPU, system
-  CPU, memory, and temperature after warm-up. Change the default backend from
-  MSM to QNN only after its outputs pass the accepted replay tolerances and the
-  HTP provider is proven active without arithmetic fallback.
+- Replay a captured route on the selected GPU backend. Record frame latency,
+  dropped frames, CPU use, memory, and temperature after warm-up.
 
 No release should be merged solely from a successful image build; the final
 in-car checklist is intentionally required.
