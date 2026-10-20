@@ -227,6 +227,10 @@ Python dependency installation. Runtime testing helpers, headers, compilers and
 debuggers remain available. Kernel modules retain their full symbols in
 `build/kernel-out`; installed copies omit debug sections.
 
+VamOS locks only its additional Python runtime dependencies. The managed
+openpilot checkout supplies its own dependencies and lock file during image
+assembly. Do not keep a second openpilot dependency snapshot in VamOS.
+
 Clang and Mesa use the same LLVM 22 runtime. Raylib uses the system EGL, GLES
 and DRM libraries, which support Dragon hardware rendering. Its bundled Mesa
 copy lacks the Dragon driver and is removed. Vulkan drivers for unrelated GPUs

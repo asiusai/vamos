@@ -96,7 +96,11 @@ class FatBootControl:
 
     def __init__(self, disk: EdlDisk, start: int, length: int):
         self.disk, self.start, self.length = disk, start, length
-        boot = self.read(0, 512)
+        # One Firehose connection costs much more than these metadata bytes.
+        # Snapshot the boot sector, FAT starts and nearby directory entries.
+        # Payload reads and write verification always use the device directly.
+        self.metadata = disk.read(start, min(length, 128 * 1024))
+        boot = self.read_metadata(0, 512)
         require(boot[510:512] == b"\x55\xaa", "invalid FAT boot signature")
         self.bps, spc, reserved, fats, root_entries, total16 = struct.unpack_from("<HBHBHH", boot, 11)
         fat16 = struct.unpack_from("<H", boot, 22)[0]
@@ -135,6 +139,11 @@ class FatBootControl:
                 "FAT read outside ESP")
         return self.disk.read(self.start + offset, size)
 
+    def read_metadata(self, offset: int, size: int) -> bytes:
+        if 0 <= offset and size > 0 and offset + size <= len(self.metadata):
+            return self.metadata[offset:offset + size]
+        return self.read(offset, size)
+
     def chain(self, cluster: int):
         seen = set()
         while True:
@@ -148,7 +157,7 @@ class FatBootControl:
             for fat in self.fat_offsets:
                 sector = fat + entry // self.bps * self.bps
                 if sector not in self.fat_cache:
-                    self.fat_cache[sector] = self.read(sector, self.bps)
+                    self.fat_cache[sector] = self.read_metadata(sector, self.bps)
                 value = struct.unpack_from("<H" if self.bits == 16 else "<I",
                                            self.fat_cache[sector], entry % self.bps)[0]
                 values.append(value & (0xffff if self.bits == 16 else 0x0fffffff))
@@ -164,7 +173,7 @@ class FatBootControl:
             matches = []
             ended = False
             for offset, size in directory:
-                data = self.read(offset, size)
+                data = self.read_metadata(offset, size)
                 for pos in range(0, len(data), 32):
                     entry = data[pos:pos + 32]
                     if entry[0] == 0:

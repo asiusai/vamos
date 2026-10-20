@@ -8,13 +8,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock
 import uuid
 import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.flash.edl_normal import FatBootControl, esp_partitions, request_normal
-from userspace.root.usr.lib.vamos.update import decode_boot_control, encode_boot_control
+from userspace.root.usr.lib.vamos.update import UpdateError, decode_boot_control, encode_boot_control
 
 
 class ImageDisk:
@@ -126,6 +127,22 @@ class NormalBootTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "boot-control"):
             request_normal(disk)
         self.assertEqual(disk.writes, [])
+
+    def test_metadata_snapshot_does_not_cache_boot_control(self):
+        disk = ImageDisk(self.directory)
+        disk.read = Mock(wraps=disk.read)
+        control = FatBootControl(disk, *disk.parts[0][:2])
+        self.assertEqual(disk.read.call_count, 1)
+        original = control.payload()
+        state = decode_boot_control(original)
+        payload = encode_boot_control({**state, "generation": 8, "normal_request": 1})
+        control.write(payload)
+        self.assertEqual(control.payload(), payload)
+        with disk.parts[0][2].open("r+b") as output:
+            output.seek(control.extents[0][0])
+            output.write(b"corrupt")
+        with self.assertRaisesRegex(UpdateError, "boot-control"):
+            decode_boot_control(control.payload())
 
     def test_interrupted_primary_keeps_newer_verified_backup(self):
         disk = ImageDisk(self.directory)
