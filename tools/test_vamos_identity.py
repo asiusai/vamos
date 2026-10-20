@@ -65,3 +65,20 @@ def test_symlink_is_rejected(volume):
   identity.KEY.symlink_to(volume / 'other')
   with pytest.raises(ValueError, match='symlinks'):
     identity.provision(os.getuid(), os.getgid())
+
+
+def test_empty_gpt_partition_metadata_is_not_a_filesystem(volume, monkeypatch):
+  from types import SimpleNamespace
+  device = volume / 'disk6'
+  with device.open('wb') as stream:
+    stream.truncate(identity.SIZE)
+  mount = volume / 'mount'
+  monkeypatch.setattr(identity, 'PERSIST', mount)
+  monkeypatch.setattr(identity, 'identity_device', lambda: device)
+  monkeypatch.setattr(identity.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout='DEVNAME=/dev/sda6\nPART_ENTRY_NAME=persist\n'))
+  commands = []
+  monkeypatch.setattr(identity, 'command', lambda *args: commands.append(args))
+  identity.mount_identity()
+  assert commands[0][:2] == ('mkfs.ext4', '-F')
+  assert commands[1][0] == 'mount'
+  assert 'ro,nosuid,nodev,noexec' in commands[1]

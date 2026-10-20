@@ -107,7 +107,7 @@ def mount_identity():
   PERSIST.mkdir(exist_ok=True)
   probe = subprocess.run(["blkid", "-p", "-o", "export", str(device)], text=True, capture_output=True)
   fields = dict(line.split("=", 1) for line in probe.stdout.splitlines() if "=" in line)
-  if not fields:
+  if "TYPE" not in fields:
     # Only an entirely erased range is eligible for first-boot formatting.
     with device.open("rb", buffering=0) as stream:
       for _ in range(SIZE // (1024 * 1024)):
