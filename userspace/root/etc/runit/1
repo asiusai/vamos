@@ -237,8 +237,8 @@ chown -R comma:comma /data/scons_cache /data/media /data/log /data/params /data/
 chmod 700 /data/etc/NetworkManager/system-connections 2>/dev/null || true
 # Restore only the user's password, retaining the new image's service accounts.
 /usr/comma/persist-password restore || exit 1
-# openpilot owns identity creation and its atomic lock files.
-install -d -o comma -g comma -m 700 /data/persist/comma
+# Keep physical recovery available when identity storage is damaged.
+/usr/bin/vamos-identity initialize || echo "ERROR: identity unavailable; openpilot will not start"
 echo "=> Setting hostname..."
 /usr/comma/set-hostname.sh
 

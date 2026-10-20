@@ -57,6 +57,7 @@ DEFAULT_STORAGE_SECTORS=$((STORAGE_BYTES / SECTOR_SIZE))
 STORAGE_SECTORS="${VAMOS_STORAGE_SECTORS:-$DEFAULT_STORAGE_SECTORS}"
 ESP_SIZE=$((256 * 1024 * 1024))
 SYSTEM_SIZE=$((10 * 1024 * 1024 * 1024))
+PERSIST_SIZE=$((64 * 1024 * 1024))
 START_SECTOR=$((1024 * 1024 / SECTOR_SIZE))
 
 # Factory releases contain a native build, including the compiled Chestnut models.
@@ -176,7 +177,9 @@ ESP_A_START=$START_SECTOR
 ROOTFS_A_START=$((ESP_A_START + ESP_SECTORS))
 ESP_B_START=$((ROOTFS_A_START + SYSTEM_SECTORS))
 ROOTFS_B_START=$((ESP_B_START + ESP_SECTORS))
-USERDATA_START=$((ROOTFS_B_START + SYSTEM_SECTORS))
+PERSIST_START=$((ROOTFS_B_START + SYSTEM_SECTORS))
+PERSIST_SECTORS=$((PERSIST_SIZE / SECTOR_SIZE))
+USERDATA_START=$((PERSIST_START + PERSIST_SECTORS))
 
 SGDISK=(sgdisk)
 [ -z "$GPT_LOOP" ] || SGDISK=(sudo sgdisk)
@@ -187,10 +190,12 @@ SGDISK=(sgdisk)
   --typecode=2:8300 --change-name=2:rootfs_a \
   --new=3:${ESP_B_START}:$((ROOTFS_B_START - 1)) \
   --typecode=3:ef00 --change-name=3:esp_b \
-  --new=4:${ROOTFS_B_START}:$((USERDATA_START - 1)) \
+  --new=4:${ROOTFS_B_START}:$((PERSIST_START - 1)) \
   --typecode=4:8300 --change-name=4:rootfs_b \
   --new=5:${USERDATA_START}:0 \
   --typecode=5:8300 --change-name=5:userdata \
+  --new=6:${PERSIST_START}:$((USERDATA_START - 1)) \
+  --typecode=6:8300 --change-name=6:persist \
   "$GPT_DEVICE" >/dev/null
 "${SGDISK[@]}" --verify "$GPT_DEVICE"
 
@@ -311,6 +316,8 @@ jq -n \
   --argjson rootfs_a_start "$(partition_start 2)" \
   --argjson esp_b_start "$(partition_start 3)" \
   --argjson rootfs_b_start "$(partition_start 4)" \
+  --argjson persist_start "$PERSIST_START" \
+  --argjson persist_sectors "$PERSIST_SECTORS" \
   --argjson userdata_start "$(partition_start 5)" \
   --argjson userdata_sectors "$USERDATA_SECTORS" \
   '{
@@ -321,6 +328,7 @@ jq -n \
       rootfs_a: {start_sector: $rootfs_a_start},
       esp_b: {start_sector: $esp_b_start},
       rootfs_b: {start_sector: $rootfs_b_start},
+      persist: {start_sector: $persist_start, sectors: $persist_sectors},
       userdata: {start_sector: $userdata_start, sectors: $userdata_sectors}
     },
     optional_payloads: {

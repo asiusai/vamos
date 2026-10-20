@@ -17,7 +17,7 @@ BUILD_DIR = ROOT / "build"
 OUTPUT_DIR = BUILD_DIR / "flash"
 OBJECT_CACHE: dict[str, dict] = {}
 PRODUCT = "asius-v0"
-MANIFEST_VERSION = 2
+MANIFEST_VERSION = 3
 # Keep each browser allocation modest while avoiding thousands of individual
 # HTTP requests and Firehose program commands for a source-complete payload.
 CHUNK_SIZE = 16 * 1024 * 1024
@@ -143,8 +143,9 @@ def package_base_image(
   source: Path,
   base_url: str,
   sector_size: int = DEFAULT_SECTOR_SIZE,
+  persist: dict | None = None,
 ) -> tuple[list[dict], int]:
-  """Erase the target, then package only non-zero ranges from the common disk."""
+  """Package only ranges outside the reserved device identity partition."""
   if not source.is_file():
     raise FileNotFoundError(f"missing {source}; run ./vamos build disk first")
   image_size = source.stat().st_size
@@ -153,13 +154,24 @@ def package_base_image(
   if image_size == 0 or image_size % sector_size:
     raise ValueError(f"factory image size must be a non-zero multiple of {sector_size}")
 
-  operations: list[dict] = [{"offset": 0, "operation": "erase", "size": image_size}]
-  offset = 0
+  if persist is None:
+    raise ValueError("factory layout must reserve persist")
+  begin, length = persist["offset"], persist["size"]
+  if begin <= 0 or length <= 0 or begin % sector_size or length % sector_size or begin + length >= image_size:
+    raise ValueError("invalid persist range")
+  ranges = [(0, begin), (begin + length, image_size)]
+  operations = [{"offset": start, "operation": "erase", "size": end - start} for start, end in ranges]
   with source.open("rb", buffering=0) as image:
-    while raw := read_chunk(image):
-      if raw.count(0) != len(raw):
-        operations.append(program_operation(raw, offset, base_url))
-      offset += len(raw)
+    for start, end in ranges:
+      offset = start
+      image.seek(start)
+      while offset < end:
+        raw = image.read(min(CHUNK_SIZE, end - offset))
+        if not raw:
+          raise ValueError("factory image ended early")
+        if raw.count(0) != len(raw):
+          operations.append(program_operation(raw, offset, base_url))
+        offset += len(raw)
 
   return operations, image_size
 
@@ -254,7 +266,9 @@ def main() -> None:
   OBJECT_CACHE = load_object_cache(OUTPUT_DIR / "flash.json")
   layout = load_layout(args.layout)
   sector_size = layout["sector_size"]
-  operations, image_size = package_base_image(args.image, args.base_url, sector_size)
+  persist_layout = layout["partitions"]["persist"]
+  persist = {"offset": persist_layout["start_sector"] * sector_size, "size": persist_layout["sectors"] * sector_size}
+  operations, image_size = package_base_image(args.image, args.base_url, sector_size, persist)
   userdata_offset = layout["partitions"]["userdata"]["start_sector"] * sector_size
   openpilot_operations, userdata_size = package_delta(
     args.userdata,
@@ -268,6 +282,7 @@ def main() -> None:
       "image": {"size": image_size},
       "operations": operations,
     },
+    "persist": persist,
     "chunk_size": CHUNK_SIZE,
     "manifest_version": MANIFEST_VERSION,
     "optional_payloads": {

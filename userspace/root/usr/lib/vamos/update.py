@@ -1184,7 +1184,7 @@ def expand_userdata() -> bool:
   partitions = table.get("partitions", [])
   labels = [partition.get("name") for partition in partitions]
   expected = ["esp_a", "rootfs_a", "esp_b", "rootfs_b", "userdata"]
-  if labels[:5] != expected or len(partitions) != 5:
+  if labels not in (expected, [*expected, "persist"]):
     log(f"userdata expansion skipped for partition layout: {labels}")
     return False
 

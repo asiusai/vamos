@@ -17,22 +17,23 @@ from package_flash import (
 
 
 class PackageFlashTest(unittest.TestCase):
-  def test_base_erases_target_and_packages_only_nonzero_chunks(self) -> None:
+  def test_base_preserves_identity_in_both_erase_and_program_ranges(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
       root = Path(temporary)
       image = root / "dragon.img"
       first = b"asius-v0" + bytes(CHUNK_SIZE - len("asius-v0"))
-      image.write_bytes(first + bytes(CHUNK_SIZE))
+      image.write_bytes(first + b"private identity" + bytes(CHUNK_SIZE - 17) + b"!" )
 
       with patch("package_flash.OUTPUT_DIR", root / "out"):
         (root / "out").mkdir()
-        operations, size = package_base_image(image, "https://updates.example/objects")
+        operations, size = package_base_image(image, "https://updates.example/objects", persist={"offset": CHUNK_SIZE, "size": 512})
 
       self.assertEqual(size, CHUNK_SIZE * 2)
-      self.assertEqual(operations[0], {"offset": 0, "operation": "erase", "size": size})
-      self.assertEqual(len(operations), 2)
-      self.assertEqual(operations[1]["operation"], "program")
-      self.assertLess(operations[1]["compressed_size"], CHUNK_SIZE)
+      self.assertEqual(operations[0], {"offset": 0, "operation": "erase", "size": CHUNK_SIZE})
+      self.assertTrue(all(op["offset"] >= CHUNK_SIZE + 512 or op["offset"] + op["size"] <= CHUNK_SIZE for op in operations))
+      self.assertEqual(len(operations), 4)
+      self.assertEqual(operations[2]["operation"], "program")
+      self.assertLess(operations[2]["compressed_size"], CHUNK_SIZE)
 
   def test_delta_packages_program_and_erase_ranges(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
@@ -83,7 +84,7 @@ class PackageFlashTest(unittest.TestCase):
            patch("package_flash.OBJECT_CACHE", {}):
         operation = program_operation(raw, 0, "https://updates.example/objects")
       manifest = {
-        "manifest_version": 2,
+        "manifest_version": 3,
         "base": {"operations": [operation]},
         "optional_payloads": {},
       }

@@ -44,6 +44,22 @@ different minimum capacity. On first boot,
 the backup GPT, userdata partition, and ext4 filesystem expand to use the
 remaining capacity of larger NVMe or UFS media.
 
+The sixth GPT entry reserves 64 MiB before userdata for `/persist`. Factory
+flashing preserves this region. First boot generates `/persist/asius/id_ed25519`
+and mounts the filesystem read-only. Openpilot reads the key and derives its
+recording-access key from it. A missing or damaged identity stops openpilot,
+while local recovery access remains available.
+
+Use `sudo vamos-identity status` to check identity storage. To import or replace
+an identity, first stop openpilot with `sudo sv down /var/service/openpilot`.
+Then run `sudo vamos-identity replace --from-file /path/to/key --confirm-identity-change`
+and reboot. Omit `--from-file` to generate a new identity. This changes device
+identity and recording recovery access. Retain the old key privately when needed.
+Normal writes remain blocked by the read-only mount; root can deliberately
+unlock it. This is not a hardware fuse or protection against physical EDL access.
+Older five-partition installations need factory provisioning and explicit key
+import once. Never write a raw full-disk image over an existing identity.
+
 Factory OS flashing keeps the connected SOM's stock UEFI. The optional
 `flash uboot` path first reads and content-addresses that board's XBL backup,
 and refuses firmware revisions that have not passed physical boot testing.

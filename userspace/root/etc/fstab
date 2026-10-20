@@ -9,9 +9,8 @@
 # sde4 = modem_a (UFS LUN)
 /dev/disk/by-partlabel/modem_a            /firmware   vfat    ro,nofail                                                    0      0
 
-# Persistent storage partition (read-only)
-# sda2 = persist (legacy storage layout)
-/dev/disk/by-partlabel/persist            /persist    squashfs ro,nosuid,nodev,noexec,nofail                               0      0
+# Device identity is provisioned and mounted read-only by vamos-identity.
+/dev/disk/by-partlabel/persist            /persist    ext4    ro,nosuid,nodev,noexec,noauto                                 0      0
 
 # Userdata partition (main writable storage)
 # sda12 = userdata (legacy storage layout)

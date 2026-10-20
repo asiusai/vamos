@@ -2,6 +2,12 @@
 # openpilot - main openpilot launcher (runs as comma user in tmux)
 exec 2>&1
 
+if [ -f /ASIUS ] && [ ! -e /run/vamos-identity-ready ]; then
+  echo "Device identity is unavailable. Run sudo vamos-identity status."
+  sleep 5
+  exit 1
+fi
+
 # Asius has no physical display, but the mainline DRM/GPU stack still behaves
 # better when the backlight class exists before openpilot starts.
 if [ -f /ASIUS ]; then

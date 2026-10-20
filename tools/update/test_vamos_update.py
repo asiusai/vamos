@@ -333,6 +333,7 @@ class LayoutInitializationTest(unittest.TestCase):
           "name": "userdata", "start": 221, "size": 280,
           "type": "linux", "uuid": "userdata-uuid",
         },
+        {"name": "persist", "start": 217, "size": 4},
       ],
     }
 

@@ -1,0 +1,8 @@
+#!/usr/local/venv/bin/python
+import sys
+
+sys.path.insert(0, "/usr/lib")
+
+from vamos.identity import main
+
+raise SystemExit(main())

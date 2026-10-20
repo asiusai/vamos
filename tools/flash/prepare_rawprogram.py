@@ -32,17 +32,13 @@ def operations_for_payload(manifest: dict, payload: str) -> list[dict]:
   sector_size = manifest.get("sector_size")
   if sector_size not in SUPPORTED_SECTOR_SIZES:
     raise ValueError("unsupported local flash sector size")
-  if manifest.get("manifest_version") == 1:
-    if payload != "base":
-      raise ValueError("legacy flash manifests contain one bundled payload")
-    operations = manifest["chunks"]
-  elif manifest.get("manifest_version") == 2:
-    if payload == "base":
-      operations = manifest["base"]["operations"]
-    else:
-      operations = manifest["optional_payloads"]["openpilot"]["operations"]
-  else:
-    raise ValueError("unsupported local flash manifest")
+  if manifest.get("manifest_version") != 3:
+    raise ValueError("unsupported local flash manifest; rebuild with persist support")
+  operations = manifest["base"]["operations"] if payload == "base" else manifest["optional_payloads"]["openpilot"]["operations"]
+  persist = manifest["persist"]
+  begin, length = persist["offset"], persist["size"]
+  if begin <= 0 or length <= 0 or begin % sector_size or length % sector_size:
+    raise ValueError("invalid persist range")
 
   if not isinstance(operations, list):
     raise ValueError("flash payload operations must be a list")
@@ -53,6 +49,8 @@ def operations_for_payload(manifest: dict, payload: str) -> list[dict]:
     size = operation.get("size")
     if not isinstance(offset, int) or not isinstance(size, int) or offset < 0 or size <= 0:
       raise ValueError("flash operation has an invalid byte range")
+    if offset < begin + length and offset + size > begin:
+      raise ValueError("flash operation overlaps persist")
     if offset % sector_size or size % sector_size:
       raise ValueError(f"flash operation is not aligned to {sector_size}-byte sectors")
   return operations
