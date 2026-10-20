@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -14,7 +15,7 @@ BUILD_DIR = ROOT / "build"
 OUTPUT_DIR = BUILD_DIR / "ota"
 PRODUCT = "asius-v0"
 MANIFEST_VERSION = 1
-UPDATER_VERSION = 1
+UPDATER_VERSION = 2
 CHUNK_SIZE = 4 * 1024 * 1024
 IMAGE_SIZES = {
   "esp": 256 * 1024 * 1024,
@@ -47,13 +48,19 @@ def compress_image(source: Path, destination: Path) -> None:
 def package_image(name: str, source: Path, base_url: str) -> dict:
   if not source.is_file():
     raise FileNotFoundError(f"missing {source}; build it first")
-  if source.stat().st_size != IMAGE_SIZES[name]:
+  size = source.stat().st_size
+  if (name == "esp" and size != IMAGE_SIZES[name]) or (name == "system" and not 0 < size <= IMAGE_SIZES[name]):
     raise ValueError(f"{source} is {source.stat().st_size} bytes, expected {IMAGE_SIZES[name]}")
   raw_hash = sha256(source)
-  filename = f"{name}-{raw_hash}.img.xz"
+  with source.open("rb") as image:
+    image.seek(1024)
+    erofs = name == "system" and image.read(4) == b"\xe2\xe1\xf5\xe0"
+  filename = f"{name}-{raw_hash}.img" + ("" if erofs else ".xz")
   destination = OUTPUT_DIR / filename
   if destination.is_file():
     print(f"Reusing {destination.name}")
+  elif erofs:
+    shutil.copyfile(source, destination)
   else:
     print(f"Compressing {source.name} -> {destination.name}")
     compress_image(source, destination)
@@ -63,7 +70,7 @@ def package_image(name: str, source: Path, base_url: str) -> dict:
     "size": source.stat().st_size,
     "hash": raw_hash,
     "sha256": raw_hash,
-    "compression": "xz",
+    "compression": "none" if erofs else "xz",
     "compressed_size": destination.stat().st_size,
     "compressed_sha256": sha256(destination),
   }

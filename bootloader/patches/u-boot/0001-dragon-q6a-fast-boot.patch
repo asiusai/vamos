@@ -1577,9 +1577,9 @@ index 00000000000..80e9f537dcc
 +bootargs_base=console=ttyMSM0,115200n8 earlycon rootwait rw fw_devlink=permissive quiet loglevel=3 msm.separate_gpu_kms=1
 +vamos_dtb=qcs6490-radxa-dragon-q6a.dtb
 +vamos_load=
-+	if ext4load ${vamos_interface} ${vamos_device}:${vamos_rootpart} ${dspfw_addr_r} lib/firmware/qcom/qcs6490/radxa/dragon-q6a/adsp.mbn &&
++	if fatload ${vamos_interface} ${vamos_device}:${vamos_esp} ${dspfw_addr_r} EFI/vamos/adsp.mbn &&
 +	   dspboot ${dspfw_addr_r} ${filesize} 1 8b800000 2800000 &&
-+	   ext4load ${vamos_interface} ${vamos_device}:${vamos_rootpart} ${dspfw_addr_r} lib/firmware/qcom/qcs6490/radxa/dragon-q6a/cdsp.mbn &&
++	   fatload ${vamos_interface} ${vamos_device}:${vamos_esp} ${dspfw_addr_r} EFI/vamos/cdsp.mbn &&
 +	   dspboot ${dspfw_addr_r} ${filesize} 12 8e000000 1e00000 &&
 +	   sllaunch &&
 +	   fatload ${vamos_interface} ${vamos_device}:${vamos_esp} ${qupfw_addr_r} EFI/vamos/qupv3fw.elf &&

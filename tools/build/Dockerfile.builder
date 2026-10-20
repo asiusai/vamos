@@ -30,6 +30,7 @@ RUN apk add --no-cache \
     util-linux-dev \
     util-linux-misc \
     xz-dev \
+    zstd-dev=1.5.7-r2 \
     zerofree
 
 RUN git lfs install --system
@@ -40,7 +41,7 @@ RUN git clone https://git.kernel.org/pub/scm/linux/kernel/git/xiang/erofs-utils.
     && git checkout v1.8.5 \
     && apk add --no-cache autoconf automake libtool \
     && autoreconf -fi \
-    && ./configure --enable-lz4 --enable-lzma --disable-fuse --enable-multithreading \
+    && ./configure --enable-lz4 --enable-lzma --enable-zstd --disable-fuse --enable-multithreading \
     && make -j$(nproc) \
     && make install \
     && rm -rf /tmp/erofs-utils

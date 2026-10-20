@@ -68,8 +68,8 @@ for input in "$KERNEL_IMAGE" "$DTB_FILE" "$ROOTFS_IMG"; do
     exit 1
   fi
 done
-if [ "$(stat -c%s "$ROOTFS_IMG")" -ne "$SYSTEM_SIZE" ]; then
-  echo "ERROR: $ROOTFS_IMG must be exactly $SYSTEM_SIZE bytes" >&2
+if [ "$(stat -c%s "$ROOTFS_IMG")" -le 0 ] || [ "$(stat -c%s "$ROOTFS_IMG")" -gt "$SYSTEM_SIZE" ]; then
+  echo "ERROR: $ROOTFS_IMG must fit within $SYSTEM_SIZE bytes" >&2
   exit 1
 fi
 if ! [[ "$STORAGE_SECTORS" =~ ^[0-9]+$ ]] || [ "$STORAGE_SECTORS" -le 0 ]; then

@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -40,7 +42,7 @@ class DeviceUpdateError(RuntimeError):
 class PreparedImage:
   name: str
   source: Path
-  compressed: Path
+  transfer_file: Path
   sha256: str
 
 
@@ -93,13 +95,23 @@ def validate_image(path: Path, name: str) -> None:
     )
   expected_size = IMAGE_SIZES[name]
   actual_size = path.stat().st_size
-  if actual_size != expected_size:
+  if (name == "esp" and actual_size != expected_size) or (name == "system" and not 0 < actual_size <= expected_size):
     raise DeviceUpdateError(f"{path} is {actual_size} bytes, expected {expected_size}")
 
 
 def system_image_version(path: Path) -> str:
+  with path.open("rb") as source:
+    source.seek(1024)
+    erofs = source.read(4) == b"\xe2\xe1\xf5\xe0"
+  if erofs:
+    command = ["dump.erofs", "--cat", "--path=/VERSION", str(path)]
+    if shutil.which("dump.erofs") is None:
+      command = ["docker", "run", "--rm", "-v", f"{path.resolve()}:{path.resolve()}:ro",
+                 "--entrypoint", "dump.erofs", "vamos-builder", "--cat", "--path=/VERSION", str(path.resolve())]
+  else:
+    command = ["debugfs", "-R", "cat /VERSION", str(path)]
   result = subprocess.run(
-    ["debugfs", "-R", "cat /VERSION", str(path)],
+    command,
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE,
     text=True,
@@ -152,12 +164,29 @@ def prepare_payload(build_dir: Path) -> Payload:
   for name, source in (("system", system), ("esp", esp)):
     print(f"[device-update] hashing {source}", flush=True)
     digest = sha256_file(source)
-    compressed = compress_image(name, source, digest, build_dir, cache_dir)
-    prepared.append(PreparedImage(name, source, compressed, digest))
+    # EROFS is already compressed. Avoid a second compression/decompression pass.
+    with source.open("rb") as image:
+      image.seek(1024)
+      erofs = name == "system" and image.read(4) == b"\xe2\xe1\xf5\xe0"
+    transfer_file = source if erofs else compress_image(name, source, digest, build_dir, cache_dir)
+    prepared.append(PreparedImage(name, source, transfer_file, digest))
 
   cache_dir.mkdir(parents=True, exist_ok=True)
   version_file = cache_dir / "VERSION"
   version_file.write_text(version + "\n", encoding="utf-8")
+  (cache_dir / "vamos.json").write_text(json.dumps({
+    "manifest_version": 1,
+    "minimum_updater_version": 2,
+    "product": "asius-v0",
+    "version": version,
+    "partitions": [{
+      "name": image.name,
+      "url": f"{image.name}.img" + (".xz" if image.transfer_file.suffix == ".xz" else ""),
+      "size": image.source.stat().st_size,
+      "sha256": image.sha256,
+      "compression": "xz" if image.transfer_file.suffix == ".xz" else "none",
+    } for image in prepared],
+  }, indent=2) + "\n", encoding="utf-8")
   updater = VAMOS_ROOT / "userspace/root/usr/lib/vamos/update.py"
   if not updater.is_file():
     raise DeviceUpdateError(f"local updater not found: {updater}")
@@ -186,11 +215,6 @@ def preflight_remote(target: str, options: list[str], remote_dir: str) -> None:
     f"test -w {shlex.quote(remote_dir)}"
   )
   command_output(["ssh", *options, target, probe])
-  remote_command(
-    target,
-    options,
-    ["rm", "-f", f"{remote_dir}/system.img", f"{remote_dir}/esp.img"],
-  )
 
 
 def rsync_file(
@@ -225,8 +249,13 @@ def sync_payload(
   files = (
     (payload.updater, "update.py"),
     (payload.version_file, "VERSION"),
-    *((image.compressed, f"{image.name}.img.xz") for image in payload.images),
+    (payload.version_file.parent / "vamos.json", "vamos.json"),
+    *((image.transfer_file, f"{image.name}.img" + (".xz" if image.transfer_file.suffix == ".xz" else "")) for image in payload.images),
   )
+  # An old compressed payload must not override the new raw EROFS image.
+  for image in payload.images:
+    obsolete = f"{image.name}.img" + ("" if image.transfer_file.suffix == ".xz" else ".xz")
+    remote_command(target, options, ["rm", "-f", f"{remote_dir}/{obsolete}"])
   for source, name in files:
     print(f"[device-update] rsync {name}", flush=True)
     rsync_file(source, target, options, f"{remote_dir}/{name}")
@@ -278,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     build_dir = args.build_dir.expanduser().resolve()
 
     payload = prepare_payload(build_dir)
-    compressed_size = sum(image.compressed.stat().st_size for image in payload.images)
+    compressed_size = sum(image.transfer_file.stat().st_size for image in payload.images)
     print(
       f"[device-update] target={target} vamOS={payload.version} transfer={compressed_size / (1024**3):.2f} GiB",
       flush=True,

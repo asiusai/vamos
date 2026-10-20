@@ -9,6 +9,7 @@ QCS_REPO=https://radxa-repo.github.io/qcs6490-noble/pool/main
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)
+. "$script_dir/dsp_firmware.sh"
 
 fetch() {
   local name=$1 url=$2 expected=$3
@@ -38,8 +39,7 @@ fetch fastrpc-test.deb \
   "https://github.com/radxa-pkg/fastrpc/releases/download/1.0.7-2/fastrpc-test_1.0.7-2_arm64.deb" \
   884869fd8cd8b502c12f2d1f83f219c36800ac18eae091dfbf1dbf96bc8ae02a
 fetch firmware.deb \
-  "https://github.com/radxa-pkg/radxa-firmware/releases/download/0.2.41/radxa-firmware-qcs6490_0.2.41_all.deb" \
-  8d53cc8da941bf748f3cd1fe7086da5fda73c680a6ffa96bfb77d95c9f1d9604
+  "$DSP_FIRMWARE_URL" "$DSP_FIRMWARE_SHA256"
 
 for package in qnn fastrpc libcdsprpc listener fastrpc-test firmware; do
   extract_deb "$package.deb" "$work_dir/$package"

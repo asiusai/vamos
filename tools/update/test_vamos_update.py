@@ -89,6 +89,53 @@ class ManifestTest(unittest.TestCase):
       self.assertEqual(manifest.images[0].sha256, hashlib.sha256(esp).hexdigest())
       self.assertEqual(manifest.images[1].sha256, hashlib.sha256(system).hexdigest())
 
+  def test_local_system_can_be_smaller_than_its_partition(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      path = Path(temporary) / "system.img"
+      path.write_bytes(b"compressed filesystem")
+      with mock.patch.object(update, "SYSTEM_SIZE", 64):
+        image = update.inspect_local_image(path, "system")
+        self.assertEqual(image.size, path.stat().st_size)
+        path.write_bytes(b"x" * 65)
+        with self.assertRaises(update.UpdateError):
+          update.inspect_local_image(path, "system")
+        path.write_bytes(b"")
+        with self.assertRaises(update.UpdateError):
+          update.inspect_local_image(path, "system")
+
+  def test_erofs_mount_does_not_use_ext4_recovery_options(self) -> None:
+    commands = []
+
+    def run(command, **kwargs):
+      commands.append(command)
+      return subprocess.CompletedProcess(command, 0, stdout="erofs\n")
+
+    with mock.patch.object(update, "run", side_effect=run):
+      with update.mounted_read_only(Path("/dev/test")):
+        pass
+    mount = next(command for command in commands if command[0] == "mount")
+    self.assertEqual(mount[1:4], ["-o", "ro", "/dev/test"])
+
+  def test_local_manifest_reuses_host_hashes(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      directory = Path(temporary)
+      (directory / "vamos.json").write_text(json.dumps({
+        "manifest_version": 1,
+        "minimum_updater_version": 2,
+        "product": update.PRODUCT,
+        "version": "erofs-test",
+        "partitions": [
+          {"name": "esp", "url": "esp.img.xz", "size": update.ESP_SIZE,
+           "sha256": "a" * 64, "compression": "xz"},
+          {"name": "system", "url": "system.img", "size": 4096,
+           "sha256": "b" * 64, "compression": "none"},
+        ],
+      }))
+      with mock.patch.object(update, "inspect_local_image", side_effect=AssertionError("redundant image read")):
+        manifest = update.manifest_from_directory(directory)
+      self.assertEqual(manifest.images[1].size, 4096)
+      self.assertEqual(manifest.images[1].source, (directory / "system.img").as_uri())
+
   def test_remote_manifest_requires_valid_signature(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
       directory = Path(temporary)

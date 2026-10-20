@@ -35,8 +35,7 @@ ROOTFS_DIR="$BUILD_DIR/void-rootfs"
 ROOTFS_IMAGE="$BUILD_DIR/system.img"
 OUT_IMAGE="$OUTPUT_DIR/system.img"
 
-# the partition is 10G, but openpilot's updater didn't always handle the full size
-# Increased from 4500M to 6G for Python packages
+# Writable staging filesystem only. The shipped image is compressed EROFS.
 ROOTFS_IMAGE_SIZE=10G
 
 # Create temp dir if non-existent
@@ -242,60 +241,33 @@ MOUNT_CONTAINER_ID="$MOUNT_CONTAINER_ID" ROOTFS_DIR="$ROOTFS_DIR" \
   "$DIR/vamos" profile
 
 EROFS_IMAGE="$BUILD_DIR/system.erofs.img"
-OUT_EROFS_IMAGE="$OUTPUT_DIR/system.erofs.img"
-if [ "${VAMOS_SKIP_EROFS:-0}" != "1" ]; then
-  # Build EROFS before unmount while the rootfs is still mounted.
-  echo "Building EROFS image (LZ4HC, 64K clusters)"
-  exec_as_root mkfs.erofs \
-    -zlz4hc,12 \
-    -C65536 \
-    -T0 \
-    --all-root \
-    --quiet \
-    -x-1 \
-    "$EROFS_IMAGE" "$ROOTFS_DIR"
-fi
+# Keep ownership and capabilities. Deduplication shares repeated data blocks.
+EROFS_COMPRESSION="${VAMOS_EROFS_COMPRESSION:-zstd,9}"
+echo "Building EROFS image ($EROFS_COMPRESSION, 64K clusters, deduplication)"
+exec_as_root mkfs.erofs \
+  "-z$EROFS_COMPRESSION" -C65536 -Ededupe -T0 --mkfs-time --quiet \
+  "$EROFS_IMAGE" "$ROOTFS_DIR"
+exec_as_root fsck.erofs --extract "$EROFS_IMAGE"
+exec_as_root dump.erofs --cat --path=/VERSION "$EROFS_IMAGE"
+exec_as_user cp "$EROFS_IMAGE" "$OUT_IMAGE"
 
 # Unmount image
 echo "Unmount filesystem"
 exec_as_root sync
 exec_as_root umount "$ROOTFS_DIR"
 
-# Deleted and deduplicated data otherwise remains in free ext4 blocks and
-# bloats the compressed OTA payload.
-echo "Checking filesystem before zeroing"
-exec_as_root e2fsck -fp "$ROOTFS_IMAGE"
-echo "Zeroing free filesystem blocks"
-exec_as_root zerofree "$ROOTFS_IMAGE"
-echo "Checking filesystem after zeroing"
-exec_as_root e2fsck -fn "$ROOTFS_IMAGE"
-
-# Copy raw ext4 image to output. edl-ng write-sector takes raw bytes, not the
-# Android-sparse format qdl used to consume — so no img2simg step.
-echo "Copying system image to output"
-exec_as_user cp "$ROOTFS_IMAGE" "$OUT_IMAGE"
-
-if [ "${VAMOS_SKIP_EROFS:-0}" != "1" ]; then
-  cp "$EROFS_IMAGE" "$OUT_EROFS_IMAGE"
-fi
-
-# Patch sparse image size into profile JSON
-SPARSE_SIZE=$(stat -c%s "$OUT_IMAGE" 2>/dev/null || stat -f%z "$OUT_IMAGE")
+# Record the actual programmed image size, excluding unused partition space.
+IMAGE_SIZE=$(stat -c%s "$OUT_IMAGE" 2>/dev/null || stat -f%z "$OUT_IMAGE")
 if command -v jq &>/dev/null; then
-  jq --arg s "$SPARSE_SIZE" '.image_size_sparse_bytes = ($s | tonumber)' \
+  jq --arg s "$IMAGE_SIZE" '.image_size_sparse_bytes = ($s | tonumber) | .image_format = "erofs"' \
     "$OUTPUT_DIR/rootfs-profile.json" > "$OUTPUT_DIR/rootfs-profile.json.tmp" && \
     mv "$OUTPUT_DIR/rootfs-profile.json.tmp" "$OUTPUT_DIR/rootfs-profile.json"
 fi
 
 # Size comparison
-EXT4_SPARSE_SIZE=$(stat -c%s "$OUT_IMAGE" 2>/dev/null || stat -f%z "$OUT_IMAGE")
 echo ""
 echo "=== Image size ==="
-echo "ext4 (sparse): $(numfmt --to=iec-i --suffix=B "$EXT4_SPARSE_SIZE") ($EXT4_SPARSE_SIZE bytes)"
-if [ "${VAMOS_SKIP_EROFS:-0}" != "1" ]; then
-  EROFS_SIZE=$(stat -c%s "$OUT_EROFS_IMAGE" 2>/dev/null || stat -f%z "$OUT_EROFS_IMAGE")
-  echo "EROFS (LZ4HC): $(numfmt --to=iec-i --suffix=B "$EROFS_SIZE") ($EROFS_SIZE bytes)"
-fi
+echo "EROFS: $(numfmt --to=iec-i --suffix=B "$IMAGE_SIZE") ($IMAGE_SIZE bytes)"
 echo ""
 
 echo "Done!"

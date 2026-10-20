@@ -172,7 +172,7 @@ case "${1:-}" in
     echo "  setup              Initialize submodules and udev rules"
     echo "  build uboot        Build Dragon Q6A XBL-embedded U-Boot"
     echo "  build kernel       Build the kernel → build/Image + dtb"
-    echo "  build system       Build the rootfs  → build/system.img (ext4)"
+    echo "  build system       Build the rootfs  → build/system.img (EROFS)"
     echo "  build esp          Build update/boot ESP → build/esp.img"
     echo "  build ota          Package ESP + system → build/ota/vamos.json"
     echo "  build disk         Assemble initial disk image; accepts --storage nvme|ufs"

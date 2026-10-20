@@ -56,6 +56,15 @@ backend remains a recovery fallback. U-Boot then reads the existing redundant
 raw arm64 `Image` plus the slot DTB. This deliberately keeps the current OTA
 state format readable by both U-Boot and the old GRUB/UEFI path during rollout.
 
+U-Boot loads `adsp.mbn`, `cdsp.mbn` and `qupv3fw.elf` from the selected ESP's
+`EFI/vamos` directory. It does not read the OS filesystem. EROFS compression
+therefore needs only a Linux decoder. `./vamos build esp` includes the same
+pinned DSP firmware used by the Linux runtime.
+
+Before upgrading an existing device's U-Boot, add these firmware files to
+both ESPs. Preserve each slot's kernel, device tree and boot records.
+This also keeps the previous ext4 OS bootable for rollback.
+
 OTA release manifests are signed independently of the bootloader image. Remote
 installs reject an unsigned manifest; create the matching `vamos.json.sig` with
 an Ed25519 release key by setting `VAMOS_OTA_SIGNING_KEY` or passing

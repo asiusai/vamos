@@ -6,10 +6,28 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import package_ota
+
+
+class ImagePackagingTest(unittest.TestCase):
+  def test_erofs_transfers_without_outer_compression_or_partition_padding(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      directory = Path(temporary)
+      source = directory / "system.img"
+      image = bytearray(4096)
+      image[1024:1028] = b"\xe2\xe1\xf5\xe0"
+      source.write_bytes(image)
+      with mock.patch.object(package_ota, "OUTPUT_DIR", directory):
+        result = package_ota.package_image("system", source, "https://images.example/objects")
+      artifact = directory / result["url"].rsplit("/", 1)[1]
+      self.assertEqual(artifact.read_bytes(), image)
+      self.assertEqual(result["compression"], "none")
+      self.assertEqual(result["size"], len(image))
+      self.assertEqual(result["compressed_sha256"], result["sha256"])
 
 
 class ManifestSigningTest(unittest.TestCase):

@@ -23,7 +23,8 @@ jobs:
             tools.camerad_env_quote_test \
             tools.device_update_test \
             tools.validate_camerad_vfe_test \
-            tools.update.test_vamos_update
+            tools.update.test_vamos_update \
+            tools.build.test_package_ota
 
   build-kernel:
     runs-on: ubuntu-24.04-arm
@@ -65,21 +66,49 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: package matching system build inputs
+        run: |
+          tar -C build -czf build/system-kernel-inputs.tar.gz \
+            modules_install kernel-out/include/config/kernel.release
+
+      - name: upload matching system build inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-kernel-inputs
+          path: build/system-kernel-inputs.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
   build-system:
+    needs: build-kernel
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: true
+          submodules: recursive
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: system-kernel-inputs
+          path: build
+
+      - name: unpack matching kernel modules
+        run: tar -C build -xzf build/system-kernel-inputs.tar.gz
+
+      - name: install system image tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y e2fsprogs grub2-common jq
 
       - name: build system image
         run: ./vamos build system
 
       - name: validate system outputs
         run: |
-          test "$(stat -c %s build/system.img)" -eq $((10 * 1024 * 1024 * 1024))
-          test -s build/system.erofs.img
-          sudo e2fsck -fn build/system.img
+          test -s build/system.img
+          test "$(stat -c %s build/system.img)" -le $((10 * 1024 * 1024 * 1024))
+          test "$(blkid -p -s TYPE -o value build/system.img)" = erofs
 
       - name: upload rootfs profile
         uses: actions/upload-artifact@v4

@@ -27,7 +27,7 @@ RUN /tmp/vamos/base_setup.sh
 # Qualcomm QCS6490 FastRPC and QAIRT v68 runtime. The installer fetches pinned,
 # checksum-verified Radxa packages and installs only the cDSP runtime pieces.
 COPY ./userspace/audio/QCS6490-Asius-Panda-tplg.bin /tmp/vamos/audio/
-COPY ./userspace/install_qnn_runtime.sh /tmp/vamos/
+COPY ./userspace/install_qnn_runtime.sh ./userspace/dsp_firmware.sh /tmp/vamos/
 RUN /tmp/vamos/install_qnn_runtime.sh && rm -rf /tmp/vamos/install_qnn_runtime.sh /tmp/vamos/audio
 
 # ################### #
@@ -169,6 +169,8 @@ RUN sed -i 's/FileCreateMode 0640/FileCreateMode 0644/' /etc/rsyslog.conf
 # Set executable permissions
 RUN chmod +x /usr/comma/comma.sh /usr/comma/get-serial.sh /usr/comma/set_ssh.sh /usr/comma/set_ncm.sh /usr/bin/journalctl /usr/bin/systemctl /usr/bin/vamos-update /usr/bin/vamos-boot /usr/bin/vamos-hypervisor /usr/bin/vamos-wifi /usr/bin/vamos-hardware /usr/local/bin/qnn-smoke /etc/sv/bluetoothd/run /etc/sv/dnsmasq/run /etc/sv/tailscaled/run /etc/sv/vamos-boot-commit/run /etc/sv/vamos-hypervisor-reboot/run
 RUN chmod +x /etc/runit/1 /etc/runit/2 /etc/runit/3
+RUN chmod +x /usr/lib/vamos/root-init && \
+    ln -sfn /usr/lib/vamos/root-init /usr/bin/init
 
 # Shutdown wrappers - send wall broadcast like systemd does on Ubuntu
 # Only poweroff and reboot: halt/shutdown must NOT be wrapped because Void's

@@ -13,7 +13,7 @@ the release checklist.
 ```bash
 ./vamos setup              # init submodules and udev rules
 ./vamos build kernel       # build Image and Dragon device tree
-./vamos build system       # build the 10 GiB system.img
+./vamos build system       # build the compressed EROFS system.img
 ./vamos build esp          # build the 256 MiB boot ESP
 ./vamos build ota          # build ESP and package a full OTA release
 ./vamos build disk         # build the common factory disk + optional userdata
@@ -200,6 +200,27 @@ replace, or remove openpilot or other persistent userspace files.
 inactive vamOS A/B slot. It does not use GitHub, R2, an openpilot branch, or the
 `VAMOS_VERSION` update gate. The image's existing `/VERSION` is used only for
 post-write verification, so rebuilding and reinstalling the same version works.
+
+`system.img` is an EROFS filesystem. The 10 GiB OS partition layout stays
+unchanged, but updates write and verify only the image bytes. EROFS payloads
+transfer without another compression layer. Local update manifests reuse the
+host's image hashes; the device checks them during writing and from storage.
+The default uses Zstandard level 9, 64 KiB clusters and deduplication.
+For compression experiments, set `VAMOS_EROFS_COMPRESSION=lz4hc,12` or
+`VAMOS_EROFS_COMPRESSION=lzma,6` when running `./vamos build system`.
+LZMA makes smaller images but increases cold-read and startup times.
+
+EROFS requires the U-Boot firmware-loading change described in
+[`bootloader/README.md`](bootloader/README.md). The old ext4-only U-Boot cannot
+start an EROFS slot.
+Install the kernel with Zstandard support before using `device-update` for
+the first conversion. EDL can install the new kernel and OS together.
+
+Before runit starts, OverlayFS adds a writable layer under `/data/vamos-root`.
+Each EROFS image UUID selects its own layer. Reboot keeps local OS changes;
+an OS update gets a new layer, and rollback restores the previous layer.
+Shared `/data` files, identity, Wi-Fi settings, and the persistent home remain
+independent of these layers. Build and debug tools remain usable.
 
 Image builds remove selected dependency tests and debug sections after the final
 Python dependency installation. Runtime testing helpers, headers, compilers and

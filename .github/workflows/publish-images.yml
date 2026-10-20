@@ -133,7 +133,7 @@ jobs:
       - name: build kernel, root filesystem, ESP, and factory disk
         run: |
           ./vamos build kernel
-          VAMOS_SKIP_EROFS=1 ./vamos build system
+          ./vamos build system
           ./vamos build esp
           ./vamos build disk
 
@@ -141,7 +141,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(stat -c %s build/esp.img)" -eq $((256 * 1024 * 1024))
-          test "$(stat -c %s build/system.img)" -eq $((10 * 1024 * 1024 * 1024))
+          test -s build/system.img
+          test "$(stat -c %s build/system.img)" -le $((10 * 1024 * 1024 * 1024))
+          test "$(blkid -p -s TYPE -o value build/system.img)" = erofs
           test "$(stat -c %s build/dragon.img)" -eq $((122142720 * 512))
           test "$(jq -r .storage_sectors build/factory-layout.json)" -eq 122142720
           userdata_bytes=$(( $(jq -r .partitions.userdata.sectors build/factory-layout.json) * 512 ))
@@ -149,7 +151,6 @@ jobs:
           test "$(stat -c %s build/userdata-openpilot.img)" -eq "$userdata_bytes"
           sgdisk --verify build/dragon.img
           fsck.vfat -n build/esp.img
-          e2fsck -fn build/system.img
           e2fsck -fn build/userdata.img
           e2fsck -fn build/userdata-openpilot.img
           if debugfs -R 'stat /openpilot' build/userdata.img 2>&1 | grep -q 'Inode:'; then
@@ -232,11 +233,12 @@ jobs:
       - name: upload immutable R2 images
         run: |
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          for image in build/ota/*.img.xz; do
+          for image in build/ota/*.img build/ota/*.img.xz; do
+            [ -f "$image" ] || continue
             aws s3 cp "$image" "s3://${R2_BUCKET}/vamos/objects/$(basename "$image")" \
               --endpoint-url "$endpoint" \
               --cache-control "public,max-age=31536000,immutable" \
-              --content-type application/x-xz
+              --content-type application/octet-stream
           done
           for object in build/flash/*.img.xz build/flash/*.bin; do
             aws s3 cp "$object" "s3://${R2_BUCKET}/vamos/flash/objects/$(basename "$object")" \

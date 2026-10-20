@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import BinaryIO, Callable, Iterator, Sequence
 
 
-UPDATER_VERSION = 1
+UPDATER_VERSION = 2
 MANIFEST_VERSION = 1
 PRODUCT = "asius-v0"
 LEGACY_PRODUCTS = {"radxa-dragon-q6a"}
@@ -39,6 +39,8 @@ def _system_disk() -> Path:
     return Path(override)
 
   sources: list[str] = []
+  if Path("/run/vamos-root-device").is_file():
+    sources.append(Path("/run/vamos-root-device").read_text().strip())
   mounted_root = subprocess.run(
     ["findmnt", "-n", "-o", "SOURCE", "/"],
     check=False,
@@ -314,7 +316,7 @@ def _parse_image(raw: object, base: str) -> ImageSpec:
   compression = str(raw.get("compression", "xz" if source.endswith(".xz") else "none")).lower()
   if name not in ("esp", "system"):
     raise UpdateError(f"unsupported partition name {name!r}")
-  if size != {"esp": ESP_SIZE, "system": SYSTEM_SIZE}[name]:
+  if (name == "esp" and size != ESP_SIZE) or (name == "system" and not 0 < size <= SYSTEM_SIZE):
     raise UpdateError(f"{name} image has unsafe size {size}")
   if not re.fullmatch(r"[0-9a-f]{64}", sha256):
     raise UpdateError(f"{name} image has an invalid SHA-256")
@@ -398,16 +400,21 @@ def inspect_local_image(path: Path, name: str) -> ImageSpec:
       if size > temporary.size:
         raise UpdateError(f"{path} expands beyond {temporary.size} bytes")
       digest.update(chunk)
-  if size != temporary.size:
+  if size == 0 or (name == "esp" and size != temporary.size):
     raise UpdateError(f"{path} expands to {size} bytes, expected {temporary.size}")
   return ImageSpec(name, temporary.source, size, digest.hexdigest(), compression)
 
 
 def manifest_from_directory(directory: Path) -> Manifest:
   directory = directory.expanduser().resolve()
+  manifest = directory / "vamos.json"
+  if manifest.is_file():
+    # The host already hashed these images. Verify while writing and again
+    # from the inactive slot, without decompressing the entire payload twice.
+    return load_manifest(str(manifest))
   images: list[ImageSpec] = []
   for name in ("esp", "system"):
-    candidates = [directory / f"{name}.img.xz", directory / f"{name}.img"]
+    candidates = [directory / f"{name}.img", directory / f"{name}.img.xz"]
     path = next((candidate for candidate in candidates if candidate.is_file()), None)
     if path is None:
       raise UpdateError(f"{directory} has no {name}.img or {name}.img.xz")
@@ -502,7 +509,9 @@ def write_image(spec: ImageSpec, destination: Path,
 def mounted_read_only(device: Path) -> Iterator[Path]:
   with tempfile.TemporaryDirectory(prefix="vamos-verify-") as mount_dir:
     mount_path = Path(mount_dir)
-    run(["mount", "-o", "ro,noload", str(device), str(mount_path)])
+    filesystem = run(["blkid", "-p", "-s", "TYPE", "-o", "value", str(device)]).stdout.strip()
+    options = "ro,noload" if filesystem == "ext4" else "ro"
+    run(["mount", "-o", options, str(device), str(mount_path)])
     try:
       yield mount_path
     finally:
@@ -510,9 +519,13 @@ def mounted_read_only(device: Path) -> Iterator[Path]:
 
 
 def verify_system_contents(device: Path, expected_version: str) -> None:
-  check = run(["e2fsck", "-fn", str(device)], check=False)
-  if check.returncode != 0:
-    raise UpdateError(f"system image filesystem check failed:\n{check.stdout.strip()}")
+  filesystem = run(["blkid", "-p", "-s", "TYPE", "-o", "value", str(device)]).stdout.strip()
+  if filesystem == "ext4":
+    check = run(["e2fsck", "-fn", str(device)], check=False)
+    if check.returncode != 0:
+      raise UpdateError(f"system image filesystem check failed:\n{check.stdout.strip()}")
+  elif filesystem != "erofs":
+    raise UpdateError(f"unsupported system filesystem: {filesystem}")
   with mounted_read_only(device) as root:
     required = (
       root / "ASIUS",
@@ -533,6 +546,8 @@ def verify_system_contents(device: Path, expected_version: str) -> None:
       raise UpdateError("system image runit stage 1 is not executable")
     if not os.access(root / "usr/comma/comma.sh", os.X_OK):
       raise UpdateError("system image launcher is not executable")
+    if filesystem == "erofs" and not os.access(root / "usr/lib/vamos/root-init", os.X_OK):
+      raise UpdateError("EROFS image lacks executable writable-root initialization")
     actual_version = (root / "VERSION").read_text(encoding="utf-8").strip()
     if expected_version not in ("", "unspecified") and actual_version != expected_version:
       raise UpdateError(f"system image version {actual_version!r} does not match manifest {expected_version!r}")
@@ -553,6 +568,9 @@ def verify_esp_contents(device: Path) -> None:
         mount_path / BOOT_CONTROL,
         mount_path / ESP_EDL_APPLICATION,
         mount_path / "qcs6490-radxa-dragon-q6a.dtb",
+        mount_path / "EFI/vamos/qupv3fw.elf",
+        mount_path / "EFI/vamos/adsp.mbn",
+        mount_path / "EFI/vamos/cdsp.mbn",
       )
       missing = [str(path.relative_to(mount_path)) for path in required if not path.is_file()]
       if missing:

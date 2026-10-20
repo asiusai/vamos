@@ -1,0 +1,54 @@
+#!/bin/sh
+# Keep each immutable OS image's local changes separate from other A/B images.
+# The kernel boot watchdog covers this short setup before runit takes ownership.
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+if [ "$$" -ne 1 ] || [ "$#" -ne 0 ]; then
+    exec /usr/bin/runit-init "$@"
+fi
+
+mountpoint -q /proc || mount -t proc proc /proc -o nosuid,noexec,nodev
+if [ "$(findmnt -n -o FSTYPE /)" != erofs ]; then
+    exec /usr/bin/runit-init
+fi
+
+trap 'echo "ERROR: EROFS writable root setup failed"; exec busybox reboot -f' EXIT
+mount --make-rprivate /
+mountpoint -q /dev || mount -t devtmpfs dev /dev -o mode=0755,nosuid
+mountpoint -q /sys || mount -t sysfs sys /sys -o nosuid,noexec,nodev
+mountpoint -q /run || mount -t tmpfs run /run -o mode=0755,nosuid,nodev
+
+root_device="$(findmnt -n -o SOURCE /)"
+disk="$(lsblk -n -o PKNAME "$root_device")"
+case "$disk" in
+    nvme[0-9]*n[0-9]*) userdata="/dev/${disk}p5" ;;
+    sd[a-z]*) userdata="/dev/${disk}5" ;;
+    *) echo "ERROR: unsupported root storage: $root_device"; exit 1 ;;
+esac
+image_uuid="$(blkid -s UUID -o value "$root_device")"
+case "$image_uuid" in
+    ""|*[!a-fA-F0-9-]*) echo "ERROR: invalid root image UUID"; exit 1 ;;
+esac
+
+mount -t ext4 -o rw,discard,noatime,nosuid,nodev "$userdata" /data
+umask 077
+state="/data/vamos-root/$image_uuid"
+mkdir -p "$state/upper" "$state/work"
+chmod 755 "$state/upper"
+umask 022
+mkdir -p /run/vamos/newroot /run/vamos/lower
+printf '%s\n' "$root_device" > /run/vamos-root-device
+mount --bind / /mnt
+mount -t overlay overlay -o "lowerdir=/mnt,upperdir=$state/upper,workdir=$state/work" /run/vamos/newroot
+cd /run/vamos/newroot
+mkdir -p oldroot
+pivot_root . oldroot
+for path in dev proc sys data run; do
+    mount --move "/oldroot/$path" "/$path"
+done
+mount --move /oldroot/mnt /run/vamos/lower
+umount -l /oldroot
+rmdir /oldroot
+trap - EXIT
+exec /usr/bin/runit-init
