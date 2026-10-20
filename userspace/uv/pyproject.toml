@@ -22,6 +22,8 @@ dependencies = [
   # On-device camera/encoder health diagnostics
   "av==13.1.0",
   "Pillow==12.3.0",
+  # SConstruct imports this even when openpilot's optional tools are disabled.
+  "comma-deps-ncurses==6.5.post103",
 ]
 
 [tool.uv]
