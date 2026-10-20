@@ -139,6 +139,24 @@ The build applies the tracked patches under `bootloader/patches/` to both upstre
 Normal Git status hides their worktree changes. Patch edits and submodule revision changes remain visible.
 Use `git status --ignore-submodules=none` to inspect the patched checkouts.
 
+## Browser U-Boot package
+
+`tools/build/package_uboot.py` creates browser templates and firmware reconstruction instructions.
+Supply a built U-Boot core and private, complete NOR reference files:
+
+```sh
+python3 tools/build/package_uboot.py \
+  --core build/u-boot/u-boot-xbl-core.bin \
+  --reference /private/stock-nor.bin \
+  --output build/browser-uboot
+```
+
+Repeat `--reference` for each supported firmware revision.
+The public template contains zeroes where device firmware must be copied.
+Sign `uboot.json` with the OS release key before publishing it.
+Never publish reference NOR files.
+Test reconstruction and physical boot before publishing the stable manifest.
+
 ## Boot watchdog and diagnostics
 
 U-Boot starts the Qualcomm hardware watchdog after relocation, before USB and
