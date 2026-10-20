@@ -186,7 +186,8 @@ build_kernel() {
   echo "-- Building and installing kernel modules --"
   make -j"$jobs" "${make_args[@]}" modules
   rm -rf "$OUT_DIR/modules_install"
-  make "${make_args[@]}" INSTALL_MOD_PATH="$OUT_DIR/modules_install" modules_install
+  # Keep full symbols in kernel-out for debugging; ship only runtime modules.
+  make "${make_args[@]}" INSTALL_MOD_PATH="$OUT_DIR/modules_install" INSTALL_MOD_STRIP=1 modules_install
 
   VAMOS_BUILD_JOBS="$jobs" bash "$DIR/tools/build/build_aic8800.sh"
 

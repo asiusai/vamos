@@ -223,13 +223,17 @@ if [ -d "$OP_SRC" ]; then
   exec_as_root find "$ROOTFS_DIR/usr/local/venv" -type f \
     -path '*/site-packages/ffmpeg/install/include/libavutil/hwcontext_opencl.h' \
     -delete
-
-  echo "Deduplicating immutable Python environment files"
-  exec_as_root hardlink -X -s 4096 "$ROOTFS_DIR/usr/local/venv"
 else
   echo "ERROR: managed openpilot checkout is missing: $OP_SRC" >&2
   exit 1
 fi
+
+# Run after both dependency installations so the final uv sync cannot restore
+# test suites, debug information or the redundant software-only Mesa runtime.
+echo "Trimming runtime dependencies"
+exec_as_root python3 "$DIR/userspace/trim.py" "$ROOTFS_DIR" --strip /usr/lib/llvm21/bin/llvm-strip
+echo "Deduplicating immutable Python environment files"
+exec_as_root hardlink -X -s 4096 "$ROOTFS_DIR/usr/local/venv"
 
 # Profile rootfs (before unmount)
 echo "Profiling rootfs"

@@ -201,6 +201,19 @@ inactive vamOS A/B slot. It does not use GitHub, R2, an openpilot branch, or the
 `VAMOS_VERSION` update gate. The image's existing `/VERSION` is used only for
 post-write verification, so rebuilding and reinstalling the same version works.
 
+Image builds remove selected dependency tests and debug sections after the final
+Python dependency installation. Runtime testing helpers, headers, compilers and
+debuggers remain available. Kernel modules retain their full symbols in
+`build/kernel-out`; installed copies omit debug sections.
+
+Clang and Mesa use the same LLVM 22 runtime. Raylib uses the system EGL, GLES
+and DRM libraries, which support Dragon hardware rendering. Its bundled Mesa
+copy lacks the Dragon driver and is removed. Vulkan drivers for unrelated GPUs
+are also removed. `userspace/trim.py` owns this cleanup and uses LLVM strip.
+
+The onboard hub driver loads before AIC8800 firmware. This prevents a late hub
+reset from restarting the radio firmware download.
+
 ## Dragon Hardware Video Encoding
 
 Dragon Q6A uses the mainline Qualcomm Venus V4L2 memory-to-memory driver. The

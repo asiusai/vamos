@@ -35,7 +35,7 @@ xbps-install -y \
   bc \
   busybox \
   bluez \
-  clang \
+  clang22-22.1.8_1 \
   chrony \
   cmake \
   dfu-util \
@@ -59,7 +59,7 @@ xbps-install -y \
   libbsd \
   libcurl \
   libgpiod \
-  libomp-devel \
+  libomp22-devel-22.1.8_1 \
   libtool \
   libyaml \
   libusb-devel \
@@ -94,6 +94,9 @@ xbps-install -y \
   ghostty-terminfo \
   kitty-terminfo \
   ncurses-term
+
+# Let runtime compilers discover the single LLVM library without development headers.
+ln -s llvm/22/lib/libLLVM.so.22.1 /usr/lib/libLLVM.so
 
 # Create privileged user (use /usr/bin/bash - Void Linux path)
 useradd -m -s /usr/bin/bash $USERNAME

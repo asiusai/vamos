@@ -20,6 +20,7 @@ RUN apk add --no-cache \
     git-lfs \
     libcap \
     linux-headers \
+    llvm21=21.1.2-r1 \
     lz4-dev \
     openssl \
     openssl-dev \
