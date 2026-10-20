@@ -167,20 +167,24 @@ The pinned ADSP and CDSP firmware remains available for board initialization and
 Clang builds openpilot on the device. LLVM compiles GPU and CPU kernels.
 GCC, development headers, and the separate Panda ARM cross-compiler remain available.
 
-The first system or disk build clones the Asius `openpilot` `master` branch into
+The first system build clones the Asius `openpilot` `master` branch into
 the gitignored `.openpilot/` checkout. Later builds fetch that ref and safely
 realign the managed checkout, then update its submodules. Release builds set
 `VAMOS_OPENPILOT_REF` to the resolved openpilot commit so the image is
-reproducible even if `master` moves. System builds use it for openpilot
-dependencies. Disk builds produce one common `dragon.img` with blank userdata
-and a separate `userdata-openpilot.img` payload containing a Git-complete
-`/data/openpilot` checkout. The manual flasher and flash.asius.ai can apply
+reproducible even if `master` moves. System builds use it for openpilot dependencies.
+
+Factory disks use a native ARM64 openpilot build with compiled Chestnut models.
+Run `python3 tools/build/download_prebuilt.py` to download and verify the signed release.
+Alternatively, put native `tools/release/build_release.sh` output at
+`build/openpilot/openpilot-v0-chestnut.tar.xz`.
+`VAMOS_OPENPILOT_ARCHIVE` selects another archive within this repository.
+Disk builds produce a common `dragon.img` with blank userdata and an optional
+`userdata-openpilot.img` with the flattened, prebuilt `master-ci` checkout. The manual flasher and flash.asius.ai can apply
 that payload for a driving device or omit it for a general-purpose vamOS
 device. No profile or role is recorded: executable `/data/continue.sh` is the
 sole opt-in to the openpilot workload.
 
-A driving device therefore boots without downloading openpilot and performs
-only the normal local openpilot build. A vamOS-only device gets the same
+A driving device boots without downloading or compiling openpilot. A vamOS-only device gets the same
 writable OS, A/B layout, and persistent `/data` and `/home`, with no
 `/data/openpilot`. Interactive shells start in `/data/openpilot` when it exists
 and otherwise remain in the persistent home directory. OTA packages use
@@ -326,15 +330,17 @@ sudo reboot
 
 ## OTA Publishing
 
-Published manifests are currently unused; migration of their old download URLs
-is deferred. Before enabling OTA updates or browser flashing, generate new signing
-keys, update the trusted public keys in VamOS and the flasher, and publish new
-manifests using `https://vamos.asius.ai`.
+Signed OTA manifests and content-addressed images use `https://vamos.asius.ai`.
+Openpilot selects the release through `openpilot/system/hardware/v0/vamos.json`.
+VamOS 18.7 passed download, inactive-slot verification, activation, and boot commit
+through openpilot on Asius 1. This release uses a new signing key.
+Devices with the retired key need an explicit trust-key update or a factory flash.
 
-The separate `build and publish vamOS images` workflow runs manually or for an
-exact `vamos-v<VERSION>` tag. It builds the kernel, system image, and ESP on
-ARM64, creates content-addressed XZ objects, signs `vamos.json`, and publishes
-the device-facing objects to Cloudflare R2. The signed `vamos.json` and
+The `build and publish vamOS images` workflow runs manually or for an exact
+`vamos-v<VERSION>` tag. It builds the kernel, system image, and ESP on ARM64.
+It downloads the signed native openpilot archive and builds UFS and NVMe factory images.
+It signs the OTA manifest and both factory manifests, then uploads objects to R2.
+Factory manifests use `vamos/releases/<VERSION>/flash-ufs.json` and `flash-nvme.json`. The signed `vamos.json` and
 `vamos.json.sig` are retained both as a 90-day workflow artifact and as durable
 assets on the matching GitHub source release. Finally, the workflow commits
 those same files to the Asius openpilot fork.

@@ -100,7 +100,10 @@ ln -s llvm/22/lib/libLLVM.so.22.1 /usr/lib/libLLVM.so
 
 # Create privileged user (use /usr/bin/bash - Void Linux path)
 useradd -m -s /usr/bin/bash $USERNAME
-echo "$USERNAME:$PASSWD" | chpasswd
+# Void's chpasswd PAM policy uses pam_permit and leaves new accounts locked.
+# Select the hash method explicitly so the physical recovery password is set.
+echo "$USERNAME:$PASSWD" | chpasswd -c SHA512
+test "$(passwd -S "$USERNAME" | awk '{print $2}')" = P
 groupadd -f gpio
 groupadd -f gpu
 usermod -aG wheel,video,audio,disk,dialout,gpio,gpu $USERNAME

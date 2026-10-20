@@ -129,6 +129,13 @@ docker buildx build -f tools/build/Dockerfile --platform=linux/arm64 \
   "$DIR" | docker exec -i "$MOUNT_CONTAINER_ID" tar -xf - -C "$ROOTFS_DIR"
 echo "Build and extraction complete"
 
+# Existing devices can hide a locked factory account with their saved password.
+# Validate the exported image before creating an OTA or factory release.
+if [ "$(exec_as_root chroot "$ROOTFS_DIR" passwd -S comma | awk '{print $2}')" != P ]; then
+  echo "ERROR: factory recovery account is locked" >&2
+  exit 1
+fi
+
 # Avoid detecting as container
 echo "Removing .dockerenv file"
 exec_as_root rm -f "$ROOTFS_DIR/.dockerenv"

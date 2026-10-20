@@ -44,7 +44,7 @@ USERDATA_OPENPILOT_IMG="$BUILD_DIR/userdata-openpilot${ARTIFACT_SUFFIX}.img"
 GRUBENV_A="$BUILD_DIR/grubenv_a.factory"
 GRUBENV_B="$BUILD_DIR/grubenv_b.factory"
 
-# Build against the minimum supported v1 storage geometry (62537072640 bytes).
+# Build against the minimum supported v0 storage geometry (62537072640 bytes).
 # NVMe uses 512-byte logical sectors while the supported removable UFS modules
 # use 4096-byte logical sectors, so they require separate GPT images.
 STORAGE_BYTES="${VAMOS_STORAGE_BYTES:-62537072640}"
@@ -59,7 +59,15 @@ ESP_SIZE=$((256 * 1024 * 1024))
 SYSTEM_SIZE=$((10 * 1024 * 1024 * 1024))
 START_SECTOR=$((1024 * 1024 / SECTOR_SIZE))
 
-. "$DIR/tools/build/openpilot_checkout.sh"
+# Factory releases contain a native build, including the compiled Chestnut models.
+# Keep the archive under the repository so the builder container can read it.
+OP_ARCHIVE="${VAMOS_OPENPILOT_ARCHIVE:-$BUILD_DIR/openpilot/openpilot-v0-chestnut.tar.xz}"
+OP_ARCHIVE="$(realpath "$OP_ARCHIVE")"
+if [ ! -f "$OP_ARCHIVE" ]; then
+  echo "ERROR: native openpilot archive not found: $OP_ARCHIVE" >&2
+  echo "Set VAMOS_OPENPILOT_ARCHIVE to tools/release/build_release.sh output." >&2
+  exit 1
+fi
 
 for input in "$KERNEL_IMAGE" "$DTB_FILE" "$ROOTFS_IMG"; do
   if [ ! -f "$input" ]; then
@@ -76,8 +84,6 @@ if ! [[ "$STORAGE_SECTORS" =~ ^[0-9]+$ ]] || [ "$STORAGE_SECTORS" -le 0 ]; then
   echo "ERROR: invalid VAMOS_STORAGE_SECTORS: $STORAGE_SECTORS" >&2
   exit 1
 fi
-
-update_openpilot_checkout
 
 if ! docker image inspect vamos-builder >/dev/null 2>&1; then
   docker build -f "$DIR/tools/build/Dockerfile.builder" -t vamos-builder "$DIR" \
@@ -216,7 +222,7 @@ for slot in a b; do
   grub-editenv "$env_path" set \
     generation=1 active=a pending= phase=stable \
     root_a="PARTUUID=$ROOT_A_GUID" root_b="PARTUUID=$ROOT_B_GUID" \
-    edl_request=0 normal_request=0 usb_mode=ncm
+    edl_request=0 normal_request=1 usb_mode=ncm
   mcopy -o -i "$esp_path" "$env_path" ::/EFI/vamos/grubenv
   echo "  prepared VAMOS-$slot_upper"
 done
@@ -245,90 +251,37 @@ echo "== Building optional openpilot userdata =="
 cp --reflink=auto --sparse=always "$USERDATA_IMG" "$USERDATA_OPENPILOT_IMG"
 mount_image "$USERDATA_OPENPILOT_IMG"
 
-OP_COMMIT="$(git -C "$OP_SRC" rev-parse HEAD)"
-OP_DATE="$(git -C "$OP_SRC" log -1 --format=%ci)"
-OP_VERSION="$(sed -n 's/.*COMMA_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' "$OP_SRC/openpilot/common/version.h" | head -1)"
 OP_DST="$MOUNT_DIR/openpilot"
 CONTINUE="$MOUNT_DIR/continue.sh"
-LFS_PATHS="$BUILD_DIR/tmp-disk/openpilot-lfs-paths"
 docker exec "$MOUNT_CONTAINER_ID" mkdir -p "$OP_DST"
-
-# Preserve Git and submodule metadata so first boot only performs the normal
-# local openpilot build and never needs to download its source. Do not copy
-# materialized LFS worktree files here: their bytes already exist in .git/lfs,
-# and writing them before replacing them with hardlinks leaves gigabytes of
-# duplicate data in freed ext4 blocks that the raw-image delta still carries.
-git -C "$OP_SRC" lfs ls-files -n > "$LFS_PATHS"
-tar -C "$OP_SRC" --no-wildcards --exclude-from="$LFS_PATHS" -cf - . \
-  | docker exec -i "$MOUNT_CONTAINER_ID" tar -C "$OP_DST" -xf -
+xz -dc "$OP_ARCHIVE" | docker exec -i "$MOUNT_CONTAINER_ID" tar -C "$OP_DST" -xf -
 
 docker exec "$MOUNT_CONTAINER_ID" bash -c '
 set -euo pipefail
-
 OP_DST="$1"
 CONTINUE="$2"
-OP_COMMIT="$3"
-OP_DATE="$4"
-OP_REPO="$5"
-OP_VERSION="$6"
-
+test -f "$OP_DST/prebuilt"
+test -f "$OP_DST/build.json"
+test ! -e "$OP_DST/.gitmodules"
+python3 - "$OP_DST/build.json" <<"PYMETA"
+import json, sys
+metadata = json.load(open(sys.argv[1]))
+assert metadata["channel"] == "master-ci"
+assert metadata["openpilot"]["build_style"] == "prebuilt"
+print("Packaged native openpilot " + metadata["openpilot"]["git_commit"])
+PYMETA
+for model in big_driving_tinygrad.pkl big_driving_warp_1344x760_tinygrad.pkl big_driving_warp_1928x1208_tinygrad.pkl; do
+  test "$(stat -c %s "$OP_DST/openpilot/selfdrive/modeld/models/$model")" -gt 1024
+done
+for binary in openpilot/system/camerad/camerad openpilot/system/loggerd/loggerd openpilot/selfdrive/pandad/pandad; do
+  readelf -h "$OP_DST/$binary" | grep -q AArch64
+done
 git config --global --add safe.directory "$OP_DST"
-
-linked=0
-linked_bytes=0
-while read -r oid marker path; do
-  worktree="$OP_DST/$path"
-  object="$OP_DST/.git/lfs/objects/${oid:0:2}/${oid:2:2}/$oid"
-  if [ ! -f "$object" ]; then
-    echo "ERROR: packaged LFS object is missing for $path ($oid)" >&2
-    exit 1
-  fi
-  mode="$(git -C "$OP_DST" ls-files -s -- "$path" | awk "NR == 1 { print substr(\$1, 4) }")"
-  [ -n "$mode" ] || mode=644
-  mkdir -p "$(dirname "$worktree")"
-  ln -f "$object" "$worktree"
-  chmod "$mode" "$worktree"
-  linked=$((linked + 1))
-  linked_bytes=$((linked_bytes + $(stat -c %s "$worktree")))
-done < <(git -C "$OP_DST" lfs ls-files -l)
-
-cat > "$OP_DST/build.json" <<BUILDJSON
-{
-  "channel": "master",
-  "openpilot": {
-    "version": "$OP_VERSION",
-    "release_notes": "",
-    "git_commit": "$OP_COMMIT",
-    "git_origin": "$OP_REPO",
-    "git_commit_date": "$OP_DATE",
-    "build_style": "source"
-  }
-}
-BUILDJSON
-
-cat >> "$OP_DST/.git/info/exclude" <<GITEXCLUDE
-/build.json
-/build/
-/scons_cache/
-/openpilot/selfdrive/modeld/models/*_tinygrad.pkl
-/openpilot/selfdrive/modeld/models/*_tinygrad.pkl.chunk*
-/openpilot/selfdrive/modeld/models/*_metadata.pkl
-/openpilot/selfdrive/modeld/models/*.prebuilt.pkl
-/openpilot/selfdrive/modeld/models/tg_compiled_flags.json
-GITEXCLUDE
-
 git -C "$OP_DST" lfs fsck
-if [ -n "$(git -C "$OP_DST" status --short --untracked-files=no)" ]; then
-  git -C "$OP_DST" status --short --untracked-files=no >&2
-  echo "ERROR: packaged openpilot checkout is dirty" >&2
+if [ -n "$(git -C "$OP_DST" status --porcelain)" ] || [ -n "$(git -C "$OP_DST" submodule status)" ]; then
+  echo "ERROR: prebuilt checkout must be clean and contain no Git submodules" >&2
   exit 1
 fi
-if git -C "$OP_DST" submodule status --recursive | grep -q "^[+-U]"; then
-  git -C "$OP_DST" submodule status --recursive >&2
-  echo "ERROR: packaged openpilot submodules do not match their gitlinks" >&2
-  exit 1
-fi
-
 cat > "$CONTINUE.tmp" <<CONT
 #!/usr/bin/env bash
 cd /data/openpilot
@@ -337,10 +290,8 @@ CONT
 chmod 755 "$CONTINUE.tmp"
 mv "$CONTINUE.tmp" "$CONTINUE"
 chown -R 1000:1000 "$OP_DST" "$CONTINUE"
-
-echo "Packaged openpilot $OP_COMMIT; hardlinked $linked LFS files ($linked_bytes bytes)"
 df -h "$(dirname "$OP_DST")"
-' _ "$OP_DST" "$CONTINUE" "$OP_COMMIT" "$OP_DATE" "$OP_REPO" "$OP_VERSION"
+' _ "$OP_DST" "$CONTINUE"
 
 unmount_image
 e2fsck -fn "$USERDATA_OPENPILOT_IMG"

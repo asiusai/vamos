@@ -272,7 +272,7 @@ def main() -> None:
     "manifest_version": MANIFEST_VERSION,
     "optional_payloads": {
       "openpilot": {
-        "description": "Preloaded Asius openpilot source; first boot builds it locally.",
+        "description": "Prebuilt Asius openpilot with Chestnut models; no first-boot compilation.",
         "label": "vamOS + openpilot",
         "operations": openpilot_operations,
         "result": {"size": userdata_size},

@@ -81,10 +81,7 @@ jobs:
               exit 1
             fi
           fi
-          openpilot_commit=$(git ls-remote https://github.com/asiusai/openpilot.git refs/heads/master | awk '{print $1}')
-          test -n "$openpilot_commit"
           echo "VAMOS_VERSION=$version" >> "$GITHUB_ENV"
-          echo "VAMOS_OPENPILOT_REF=$openpilot_commit" >> "$GITHUB_ENV"
 
       - name: free runner disk space
         run: |
@@ -135,7 +132,9 @@ jobs:
           ./vamos build kernel
           ./vamos build system
           ./vamos build esp
-          ./vamos build disk
+          python3 tools/build/download_prebuilt.py
+          ./vamos build disk --storage ufs
+          ./vamos build disk --storage nvme
 
       - name: validate release images
         run: |
@@ -144,21 +143,19 @@ jobs:
           test -s build/system.img
           test "$(stat -c %s build/system.img)" -le $((10 * 1024 * 1024 * 1024))
           test "$(blkid -p -s TYPE -o value build/system.img)" = erofs
-          test "$(stat -c %s build/dragon.img)" -eq $((122142720 * 512))
-          test "$(jq -r .storage_sectors build/factory-layout.json)" -eq 122142720
-          userdata_bytes=$(( $(jq -r .partitions.userdata.sectors build/factory-layout.json) * 512 ))
-          test "$(stat -c %s build/userdata.img)" -eq "$userdata_bytes"
-          test "$(stat -c %s build/userdata-openpilot.img)" -eq "$userdata_bytes"
-          sgdisk --verify build/dragon.img
           fsck.vfat -n build/esp.img
-          e2fsck -fn build/userdata.img
-          e2fsck -fn build/userdata-openpilot.img
-          if debugfs -R 'stat /openpilot' build/userdata.img 2>&1 | grep -q 'Inode:'; then
-            echo 'blank userdata unexpectedly contains openpilot' >&2
-            exit 1
-          fi
-          debugfs -R 'stat /openpilot/.git/HEAD' build/userdata-openpilot.img 2>&1 | grep -q 'Inode:'
-          debugfs -R 'stat /continue.sh' build/userdata-openpilot.img 2>&1 | grep -q 'Inode:'
+          for suffix in "" -ufs; do
+            test "$(stat -c %s "build/dragon${suffix}.img")" -eq 62537072640
+            e2fsck -fn "build/userdata${suffix}.img"
+            e2fsck -fn "build/userdata-openpilot${suffix}.img"
+            if debugfs -R 'stat /openpilot' "build/userdata${suffix}.img" 2>&1 | grep -q 'Inode:'; then
+              echo 'blank userdata unexpectedly contains openpilot' >&2
+              exit 1
+            fi
+            for file in /openpilot/.git/HEAD /openpilot/prebuilt /continue.sh; do
+              debugfs -R "stat $file" "build/userdata-openpilot${suffix}.img" 2>&1 | grep -q 'Inode:'
+            done
+          done
 
       - name: package content-addressed update
         run: |
@@ -171,21 +168,20 @@ jobs:
       - name: package content-addressed browser flash image
         run: |
           python3 -m unittest discover -s tools/build -p 'test_package_flash.py'
-          python3 tools/build/package_flash.py \
-            --version "$VAMOS_VERSION" \
-            --base-url "${VAMOS_PUBLIC_URL%/}/vamos/flash/objects"
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          manifest = json.loads(Path("build/flash/flash.json").read_text())
-          assert manifest["manifest_version"] == 2
-          assert manifest["base"]["image"]["size"] == 122142720 * 512
-          assert manifest["base"]["operations"][0] == {
-              "offset": 0, "operation": "erase", "size": 122142720 * 512,
-          }
-          assert manifest["optional_payloads"]["openpilot"]["operations"]
-          PY
+          mkdir -p build/release
+          for target in nvme ufs; do
+            suffix=""
+            [ "$target" != ufs ] || suffix=-ufs
+            python3 tools/build/package_flash.py \
+              --version "$VAMOS_VERSION" \
+              --base-url "${VAMOS_PUBLIC_URL%/}/vamos/flash/objects" \
+              --image "build/dragon${suffix}.img" \
+              --layout "build/factory-layout${suffix}.json" \
+              --userdata "build/userdata${suffix}.img" \
+              --openpilot-userdata "build/userdata-openpilot${suffix}.img" \
+              --output-dir "build/flash${suffix}"
+            cp "build/flash${suffix}/flash.json" "build/release/flash-${target}.json"
+          done
 
       - name: sign update manifest
         env:
@@ -199,26 +195,21 @@ jobs:
           printf '%s\n' "$VAMOS_UPDATE_SIGNING_KEY" > "$key"
           openssl pkey -in "$key" -pubout -out "$public"
           cmp "$public" userspace/root/usr/share/vamos/update-public.pem
-          openssl pkeyutl -sign -inkey "$key" -rawin \
-            -in build/ota/vamos.json -out build/ota/vamos.json.sig
-          openssl pkeyutl -sign -inkey "$key" -rawin \
-            -in build/flash/flash.json -out build/flash/flash.json.sig
-          test "$(stat -c %s build/ota/vamos.json.sig)" -eq 64
-          test "$(stat -c %s build/flash/flash.json.sig)" -eq 64
-          openssl pkeyutl -verify -pubin -inkey "$public" -rawin \
-            -in build/ota/vamos.json -sigfile build/ota/vamos.json.sig
-          openssl pkeyutl -verify -pubin -inkey "$public" -rawin \
-            -in build/flash/flash.json -sigfile build/flash/flash.json.sig
+          cp build/ota/vamos.json build/release/vamos.json
+          for manifest in build/release/*.json; do
+            openssl pkeyutl -sign -inkey "$key" -rawin -in "$manifest" -out "$manifest.sig"
+            test "$(stat -c %s "$manifest.sig")" -eq 64
+            openssl pkeyutl -verify -pubin -inkey "$public" -rawin -in "$manifest" -sigfile "$manifest.sig"
+          done
+          cp build/release/vamos.json.sig build/ota/vamos.json.sig
 
       - name: upload signed manifest artifact
         uses: actions/upload-artifact@v4
         with:
           name: vamos-manifest-${{ env.VAMOS_VERSION }}
           path: |
-            build/ota/vamos.json
-            build/ota/vamos.json.sig
-            build/flash/flash.json
-            build/flash/flash.json.sig
+            build/release/*.json
+            build/release/*.json.sig
           if-no-files-found: error
           retention-days: 90
 
@@ -240,7 +231,7 @@ jobs:
               --cache-control "public,max-age=31536000,immutable" \
               --content-type application/octet-stream
           done
-          for object in build/flash/*.img.xz build/flash/*.bin; do
+          for object in build/flash/*.img.xz build/flash/*.bin build/flash-ufs/*.img.xz build/flash-ufs/*.bin; do
             aws s3 cp "$object" "s3://${R2_BUCKET}/vamos/flash/objects/$(basename "$object")" \
               --endpoint-url "$endpoint" \
               --cache-control "public,max-age=31536000,immutable" \
@@ -250,26 +241,12 @@ jobs:
       - name: upload versioned R2 manifest
         run: |
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp build/ota/vamos.json.sig \
-            "s3://${R2_BUCKET}/vamos/releases/${VAMOS_VERSION}/vamos.json.sig" \
-            --endpoint-url "$endpoint" \
-            --cache-control "public,max-age=300" \
-            --content-type application/octet-stream
-          aws s3 cp build/ota/vamos.json \
-            "s3://${R2_BUCKET}/vamos/releases/${VAMOS_VERSION}/vamos.json" \
-            --endpoint-url "$endpoint" \
-            --cache-control "public,max-age=300" \
-            --content-type application/json
-          aws s3 cp build/flash/flash.json.sig \
-            "s3://${R2_BUCKET}/vamos/releases/${VAMOS_VERSION}/flash.json.sig" \
-            --endpoint-url "$endpoint" \
-            --cache-control "public,max-age=300" \
-            --content-type application/octet-stream
-          aws s3 cp build/flash/flash.json \
-            "s3://${R2_BUCKET}/vamos/releases/${VAMOS_VERSION}/flash.json" \
-            --endpoint-url "$endpoint" \
-            --cache-control "public,max-age=300" \
-            --content-type application/json
+          for manifest in build/release/*.json build/release/*.json.sig; do
+            content_type=application/json
+            [[ "$manifest" != *.sig ]] || content_type=application/octet-stream
+            aws s3 cp "$manifest" "s3://${R2_BUCKET}/vamos/releases/${VAMOS_VERSION}/$(basename "$manifest")" \
+              --endpoint-url "$endpoint" --cache-control "public,max-age=300" --content-type "$content_type"
+          done
 
       - name: check out openpilot fork
         uses: actions/checkout@v4
@@ -308,14 +285,6 @@ jobs:
             --endpoint-url "$endpoint" \
             --cache-control "no-cache" \
             --content-type application/json
-          aws s3 cp build/flash/flash.json.sig "s3://${R2_BUCKET}/vamos/flash.json.sig" \
-            --endpoint-url "$endpoint" \
-            --cache-control "no-cache" \
-            --content-type application/octet-stream
-          aws s3 cp build/flash/flash.json "s3://${R2_BUCKET}/vamos/flash.json" \
-            --endpoint-url "$endpoint" \
-            --cache-control "no-cache" \
-            --content-type application/json
 
       - name: create source release
         env:
@@ -333,9 +302,6 @@ jobs:
               --notes "Signed manifests are attached to this release. Device images are published to Cloudflare R2 at ${VAMOS_PUBLIC_URL%/}/vamos/."
           fi
           gh release upload "$source_tag" \
-            build/ota/vamos.json \
-            build/ota/vamos.json.sig \
-            build/flash/flash.json \
-            build/flash/flash.json.sig \
+            build/release/*.json build/release/*.json.sig \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
