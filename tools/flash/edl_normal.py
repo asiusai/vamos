@@ -27,7 +27,7 @@ def require(condition: bool, message: str) -> None:
 
 class EdlDisk:
     def __init__(self, loader: str, memory: str, max_payload: int | None = None):
-        require(memory in ("Ufs", "Nvme"), "normal boot requires Ufs or Nvme")
+        require(memory == "Ufs", "normal boot requires Ufs")
         self.sector_size = 4096 if memory == "Ufs" else 512
         payload = int(os.environ.get("VAMOS_EDL_MAX_PAYLOAD", "65536")) if max_payload is None else max_payload
         require(payload >= 4096, "Firehose payload must be at least 4096 bytes")

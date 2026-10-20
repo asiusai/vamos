@@ -55,7 +55,7 @@ def main() -> None:
     parser.add_argument("manifest", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--loader", required=True)
-    parser.add_argument("--memory", required=True, choices=("Ufs", "Nvme"))
+    parser.add_argument("--memory", required=True, choices=("Ufs",))
     parser.add_argument("--without-openpilot", action="store_true")
     parser.add_argument("--no-reset", action="store_true")
     args = parser.parse_args()

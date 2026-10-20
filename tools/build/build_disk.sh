@@ -9,23 +9,14 @@ cd "$DIR"
 
 BUILD_DIR="$DIR/build"
 
-STORAGE_TARGET="${VAMOS_DISK_STORAGE:-nvme}"
-case "${STORAGE_TARGET,,}" in
-  nvme)
-    STORAGE_TARGET=nvme
-    SECTOR_SIZE=512
-    ARTIFACT_SUFFIX=""
-    ;;
-  ufs)
-    STORAGE_TARGET=ufs
-    SECTOR_SIZE=4096
-    ARTIFACT_SUFFIX="-ufs"
-    ;;
-  *)
-    echo "ERROR: VAMOS_DISK_STORAGE must be nvme or ufs" >&2
-    exit 2
-    ;;
-esac
+STORAGE_TARGET="${VAMOS_DISK_STORAGE:-ufs}"
+if [ "${STORAGE_TARGET,,}" != ufs ]; then
+  echo "ERROR: VAMOS_DISK_STORAGE must be ufs" >&2
+  exit 2
+fi
+STORAGE_TARGET=ufs
+SECTOR_SIZE=4096
+ARTIFACT_SUFFIX="-ufs"
 
 DISK_IMG="$BUILD_DIR/dragon${ARTIFACT_SUFFIX}.img"
 LAYOUT_JSON="$BUILD_DIR/factory-layout${ARTIFACT_SUFFIX}.json"
@@ -45,8 +36,7 @@ GRUBENV_A="$BUILD_DIR/grubenv_a.factory"
 GRUBENV_B="$BUILD_DIR/grubenv_b.factory"
 
 # Build against the minimum supported v0 storage geometry (62537072640 bytes).
-# NVMe uses 512-byte logical sectors while the supported removable UFS modules
-# use 4096-byte logical sectors, so they require separate GPT images.
+# Supported removable UFS modules use 4096-byte logical sectors.
 STORAGE_BYTES="${VAMOS_STORAGE_BYTES:-62537072640}"
 if ! [[ "$STORAGE_BYTES" =~ ^[0-9]+$ ]] || [ "$STORAGE_BYTES" -le 0 ] || \
    [ $((STORAGE_BYTES % SECTOR_SIZE)) -ne 0 ]; then

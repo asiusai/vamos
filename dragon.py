@@ -539,8 +539,8 @@ def cmd_normal(args):
         sys.exit(f"Firehose loader not found: {EDL_LOADER}")
 
     memory = args.storage.capitalize()
-    if memory not in {"Ufs", "Nvme"}:
-        sys.exit("VAMOS_EDL_MEMORY must be Ufs or Nvme")
+    if memory != "Ufs":
+        sys.exit("VAMOS_EDL_MEMORY must be Ufs")
 
     detach_qcserial()
     from tools.flash.edl_normal import EdlDisk, request_normal
@@ -802,9 +802,9 @@ def main():
                        help="Seconds to press F2 after power-on (default 10)")
 
     normal_p = sub.add_parser("normal", help="Boot normally once using only the EDL USB cable")
-    normal_p.add_argument("--storage", choices=("ufs", "nvme"),
-                          default=os.environ.get("VAMOS_EDL_MEMORY", "nvme").lower(),
-                          help="installed storage (default: VAMOS_EDL_MEMORY or nvme)")
+    normal_p.add_argument("--storage", choices=("ufs",),
+                          default=os.environ.get("VAMOS_EDL_MEMORY", "ufs").lower(),
+                          help="installed storage (default: VAMOS_EDL_MEMORY or ufs)")
     normal_p.add_argument("--delay", type=int, default=1,
                           help="Firehose reset delay in seconds (default 1)")
 

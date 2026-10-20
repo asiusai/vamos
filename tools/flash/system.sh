@@ -14,29 +14,17 @@ case "${1:-}" in
   *) echo "Usage: ./vamos flash system [--with-openpilot|--without-openpilot]" >&2; exit 2 ;;
 esac
 
-storage="${VAMOS_EDL_MEMORY:-Nvme}"
-case "${storage,,}" in
-  nvme)
-    DISK_IMG="$DIR/build/dragon.img"
-    USERDATA_IMG="$DIR/build/userdata.img"
-    OPENPILOT_IMG="$DIR/build/userdata-openpilot.img"
-    LAYOUT="$DIR/build/factory-layout.json"
-    MANIFEST_DIR="$DIR/build/flash"
-    RAWPROGRAM_DIR="$DIR/build/manual-flash"
-    ;;
-  ufs)
-    DISK_IMG="$DIR/build/dragon-ufs.img"
-    USERDATA_IMG="$DIR/build/userdata-ufs.img"
-    OPENPILOT_IMG="$DIR/build/userdata-openpilot-ufs.img"
-    LAYOUT="$DIR/build/factory-layout-ufs.json"
-    MANIFEST_DIR="$DIR/build/flash-ufs"
-    RAWPROGRAM_DIR="$DIR/build/manual-flash-ufs"
-    ;;
-  *)
-    echo "ERROR: VAMOS_EDL_MEMORY must be Ufs or Nvme" >&2
-    exit 2
-    ;;
-esac
+storage="${VAMOS_EDL_MEMORY:-Ufs}"
+if [ "${storage,,}" != ufs ]; then
+  echo "ERROR: VAMOS_EDL_MEMORY must be Ufs" >&2
+  exit 2
+fi
+DISK_IMG="$DIR/build/dragon-ufs.img"
+USERDATA_IMG="$DIR/build/userdata-ufs.img"
+OPENPILOT_IMG="$DIR/build/userdata-openpilot-ufs.img"
+LAYOUT="$DIR/build/factory-layout-ufs.json"
+MANIFEST_DIR="$DIR/build/flash-ufs"
+RAWPROGRAM_DIR="$DIR/build/manual-flash-ufs"
 MANIFEST="$MANIFEST_DIR/flash.json"
 LOADER="$DIR/firmware-dragon/flat_build/spinor/dragon-q6a/prog_firehose_ddr.elf"
 
@@ -71,9 +59,5 @@ detect_edl_storage "$LOADER"
 options=()
 [ "$choice" = openpilot ] || options+=(--without-openpilot)
 [ "${VAMOS_NO_RESET:-}" != "1" ] || options+=(--no-reset)
-case "${storage,,}" in
-  ufs) memory=Ufs ;;
-  nvme) memory=Nvme ;;
-esac
 python3 -m tools.flash.flash_factory "$MANIFEST" "$RAWPROGRAM_DIR" \
-  --loader "$LOADER" --memory "$memory" "${options[@]}"
+  --loader "$LOADER" --memory Ufs "${options[@]}"

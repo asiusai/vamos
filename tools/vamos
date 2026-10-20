@@ -18,7 +18,7 @@ configure_flash_storage() {
     case "$1" in
       --storage)
         if [ "$#" -lt 2 ]; then
-          echo "ERROR: --storage requires nvme or ufs" >&2
+          echo "ERROR: --storage requires ufs" >&2
           exit 2
         fi
         storage="$2"
@@ -28,7 +28,7 @@ configure_flash_storage() {
         storage="${1#*=}"
         shift
         ;;
-      --nvme|--ufs)
+      --ufs)
         storage="${1#--}"
         shift
         ;;
@@ -41,23 +41,22 @@ configure_flash_storage() {
 
   [ -n "$storage" ] || return 0
   case "${storage,,}" in
-    nvme) export VAMOS_EDL_MEMORY=Nvme ;;
     ufs) export VAMOS_EDL_MEMORY=Ufs ;;
     *)
-      echo "ERROR: --storage must be nvme or ufs" >&2
+      echo "ERROR: --storage must be ufs" >&2
       exit 2
       ;;
   esac
 }
 
 configure_build_storage() {
-  local storage="nvme"
+  local storage="ufs"
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --storage)
         if [ "$#" -lt 2 ]; then
-          echo "ERROR: --storage requires nvme or ufs" >&2
+          echo "ERROR: --storage requires ufs" >&2
           exit 2
         fi
         storage="$2"
@@ -67,7 +66,7 @@ configure_build_storage() {
         storage="${1#*=}"
         shift
         ;;
-      --nvme|--ufs)
+      --ufs)
         storage="${1#--}"
         shift
         ;;
@@ -79,9 +78,9 @@ configure_build_storage() {
   done
 
   case "${storage,,}" in
-    nvme|ufs) export VAMOS_DISK_STORAGE="${storage,,}" ;;
+    ufs) export VAMOS_DISK_STORAGE="${storage,,}" ;;
     *)
-      echo "ERROR: --storage must be nvme or ufs" >&2
+      echo "ERROR: --storage must be ufs" >&2
       exit 2
       ;;
   esac
@@ -125,7 +124,7 @@ case "${1:-}" in
         configure_build_storage "$@"
         "$DIR/tools/build/build_kernel.sh" && "$DIR/tools/build/build_system.sh" && "$DIR/tools/build/build_disk.sh"
         ;;
-      *)      echo "Usage: vamos build <uboot|kernel|system|esp|ota|disk|all> [--storage nvme|ufs]"; exit 1 ;;
+      *)      echo "Usage: vamos build <uboot|kernel|system|esp|ota|disk|all> [--storage ufs]"; exit 1 ;;
     esac ;;
   flash)
     flash_target="${2:-}"
@@ -135,7 +134,7 @@ case "${1:-}" in
     case "$flash_target" in
       kernel)
         if [ "${#FLASH_ARGS[@]}" -ne 0 ]; then
-          echo "Usage: vamos flash kernel [--storage nvme|ufs]" >&2
+          echo "Usage: vamos flash kernel [--storage ufs]" >&2
           exit 2
         fi
         exec "$DIR/tools/flash/kernel.sh"
@@ -156,7 +155,7 @@ case "${1:-}" in
           "$DIR/tools/flash/kernel.sh"
         ;;
       *)
-        echo "Usage: vamos flash <uboot|kernel|system|all> [--storage nvme|ufs]" >&2
+        echo "Usage: vamos flash <uboot|kernel|system|all> [--storage ufs]" >&2
         exit 1
         ;;
     esac ;;
@@ -175,11 +174,11 @@ case "${1:-}" in
     echo "  build system       Build the rootfs  → build/system.img (EROFS)"
     echo "  build esp          Build update/boot ESP → build/esp.img"
     echo "  build ota          Package ESP + system → build/ota/vamos.json"
-    echo "  build disk         Assemble initial disk image; accepts --storage nvme|ufs"
-    echo "  build all          Do all three in order; accepts --storage nvme|ufs"
+    echo "  build disk         Assemble initial disk image; accepts --storage ufs"
+    echo "  build all          Do all three in order; accepts --storage ufs"
     echo "  flash uboot        Replace SPI XBL; --restore-stock restores backup"
     echo "  flash system       Flash vamOS; accepts --storage and --without-openpilot"
-    echo "  flash kernel       Flash the ESP; accepts --storage nvme|ufs"
+    echo "  flash kernel       Flash the ESP; accepts --storage ufs"
     echo "  flash all          Flash system + kernel; accepts --storage"
     echo "  profile [diff]     Profile rootfs or diff two profiles"
     echo "  device-update HOST Install local vamOS images over SSH"

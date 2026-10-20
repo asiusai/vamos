@@ -39,10 +39,8 @@ ar p "$DSP_PACKAGE" data.tar.xz | tar -xJf - -C "$DSP_STAGE" "./$DSP_PATH/adsp.m
 
 rm -f "$ESP_IMG"
 truncate -s $((256 * 1024 * 1024)) "$ESP_IMG"
-# A FAT logical sector may be larger than the storage device's logical sector,
-# but never smaller.  Use 4 KiB so this one OTA image mounts on both 512-byte
-# NVMe and 4096-byte UFS media.  At 256 MiB the valid format with 4 KiB sectors
-# is FAT16 (FAT32 would have fewer than its required 65,525 data clusters).
+# Match UFS's 4 KiB logical sectors. At 256 MiB this requires FAT16;
+# FAT32 would have fewer than its required 65,525 data clusters.
 mkfs.vfat -F 16 -S 4096 -n VAMOS-NEW "$ESP_IMG" >/dev/null
 mmd -i "$ESP_IMG" ::/EFI
 mmd -i "$ESP_IMG" ::/EFI/BOOT

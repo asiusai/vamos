@@ -14,15 +14,15 @@ class PrepareRawprogramTest(unittest.TestCase):
   def test_rejects_destructive_legacy_manifests(self) -> None:
     for version in (1, 2):
       with self.assertRaisesRegex(ValueError, "rebuild with persist"):
-        operations_for_payload({"manifest_version": version, "sector_size": 512}, "base")
+        operations_for_payload({"manifest_version": version, "sector_size": 4096}, "base")
 
   def test_reads_current_payloads(self) -> None:
-    base = [{"operation": "erase", "offset": 0, "size": 512}]
-    openpilot = [{"operation": "program", "offset": 512, "size": 512}]
+    base = [{"operation": "erase", "offset": 0, "size": 4096}]
+    openpilot = [{"operation": "program", "offset": 4096, "size": 4096}]
     manifest = {
       "manifest_version": 3,
       "persist": {"offset": 1024 * 1024, "size": 4096},
-      "sector_size": 512,
+      "sector_size": 4096,
       "base": {"operations": base},
       "optional_payloads": {"openpilot": {"operations": openpilot}},
     }
@@ -52,7 +52,7 @@ class PrepareRawprogramTest(unittest.TestCase):
   def test_reuses_verified_prepared_payload_and_rebuilds_changed_output(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
       root = Path(temporary)
-      raw = b"asius-v0" + bytes(512 - len("asius-v0"))
+      raw = b"asius-v0" + bytes(4096 - len("asius-v0"))
       compressed = lzma.compress(raw)
       source = root / "object.img.xz"
       source.write_bytes(compressed)
@@ -60,11 +60,11 @@ class PrepareRawprogramTest(unittest.TestCase):
       manifest_path.write_text(json.dumps({
         "manifest_version": 3,
       "persist": {"offset": 1024 * 1024, "size": 4096},
-        "sector_size": 512,
+        "sector_size": 4096,
         "base": {"operations": [{
           "compressed_sha256": hashlib.sha256(compressed).hexdigest(),
           "compressed_size": len(compressed),
-          "offset": 512,
+          "offset": 4096,
           "operation": "program",
           "sha256": hashlib.sha256(raw).hexdigest(),
           "size": len(raw),

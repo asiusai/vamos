@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 
-SUPPORTED_SECTOR_SIZES = (512, 4096)
+SUPPORTED_SECTOR_SIZES = (4096,)
 CACHE_VERSION = 2
 CACHE_MARKER = ".prepared.json"
 

@@ -18,31 +18,27 @@ the release checklist.
 ./vamos build ota          # build ESP and package a full OTA release
 ./vamos build disk         # build the common factory disk + optional userdata
 ./vamos build disk --storage ufs  # build the 4 KiB-sector UFS factory disk
-./vamos flash kernel --storage nvme  # replace an NVMe ESP through EDL
-./vamos flash system --storage nvme  # factory flash NVMe with openpilot
+./vamos flash kernel --storage ufs  # replace a UFS ESP through EDL
+./vamos flash system --storage ufs  # factory flash UFS with openpilot
 ./vamos flash system --storage ufs --without-openpilot  # vamOS-only UFS
-./vamos flash all --storage nvme     # flash system and kernel
+./vamos flash all --storage ufs     # flash system and kernel
 ./vamos profile diff A B   # diff two rootfs profiles
 ./vamos device-update comma@192.168.88.20
 ```
 
-EDL flashing defaults to Asius v0 NVMe. NVMe factory images use 512-byte
-logical sectors; supported removable UFS modules use 4096-byte logical sectors.
-Select the hardware target with `--storage nvme|ufs`; `--nvme` and `--ufs` are
-equivalent shortcuts. Low-level tooling can still use
-`VAMOS_EDL_MEMORY=Nvme|Ufs`. The signed QCS6490 programmer hangs after configuring an
-unsupported backend, so it cannot safely probe multiple storage types in one
-EDL session.
+Factory builds and EDL flashing support UFS modules with 4096-byte logical sectors.
+UFS is the default. `--storage ufs` selects it explicitly.
+The signed QCS6490 programmer cannot safely probe unsupported storage backends.
 CLI transfers default to conservative 64 KiB USB payloads; override that with
 `VAMOS_EDL_MAX_PAYLOAD` when benchmarking a known-stable link.
 System factory flashing and `dragon.py normal` reuse one Firehose connection.
 Writes retain full readback verification. Failed operations stop the session
 without automatic retries. See [the host tool](tools/flash/edl-ng/README.md).
-Factory disks use a 64 GB minimum geometry and target-specific GPTs;
+Factory disks use a 64 GB minimum geometry and a UFS GPT;
 `VAMOS_STORAGE_BYTES` remains available for builds that intentionally target a
 different minimum capacity. On first boot,
 the backup GPT, userdata partition, and ext4 filesystem expand to use the
-remaining capacity of larger NVMe or UFS media.
+remaining capacity of larger UFS media.
 
 The sixth GPT entry reserves 64 MiB before userdata for `/persist`. Factory
 flashing preserves this region. First boot generates `/persist/asius/id_ed25519`
@@ -100,7 +96,7 @@ UART. It can also control a dock with real ganged VBUS switching:
 
 ```bash
 ./dragon.py edl                 # request reboot-edl over NCM
-./dragon.py normal              # leave EDL over USB (NVMe product)
+./dragon.py normal              # leave EDL over USB (UFS module)
 ./dragon.py normal --storage ufs # same command for a Dragon with UFS
 ./dragon.py dock status
 ./dragon.py dock on|off|cycle
@@ -355,9 +351,9 @@ Devices with the retired key need an explicit trust-key update or a factory flas
 
 The `build and publish vamOS images` workflow runs manually or for an exact
 `vamos-v<VERSION>` tag. It builds the kernel, system image, and ESP on ARM64.
-It downloads the signed native openpilot archive and builds UFS and NVMe factory images.
+It downloads the signed native openpilot archive and builds UFS factory images.
 It signs the OTA manifest and both factory manifests, then uploads objects to R2.
-Factory manifests use `vamos/releases/<VERSION>/flash-ufs.json` and `flash-nvme.json`. The signed `vamos.json` and
+Factory manifests use `vamos/releases/<VERSION>/flash-ufs.json`. The signed `vamos.json` and
 `vamos.json.sig` are retained both as a 90-day workflow artifact and as durable
 assets on the matching GitHub source release. Finally, the workflow commits
 those same files to the Asius openpilot fork.

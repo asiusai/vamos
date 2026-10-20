@@ -26,11 +26,11 @@ class PackageFlashTest(unittest.TestCase):
 
       with patch("package_flash.OUTPUT_DIR", root / "out"):
         (root / "out").mkdir()
-        operations, size = package_base_image(image, "https://updates.example/objects", persist={"offset": CHUNK_SIZE, "size": 512})
+        operations, size = package_base_image(image, "https://updates.example/objects", persist={"offset": CHUNK_SIZE, "size": 4096})
 
       self.assertEqual(size, CHUNK_SIZE * 2)
       self.assertEqual(operations[0], {"offset": 0, "operation": "erase", "size": CHUNK_SIZE})
-      self.assertTrue(all(op["offset"] >= CHUNK_SIZE + 512 or op["offset"] + op["size"] <= CHUNK_SIZE for op in operations))
+      self.assertTrue(all(op["offset"] >= CHUNK_SIZE + 4096 or op["offset"] + op["size"] <= CHUNK_SIZE for op in operations))
       self.assertEqual(len(operations), 4)
       self.assertEqual(operations[2]["operation"], "program")
       self.assertLess(operations[2]["compressed_size"], CHUNK_SIZE)
@@ -79,7 +79,7 @@ class PackageFlashTest(unittest.TestCase):
       root = Path(temporary)
       output = root / "out"
       output.mkdir()
-      raw = b"asius-v0" + bytes(512 - len("asius-v0"))
+      raw = b"asius-v0" + bytes(4096 - len("asius-v0"))
       with patch("package_flash.OUTPUT_DIR", output), \
            patch("package_flash.OBJECT_CACHE", {}):
         operation = program_operation(raw, 0, "https://updates.example/objects")
@@ -94,7 +94,7 @@ class PackageFlashTest(unittest.TestCase):
       with patch("package_flash.OUTPUT_DIR", output), \
            patch("package_flash.OBJECT_CACHE", load_object_cache(manifest_path)), \
            patch("package_flash.lzma.decompress", side_effect=AssertionError("cache miss")):
-        reused = program_operation(raw, 512, "https://updates.example/objects")
+        reused = program_operation(raw, 4096, "https://updates.example/objects")
       self.assertEqual(reused["compressed_sha256"], operation["compressed_sha256"])
 
 

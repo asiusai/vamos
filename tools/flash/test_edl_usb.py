@@ -37,8 +37,8 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 printf '%s:%s\\n' "$memory" "$slot" >> "$EDL_TEST_CALLS"
-if [ "$memory:$slot" = Nvme:0 ]; then
-  dd if=/dev/zero of="$output" bs=512 count=1 status=none
+if [ "$memory:$slot" = Ufs:0 ]; then
+  dd if=/dev/zero of="$output" bs=4096 count=1 status=none
   exit 0
 fi
 exit 1
@@ -66,14 +66,14 @@ exit 1
       env=environment,
     )
 
-  def test_defaults_to_v1_nvme_without_probing(self) -> None:
+  def test_defaults_to_ufs_without_probing(self) -> None:
     result = self.run_helper(
       'detect_edl_storage loader; printf "RESULT=%s|%s\\nTRANSPORT=%s\\n" "${EDL_STORAGE_ARGS[*]}" "$EDL_STORAGE_LABEL" "${EDL_TRANSPORT_ARGS[*]}"'
     )
 
     self.assertEqual(result.returncode, 0, result.stdout)
     self.assertFalse(self.calls.exists())
-    self.assertIn("RESULT=--memory=Nvme --slot=0|NVMe slot 0 (Asius v0 default)", result.stdout)
+    self.assertIn("RESULT=--memory=Ufs --slot=0|UFS slot 0 (Asius v0 default)", result.stdout)
     self.assertIn("TRANSPORT=--maxpayload=65536", result.stdout)
 
   def test_explicit_ufs_override(self) -> None:
@@ -86,15 +86,15 @@ exit 1
     self.assertFalse(self.calls.exists())
     self.assertIn("RESULT=--memory=Ufs --slot=0|UFS slot 0 (explicit)", result.stdout)
 
-  def test_rejects_removed_sdcc_target(self) -> None:
+  def test_rejects_removed_nvme_target(self) -> None:
     result = self.run_helper(
       'detect_edl_storage loader',
-      VAMOS_EDL_MEMORY="Sdcc",
+      VAMOS_EDL_MEMORY="Nvme",
     )
 
     self.assertEqual(result.returncode, 2, result.stdout)
     self.assertFalse(self.calls.exists())
-    self.assertIn("VAMOS_EDL_MEMORY must be Ufs or Nvme", result.stdout)
+    self.assertIn("VAMOS_EDL_MEMORY must be Ufs", result.stdout)
 
 
 if __name__ == "__main__":

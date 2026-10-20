@@ -134,7 +134,6 @@ jobs:
           ./vamos build esp
           python3 tools/build/download_prebuilt.py
           ./vamos build disk --storage ufs
-          ./vamos build disk --storage nvme
 
       - name: validate release images
         run: |
@@ -144,17 +143,15 @@ jobs:
           test "$(stat -c %s build/system.img)" -le $((10 * 1024 * 1024 * 1024))
           test "$(blkid -p -s TYPE -o value build/system.img)" = erofs
           fsck.vfat -n build/esp.img
-          for suffix in "" -ufs; do
-            test "$(stat -c %s "build/dragon${suffix}.img")" -eq 62537072640
-            e2fsck -fn "build/userdata${suffix}.img"
-            e2fsck -fn "build/userdata-openpilot${suffix}.img"
-            if debugfs -R 'stat /openpilot' "build/userdata${suffix}.img" 2>&1 | grep -q 'Inode:'; then
-              echo 'blank userdata unexpectedly contains openpilot' >&2
-              exit 1
-            fi
-            for file in /openpilot/.git/HEAD /openpilot/prebuilt /continue.sh; do
-              debugfs -R "stat $file" "build/userdata-openpilot${suffix}.img" 2>&1 | grep -q 'Inode:'
-            done
+          test "$(stat -c %s "build/dragon-ufs.img")" -eq 62537072640
+          e2fsck -fn "build/userdata-ufs.img"
+          e2fsck -fn "build/userdata-openpilot-ufs.img"
+          if debugfs -R 'stat /openpilot' "build/userdata-ufs.img" 2>&1 | grep -q 'Inode:'; then
+            echo 'blank userdata unexpectedly contains openpilot' >&2
+            exit 1
+          fi
+          for file in /openpilot/.git/HEAD /openpilot/prebuilt /continue.sh; do
+            debugfs -R "stat $file" "build/userdata-openpilot-ufs.img" 2>&1 | grep -q 'Inode:'
           done
 
       - name: package content-addressed update
@@ -169,19 +166,15 @@ jobs:
         run: |
           python3 -m unittest discover -s tools/build -p 'test_package_flash.py'
           mkdir -p build/release
-          for target in nvme ufs; do
-            suffix=""
-            [ "$target" != ufs ] || suffix=-ufs
-            python3 tools/build/package_flash.py \
-              --version "$VAMOS_VERSION" \
-              --base-url "${VAMOS_PUBLIC_URL%/}/vamos/flash/objects" \
-              --image "build/dragon${suffix}.img" \
-              --layout "build/factory-layout${suffix}.json" \
-              --userdata "build/userdata${suffix}.img" \
-              --openpilot-userdata "build/userdata-openpilot${suffix}.img" \
-              --output-dir "build/flash${suffix}"
-            cp "build/flash${suffix}/flash.json" "build/release/flash-${target}.json"
-          done
+          python3 tools/build/package_flash.py \
+            --version "$VAMOS_VERSION" \
+            --base-url "${VAMOS_PUBLIC_URL%/}/vamos/flash/objects" \
+            --image "build/dragon-ufs.img" \
+            --layout "build/factory-layout-ufs.json" \
+            --userdata "build/userdata-ufs.img" \
+            --openpilot-userdata "build/userdata-openpilot-ufs.img" \
+            --output-dir "build/flash-ufs"
+          cp "build/flash-ufs/flash.json" "build/release/flash-ufs.json"
 
       - name: sign update manifest
         env:
@@ -231,7 +224,7 @@ jobs:
               --cache-control "public,max-age=31536000,immutable" \
               --content-type application/octet-stream
           done
-          for object in build/flash/*.img.xz build/flash/*.bin build/flash-ufs/*.img.xz build/flash-ufs/*.bin; do
+          for object in build/flash-ufs/*.img.xz build/flash-ufs/*.bin; do
             aws s3 cp "$object" "s3://${R2_BUCKET}/vamos/flash/objects/$(basename "$object")" \
               --endpoint-url "$endpoint" \
               --cache-control "public,max-age=31536000,immutable" \

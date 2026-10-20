@@ -21,7 +21,7 @@ if ! [[ "$EDL_MAX_PAYLOAD" =~ ^[0-9]+$ ]] || [ "$EDL_MAX_PAYLOAD" -lt 4096 ]; th
 fi
 EDL_TRANSPORT_ARGS=(--maxpayload="$EDL_MAX_PAYLOAD")
 
-# Default to NVMe unless the operator explicitly selects a UFS device. This
+# Only UFS is supported. This
 # signed programmer can ACK an unsupported backend and then hang before another
 # backend can be selected, so sequential runtime probing is not safe.
 detect_edl_storage() {
@@ -32,18 +32,17 @@ detect_edl_storage() {
     return 1
   fi
 
-  selection="${VAMOS_EDL_MEMORY:-nvme}"
+  selection="${VAMOS_EDL_MEMORY:-ufs}"
   case "${selection,,}" in
     ufs) memory=Ufs; label=UFS ;;
-    nvme) memory=Nvme; label=NVMe ;;
-    *) echo "ERROR: VAMOS_EDL_MEMORY must be Ufs or Nvme" >&2; return 2 ;;
+    *) echo "ERROR: VAMOS_EDL_MEMORY must be Ufs" >&2; return 2 ;;
   esac
 
   EDL_STORAGE_ARGS=(--memory="$memory" --slot=0)
   if [ -n "${VAMOS_EDL_MEMORY:-}" ]; then
     EDL_STORAGE_LABEL="$label slot 0 (explicit)"
   else
-    EDL_STORAGE_LABEL="NVMe slot 0 (Asius v0 default)"
+    EDL_STORAGE_LABEL="UFS slot 0 (Asius v0 default)"
   fi
   echo "== Using $EDL_STORAGE_LABEL =="
 }

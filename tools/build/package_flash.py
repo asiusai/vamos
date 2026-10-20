@@ -14,15 +14,15 @@ from typing import BinaryIO
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD_DIR = ROOT / "build"
-OUTPUT_DIR = BUILD_DIR / "flash"
+OUTPUT_DIR = BUILD_DIR / "flash-ufs"
 OBJECT_CACHE: dict[str, dict] = {}
 PRODUCT = "asius-v0"
 MANIFEST_VERSION = 3
 # Keep each browser allocation modest while avoiding thousands of individual
 # HTTP requests and Firehose program commands for a source-complete payload.
 CHUNK_SIZE = 16 * 1024 * 1024
-DEFAULT_SECTOR_SIZE = 512
-SUPPORTED_SECTOR_SIZES = (512, 4096)
+DEFAULT_SECTOR_SIZE = 4096
+SUPPORTED_SECTOR_SIZES = (4096,)
 PROGRAMMER = ROOT / "firmware-dragon/flat_build/spinor/dragon-q6a/prog_firehose_ddr.elf"
 
 def sha256_bytes(data: bytes) -> str:
@@ -249,10 +249,10 @@ def main() -> None:
     "--base-url",
     default=os.environ.get("VAMOS_FLASH_BASE_URL", "https://vamos.asius.ai/vamos/flash/objects"),
   )
-  parser.add_argument("--image", type=Path, default=BUILD_DIR / "dragon.img")
-  parser.add_argument("--layout", type=Path, default=BUILD_DIR / "factory-layout.json")
-  parser.add_argument("--userdata", type=Path, default=BUILD_DIR / "userdata.img")
-  parser.add_argument("--openpilot-userdata", type=Path, default=BUILD_DIR / "userdata-openpilot.img")
+  parser.add_argument("--image", type=Path, default=BUILD_DIR / "dragon-ufs.img")
+  parser.add_argument("--layout", type=Path, default=BUILD_DIR / "factory-layout-ufs.json")
+  parser.add_argument("--userdata", type=Path, default=BUILD_DIR / "userdata-ufs.img")
+  parser.add_argument("--openpilot-userdata", type=Path, default=BUILD_DIR / "userdata-openpilot-ufs.img")
   parser.add_argument("--programmer", type=Path, default=PROGRAMMER)
   parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
   parser.add_argument(
