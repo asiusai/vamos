@@ -15,13 +15,13 @@ class BootLedPatternTests(unittest.TestCase):
 
   def test_breath_has_visible_floor_and_unused_centers(self):
     self.assertEqual(levels(0), [1, 0, 1, 1, 0, 1])
-    self.assertEqual(levels(1.2), [13, 0, 13, 13, 0, 13])
+    self.assertEqual(levels(1.2), [6, 0, 6, 6, 0, 6])
     for frame in range(180):
       values = levels(frame / 60.)
       self.assertEqual(values, levels(frame / 60. + 3.))
       self.assertEqual([values[1], values[4]], [0, 0])
       self.assertEqual(len({values[i] for i in (0, 2, 3, 5)}), 1)
-      self.assertTrue(1 <= values[0] <= 13)
+      self.assertTrue(1 <= values[0] <= 6)
 
 
 if __name__ == "__main__":

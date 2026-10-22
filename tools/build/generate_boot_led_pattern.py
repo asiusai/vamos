@@ -3,7 +3,7 @@
 
 The six columns are LEDs 1-6 at 0, 7.5, 15, 45, 52.5, 60 mm.
 The two center LEDs stay off.
-The outer LEDs peak at 13/255 (approximately 5%) until camera exposure is available.
+The outer LEDs peak at 6/255 (approximately 2.4%) until camera exposure is available.
 Keep this curve aligned with openpilot.selfdrive.v0.led_patterns.startup_levels.
 """
 import math
@@ -15,7 +15,7 @@ def levels(elapsed: float) -> list[int]:
     level = (1. - math.cos(math.pi * phase / 1.2)) / 2.
   else:
     level = (1. + math.cos(math.pi * (phase - 1.2) / 1.8)) / 2.
-  brightness = math.floor(1. + 12. * level + .5 + 1e-9)
+  brightness = math.floor(1. + 5. * level + .5 + 1e-9)
   return [brightness, 0, brightness, brightness, 0, brightness]
 
 
