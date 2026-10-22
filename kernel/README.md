@@ -10,6 +10,10 @@ The external USB PHY uses the mainline lane mapping. Transmit calibration is
 selected in the board device tree: mode 0 and QMP v4 tap 31 on the external
 Dragon port. The shared SoC defaults and internal USB controller are unchanged.
 
+The AW9523 camera LED driver exposes six RGB sinks per board. It initializes
+all sixteen currents to zero before LED mode and leaves joined IR sinks off.
+The global half-current setting limits RGB full scale to 18.5 mA nominal.
+
 ## Patch scope and provenance
 
 The 6.18 series had 57 patches. The 7.2 series consolidates the remaining changes

@@ -762,7 +762,7 @@ index 696fef50f577..20058b7fca04 100644
  &pcie0_clkreq_n {
  	bias-pull-up;
  	drive-strength = <2>;
-@@ -1093,3 +1406,454 @@ &sdc2_data {
+@@ -1093,3 +1406,394 @@ &sdc2_data {
  	bias-pull-up;
  	drive-strength = <10>;
  };
@@ -927,64 +927,46 @@ index 696fef50f577..20058b7fca04 100644
 +		};
 +	};
 +
-+	cam1_leds: led-controller@64 {
-+		compatible = "issi,is31fl3199";
-+		reg = <0x64>;
++	cam1_leds: led-controller@5b {
++		compatible = "awinic,aw9523-camera";
++		reg = <0x5b>;
 +		#address-cells = <1>;
 +		#size-cells = <0>;
 +
++		led@0 {
++			reg = <0>;
++			label = "asius:cam1:red:0";
++			led-max-microamp = <18500>;
++		};
++
 +		led@1 {
 +			reg = <1>;
-+			label = "asius:cam1:red:0";
-+			led-max-microamp = <40000>;
++			label = "asius:cam1:green:0";
++			led-max-microamp = <18500>;
 +		};
 +
 +		led@2 {
 +			reg = <2>;
-+			label = "asius:cam1:green:0";
-+			led-max-microamp = <40000>;
++			label = "asius:cam1:blue:0";
++			led-max-microamp = <18500>;
 +		};
 +
 +		led@3 {
 +			reg = <3>;
-+			label = "asius:cam1:blue:0";
-+			led-max-microamp = <40000>;
++			label = "asius:cam1:red:2";
++			led-max-microamp = <18500>;
 +		};
 +
 +		led@4 {
 +			reg = <4>;
-+			label = "asius:cam1:red:1";
-+			led-max-microamp = <40000>;
++			label = "asius:cam1:green:2";
++			led-max-microamp = <18500>;
 +		};
 +
 +		led@5 {
 +			reg = <5>;
-+			label = "asius:cam1:green:1";
-+			led-max-microamp = <40000>;
-+		};
-+
-+		led@6 {
-+			reg = <6>;
-+			label = "asius:cam1:blue:1";
-+			led-max-microamp = <40000>;
-+		};
-+
-+		led@7 {
-+			reg = <7>;
-+			label = "asius:cam1:red:2";
-+			led-max-microamp = <40000>;
-+		};
-+
-+		led@8 {
-+			reg = <8>;
-+			label = "asius:cam1:green:2";
-+			led-max-microamp = <40000>;
-+		};
-+
-+		led@9 {
-+			reg = <9>;
 +			label = "asius:cam1:blue:2";
-+			led-max-microamp = <40000>;
++			led-max-microamp = <18500>;
 +		};
 +	};
 +};
@@ -1014,72 +996,51 @@ index 696fef50f577..20058b7fca04 100644
 +		};
 +	};
 +
-+	cam2_leds: led-controller@64 {
-+		compatible = "issi,is31fl3199";
-+		reg = <0x64>;
++	cam2_leds: led-controller@5b {
++		compatible = "awinic,aw9523-camera";
++		reg = <0x5b>;
 +		#address-cells = <1>;
 +		#size-cells = <0>;
 +
++		led@0 {
++			reg = <0>;
++			label = "asius:cam2:red:0";
++			led-max-microamp = <18500>;
++			linux,default-trigger = "asius-boot-6-r";
++		};
++
 +		led@1 {
 +			reg = <1>;
-+			label = "asius:cam2:red:0";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-6-r";
++			label = "asius:cam2:green:0";
++			led-max-microamp = <18500>;
++			linux,default-trigger = "asius-boot-6-g";
 +		};
 +
 +		led@2 {
 +			reg = <2>;
-+			label = "asius:cam2:green:0";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-6-g";
++			label = "asius:cam2:blue:0";
++			led-max-microamp = <18500>;
++			linux,default-trigger = "asius-boot-6-b";
 +		};
 +
 +		led@3 {
 +			reg = <3>;
-+			label = "asius:cam2:blue:0";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-6-b";
++			label = "asius:cam2:red:2";
++			led-max-microamp = <18500>;
++			linux,default-trigger = "asius-boot-4-r";
 +		};
 +
 +		led@4 {
 +			reg = <4>;
-+			label = "asius:cam2:red:1";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-5-r";
++			label = "asius:cam2:green:2";
++			led-max-microamp = <18500>;
++			linux,default-trigger = "asius-boot-4-g";
 +		};
 +
 +		led@5 {
 +			reg = <5>;
-+			label = "asius:cam2:green:1";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-5-g";
-+		};
-+
-+		led@6 {
-+			reg = <6>;
-+			label = "asius:cam2:blue:1";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-5-b";
-+		};
-+
-+		led@7 {
-+			reg = <7>;
-+			label = "asius:cam2:red:2";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-4-r";
-+		};
-+
-+		led@8 {
-+			reg = <8>;
-+			label = "asius:cam2:green:2";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-4-g";
-+		};
-+
-+		led@9 {
-+			reg = <9>;
 +			label = "asius:cam2:blue:2";
-+			led-max-microamp = <40000>;
++			led-max-microamp = <18500>;
 +			linux,default-trigger = "asius-boot-4-b";
 +		};
 +	};
@@ -1106,72 +1067,51 @@ index 696fef50f577..20058b7fca04 100644
 +		};
 +	};
 +
-+	cam3_leds: led-controller@64 {
-+		compatible = "issi,is31fl3199";
-+		reg = <0x64>;
++	cam3_leds: led-controller@5b {
++		compatible = "awinic,aw9523-camera";
++		reg = <0x5b>;
 +		#address-cells = <1>;
 +		#size-cells = <0>;
 +
++		led@0 {
++			reg = <0>;
++			label = "asius:cam3:red:0";
++			led-max-microamp = <18500>;
++			linux,default-trigger = "asius-boot-3-r";
++		};
++
 +		led@1 {
 +			reg = <1>;
-+			label = "asius:cam3:red:0";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-3-r";
++			label = "asius:cam3:green:0";
++			led-max-microamp = <18500>;
++			linux,default-trigger = "asius-boot-3-g";
 +		};
 +
 +		led@2 {
 +			reg = <2>;
-+			label = "asius:cam3:green:0";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-3-g";
++			label = "asius:cam3:blue:0";
++			led-max-microamp = <18500>;
++			linux,default-trigger = "asius-boot-3-b";
 +		};
 +
 +		led@3 {
 +			reg = <3>;
-+			label = "asius:cam3:blue:0";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-3-b";
++			label = "asius:cam3:red:2";
++			led-max-microamp = <18500>;
++			linux,default-trigger = "asius-boot-1-r";
 +		};
 +
 +		led@4 {
 +			reg = <4>;
-+			label = "asius:cam3:red:1";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-2-r";
++			label = "asius:cam3:green:2";
++			led-max-microamp = <18500>;
++			linux,default-trigger = "asius-boot-1-g";
 +		};
 +
 +		led@5 {
 +			reg = <5>;
-+			label = "asius:cam3:green:1";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-2-g";
-+		};
-+
-+		led@6 {
-+			reg = <6>;
-+			label = "asius:cam3:blue:1";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-2-b";
-+		};
-+
-+		led@7 {
-+			reg = <7>;
-+			label = "asius:cam3:red:2";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-1-r";
-+		};
-+
-+		led@8 {
-+			reg = <8>;
-+			label = "asius:cam3:green:2";
-+			led-max-microamp = <40000>;
-+			linux,default-trigger = "asius-boot-1-g";
-+		};
-+
-+		led@9 {
-+			reg = <9>;
 +			label = "asius:cam3:blue:2";
-+			led-max-microamp = <40000>;
++			led-max-microamp = <18500>;
 +			linux,default-trigger = "asius-boot-1-b";
 +		};
 +	};

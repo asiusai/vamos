@@ -1,0 +1,158 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] leds: support AW9523 camera RGB outputs with IR disabled
+
+diff --git a/drivers/leds/leds-aw9523.c b/drivers/leds/leds-aw9523.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/leds/leds-aw9523.c
+@@ -0,0 +1,125 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* AW9523 camera RGB outputs. Joined IR sinks remain disabled. */
++#include <linux/i2c.h>
++#include <linux/leds.h>
++#include <linux/module.h>
++#include <linux/property.h>
++
++#define AW9523_DIM_BASE 0x20
++#define AW9523_RGB_COUNT 6
++
++struct aw9523_led {
++	struct led_classdev cdev;
++	struct i2c_client *client;
++	u8 channel;
++};
++
++struct aw9523 {
++	struct i2c_client *client;
++	struct aw9523_led leds[AW9523_RGB_COUNT];
++};
++
++static int aw9523_brightness_set(struct led_classdev *cdev,
++			       enum led_brightness brightness)
++{
++	struct aw9523_led *led = container_of(cdev, struct aw9523_led, cdev);
++
++	return i2c_smbus_write_byte_data(led->client,
++				       AW9523_DIM_BASE + led->channel, brightness);
++}
++
++static void aw9523_off(void *data)
++{
++	struct aw9523 *chip = data;
++	int i;
++
++	for (i = 0; i < 16; i++)
++		i2c_smbus_write_byte_data(chip->client, AW9523_DIM_BASE + i, 0);
++}
++
++static int aw9523_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct aw9523 *chip;
++	unsigned long used = 0;
++	int ret, i;
++
++	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA))
++		return -EOPNOTSUPP;
++	ret = i2c_smbus_read_byte_data(client, 0x10);
++	if (ret < 0)
++		return ret;
++	if (ret != 0x23)
++		return -ENODEV;
++	chip = devm_kzalloc(dev, sizeof(*chip), GFP_KERNEL);
++	if (!chip)
++		return -ENOMEM;
++	chip->client = client;
++	i2c_set_clientdata(client, chip);
++
++	/* High impedance before switching joined outputs to current sinks. */
++	for (i = 4; i <= 5; i++) {
++		ret = i2c_smbus_write_byte_data(client, i, 0xff);
++		if (ret < 0)
++			return ret;
++	}
++	for (i = 0; i < 16; i++) {
++		ret = i2c_smbus_write_byte_data(client, AW9523_DIM_BASE + i, 0);
++		if (ret < 0)
++			return ret;
++	}
++	/* Half of 37 mA: 18.5 mA nominal maximum per RGB die. */
++	ret = i2c_smbus_write_byte_data(client, 0x11, 0x02);
++	if (ret < 0)
++		return ret;
++	for (i = 0x12; i <= 0x13; i++) {
++		ret = i2c_smbus_write_byte_data(client, i, 0);
++		if (ret < 0)
++			return ret;
++	}
++	ret = devm_add_action_or_reset(dev, aw9523_off, chip);
++	if (ret)
++		return ret;
++
++	device_for_each_child_node_scoped(dev, child) {
++		struct led_init_data init_data = { .fwnode = child };
++		struct aw9523_led *led;
++		u32 channel;
++
++		ret = fwnode_property_read_u32(child, "reg", &channel);
++		if (ret || channel >= AW9523_RGB_COUNT || test_and_set_bit(channel, &used))
++			return -EINVAL;
++		led = &chip->leds[channel];
++		led->client = client;
++		led->channel = channel;
++		led->cdev.max_brightness = 255;
++		led->cdev.brightness_set_blocking = aw9523_brightness_set;
++		ret = devm_led_classdev_register_ext(dev, &led->cdev, &init_data);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
++static void aw9523_shutdown(struct i2c_client *client)
++{
++	aw9523_off(i2c_get_clientdata(client));
++}
++
++static const struct of_device_id aw9523_of_match[] = {
++	{ .compatible = "awinic,aw9523-camera" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, aw9523_of_match);
++
++static struct i2c_driver aw9523_driver = {
++	.driver = {
++		.name = "aw9523-camera",
++		.of_match_table = aw9523_of_match,
++	},
++	.probe = aw9523_probe,
++	.shutdown = aw9523_shutdown,
++};
++module_i2c_driver(aw9523_driver);
++MODULE_DESCRIPTION("AW9523 camera RGB LEDs with inactive IR sinks");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/leds/Kconfig b/drivers/leds/Kconfig
+--- a/drivers/leds/Kconfig
++++ b/drivers/leds/Kconfig
+@@ -832,6 +832,13 @@
+ 	  This driver can also be built as a module. If so the module
+ 	  will be called leds-menf21bmc.
+ 
++config LEDS_AW9523_CAMERA
++	tristate "AW9523 camera RGB LEDs"
++	depends on LEDS_CLASS && I2C
++	help
++	  Control the six RGB outputs on Asius camera modules.
++	  The ten joined IR outputs stay off.
++
+ config LEDS_IS31FL319X
+ 	tristate "LED Support for ISSI IS31FL319x I2C LED controller family"
+ 	depends on LEDS_CLASS && I2C
+diff --git a/drivers/leds/Makefile b/drivers/leds/Makefile
+--- a/drivers/leds/Makefile
++++ b/drivers/leds/Makefile
+@@ -126,3 +126,4 @@
+ 
+ # Simatic LED drivers
+ obj-y					+= simatic/
++obj-$(CONFIG_LEDS_AW9523_CAMERA)		+= leds-aw9523.o

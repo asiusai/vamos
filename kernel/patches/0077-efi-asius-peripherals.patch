@@ -347,9 +347,9 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +#define ASIUS_CAM1_PATH			ASIUS_CCI0_BUS0_PATH "/camera@36"
 +#define ASIUS_CAM2_PATH			ASIUS_CCI1_BUS0_PATH "/camera@36"
 +#define ASIUS_CAM3_PATH			ASIUS_CCI1_BUS1_PATH "/camera@36"
-+#define ASIUS_CAM1_LEDS_PATH		ASIUS_CCI0_BUS0_PATH "/led-controller@64"
-+#define ASIUS_CAM2_LEDS_PATH		ASIUS_CCI1_BUS0_PATH "/led-controller@64"
-+#define ASIUS_CAM3_LEDS_PATH		ASIUS_CCI1_BUS1_PATH "/led-controller@64"
++#define ASIUS_CAM1_LEDS_PATH		ASIUS_CCI0_BUS0_PATH "/led-controller@5b"
++#define ASIUS_CAM2_LEDS_PATH		ASIUS_CCI1_BUS0_PATH "/led-controller@5b"
++#define ASIUS_CAM3_LEDS_PATH		ASIUS_CCI1_BUS1_PATH "/led-controller@5b"
 +#define ASIUS_CAM1_PORT_PATH		ASIUS_CAM1_PATH "/port"
 +#define ASIUS_CAM2_PORT_PATH		ASIUS_CAM2_PATH "/port"
 +#define ASIUS_CAM3_PORT_PATH		ASIUS_CAM3_PATH "/port"
@@ -522,15 +522,15 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +		return controller;
 +
 +	status = fdt_setprop_string(fdt, controller, "compatible",
-+				    "issi,is31fl3199") ?:
-+		 fdt_setprop_u32(fdt, controller, "reg", 0x64) ?:
++				    "awinic,aw9523-camera") ?:
++		 fdt_setprop_u32(fdt, controller, "reg", 0x5b) ?:
 +		 fdt_setprop_u32(fdt, controller, "#address-cells", 1) ?:
 +		 fdt_setprop_u32(fdt, controller, "#size-cells", 0);
 +	if (status)
 +		return status;
 +
-+	for (i = 0; i < 9; i++) {
-+		child_name[4] = '1' + i;
++	for (i = 0; i < 6; i++) {
++		child_name[4] = '0' + i;
 +		child = asius_fdt_subnode(fdt, controller, child_name);
 +		if (child < 0)
 +			return child;
@@ -538,28 +538,28 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +		switch (i % 3) {
 +		case 0:
 +			snprintf(label, sizeof(label), "asius:cam%d:red:%d",
-+				 camera_number, i / 3);
++				 camera_number, (i / 3) * 2);
 +			break;
 +		case 1:
 +			snprintf(label, sizeof(label), "asius:cam%d:green:%d",
-+				 camera_number, i / 3);
++				 camera_number, (i / 3) * 2);
 +			break;
 +		default:
 +			snprintf(label, sizeof(label), "asius:cam%d:blue:%d",
-+				 camera_number, i / 3);
++				 camera_number, (i / 3) * 2);
 +			break;
 +		}
 +
-+		status = fdt_setprop_u32(fdt, child, "reg", i + 1) ?:
++		status = fdt_setprop_u32(fdt, child, "reg", i) ?:
 +			 fdt_setprop_string(fdt, child, "label", label) ?:
 +			 fdt_setprop_u32(fdt, child, "led-max-microamp",
-+					 40000);
++					 18500);
 +		if (status)
 +			return status;
 +
 +		if (camera_number != 1) {
 +			snprintf(trigger, sizeof(trigger), "asius-boot-%d-%c",
-+				 6 - ((camera_number - 2) * 3 + i / 3), "rgb"[i % 3]);
++				 6 - ((camera_number - 2) * 3 + (i / 3) * 2), "rgb"[i % 3]);
 +			status = fdt_setprop_string(fdt, child,
 +						   "linux,default-trigger",
 +						   trigger) ?:
@@ -812,19 +812,19 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +		goto fail;
 +
 +	status = asius_fdt_ensure_child(fdt, ASIUS_CCI0_BUS0_PATH,
-+				       "led-controller@64",
++				       "led-controller@5b",
 +				       ASIUS_CAM1_LEDS_PATH);
 +	if (status < 0)
 +		goto fail;
 +
 +	status = asius_fdt_ensure_child(fdt, ASIUS_CCI1_BUS0_PATH,
-+				       "led-controller@64",
++				       "led-controller@5b",
 +				       ASIUS_CAM2_LEDS_PATH);
 +	if (status < 0)
 +		goto fail;
 +
 +	status = asius_fdt_ensure_child(fdt, ASIUS_CCI1_BUS1_PATH,
-+				       "led-controller@64",
++				       "led-controller@5b",
 +				       ASIUS_CAM3_LEDS_PATH);
 +	if (status < 0)
 +		goto fail;
