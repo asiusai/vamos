@@ -12,8 +12,8 @@ Dragon port. The shared SoC defaults and internal USB controller are unchanged.
 
 The AW9523 camera LED driver exposes six RGB sinks per board. It initializes
 all sixteen currents to zero before LED mode. Each road board also exposes
-one IR output, from 0 to 100 percent. Ten joined sinks are capped at DIM 248,
-giving 179.92 mA nominal total. The cabin board has no IR control.
+one IR output, from 0 to 100 percent. Ten joined sinks are capped at DIM 206,
+giving 149.45 mA nominal total. The cabin board has no IR control.
 The global half-current setting limits RGB full scale to 18.5 mA nominal.
 
 ## Patch scope and provenance

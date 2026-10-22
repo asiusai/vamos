@@ -555,7 +555,7 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +		status = fdt_setprop_u32(fdt, child, "reg", i) ?:
 +			 fdt_setprop_string(fdt, child, "label", label) ?:
 +			 fdt_setprop_u32(fdt, child, "led-max-microamp",
-+					 i == 6 ? 180000 : 18500);
++					 i == 6 ? 150000 : 18500);
 +		if (status)
 +			return status;
 +

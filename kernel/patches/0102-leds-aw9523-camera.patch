@@ -15,7 +15,7 @@ new file mode 100644
 +
 +#define AW9523_DIM_BASE 0x20
 +#define AW9523_RGB_COUNT 6
-+#define AW9523_IR_MAX_DIM 248 /* 10 * 18.5 mA * 248 / 255 < 180 mA. */
++#define AW9523_IR_MAX_DIM 206 /* 10 * 18.5 mA * 206 / 255 < 150 mA. */
 +
 +struct aw9523_led {
 +	struct led_classdev cdev;

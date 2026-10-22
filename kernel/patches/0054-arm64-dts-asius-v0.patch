@@ -1030,7 +1030,7 @@ index 696fef50f577..20058b7fca04 100644
 +		led@6 {
 +			reg = <6>;
 +			label = "asius:cam2:ir";
-+			led-max-microamp = <180000>;
++			led-max-microamp = <150000>;
 +		};
 +	};
 +};
@@ -1107,7 +1107,7 @@ index 696fef50f577..20058b7fca04 100644
 +		led@6 {
 +			reg = <6>;
 +			label = "asius:cam3:ir";
-+			led-max-microamp = <180000>;
++			led-max-microamp = <150000>;
 +		};
 +	};
 +};
