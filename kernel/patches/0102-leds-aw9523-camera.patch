@@ -1,13 +1,13 @@
 From: Asius <dev@asius.ai>
-Subject: [PATCH] leds: support AW9523 camera RGB outputs with IR disabled
+Subject: [PATCH] leds: support AW9523 camera RGB and grouped IR outputs
 
 diff --git a/drivers/leds/leds-aw9523.c b/drivers/leds/leds-aw9523.c
 new file mode 100644
 --- /dev/null
 +++ b/drivers/leds/leds-aw9523.c
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,142 @@
 +// SPDX-License-Identifier: GPL-2.0-only
-+/* AW9523 camera RGB outputs. Joined IR sinks remain disabled. */
++/* AW9523 camera RGB outputs. Ten joined IR sinks form one current-limited output. */
 +#include <linux/i2c.h>
 +#include <linux/leds.h>
 +#include <linux/module.h>
@@ -15,6 +15,7 @@ new file mode 100644
 +
 +#define AW9523_DIM_BASE 0x20
 +#define AW9523_RGB_COUNT 6
++#define AW9523_IR_MAX_DIM 248 /* 10 * 18.5 mA * 248 / 255 < 180 mA. */
 +
 +struct aw9523_led {
 +	struct led_classdev cdev;
@@ -24,13 +25,29 @@ new file mode 100644
 +
 +struct aw9523 {
 +	struct i2c_client *client;
-+	struct aw9523_led leds[AW9523_RGB_COUNT];
++	struct aw9523_led leds[AW9523_RGB_COUNT + 1];
 +};
 +
 +static int aw9523_brightness_set(struct led_classdev *cdev,
 +			       enum led_brightness brightness)
 +{
 +	struct aw9523_led *led = container_of(cdev, struct aw9523_led, cdev);
++
++	if (led->channel == AW9523_RGB_COUNT) {
++		u8 dim = min_t(unsigned int, brightness, 100) * AW9523_IR_MAX_DIM / 100;
++		int channel, ret;
++
++		for (channel = 6; channel < 16; channel++) {
++			ret = i2c_smbus_write_byte_data(led->client, AW9523_DIM_BASE + channel, dim);
++			if (ret < 0) {
++				/* Clear the whole group after a partial update. */
++				for (channel = 6; channel < 16; channel++)
++					i2c_smbus_write_byte_data(led->client, AW9523_DIM_BASE + channel, 0);
++				return ret;
++			}
++		}
++		return 0;
++	}
 +
 +	return i2c_smbus_write_byte_data(led->client,
 +				       AW9523_DIM_BASE + led->channel, brightness);
@@ -95,12 +112,12 @@ new file mode 100644
 +		u32 channel;
 +
 +		ret = fwnode_property_read_u32(child, "reg", &channel);
-+		if (ret || channel >= AW9523_RGB_COUNT || test_and_set_bit(channel, &used))
++		if (ret || channel > AW9523_RGB_COUNT || test_and_set_bit(channel, &used))
 +			return -EINVAL;
 +		led = &chip->leds[channel];
 +		led->client = client;
 +		led->channel = channel;
-+		led->cdev.max_brightness = 255;
++		led->cdev.max_brightness = channel == AW9523_RGB_COUNT ? 100 : 255;
 +		led->cdev.brightness_set_blocking = aw9523_brightness_set;
 +		ret = devm_led_classdev_register_ext(dev, &led->cdev, &init_data);
 +		if (ret)
@@ -129,7 +146,7 @@ new file mode 100644
 +	.shutdown = aw9523_shutdown,
 +};
 +module_i2c_driver(aw9523_driver);
-+MODULE_DESCRIPTION("AW9523 camera RGB LEDs with inactive IR sinks");
++MODULE_DESCRIPTION("AW9523 camera RGB LEDs and current-limited IR");
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/leds/Kconfig b/drivers/leds/Kconfig
 --- a/drivers/leds/Kconfig
@@ -143,7 +160,7 @@ diff --git a/drivers/leds/Kconfig b/drivers/leds/Kconfig
 +	depends on LEDS_CLASS && I2C
 +	help
 +	  Control the six RGB outputs on Asius camera modules.
-+	  The ten joined IR outputs stay off.
++	  The ten joined IR outputs form a current-limited group.
 +
  config LEDS_IS31FL319X
  	tristate "LED Support for ISSI IS31FL319x I2C LED controller family"

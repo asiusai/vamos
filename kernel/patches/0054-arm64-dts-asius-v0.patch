@@ -130,7 +130,7 @@ index 696fef50f577..20058b7fca04 100644
  			no-map;
  		};
  	};
-@@ -258,6 +269,86 @@ vph_pwr: regulator-vph-pwr {
+@@ -258,6 +269,69 @@ vph_pwr: regulator-vph-pwr {
  		regulator-boot-on;
  		regulator-always-on;
  	};
@@ -138,23 +138,6 @@ index 696fef50f577..20058b7fca04 100644
 +	memory@80000000 {
 +		device_type = "memory";
 +		reg = <0x0 0x80000000 0x2 0x00000000>;
-+	};
-+
-+	panda_ir_pwm: pwm-ir {
-+		compatible = "pwm-gpio";
-+		#pwm-cells = <3>;
-+		gpios = <&tlmm 57 GPIO_ACTIVE_HIGH>;
-+	};
-+
-+	panda-ir-leds {
-+		compatible = "pwm-leds";
-+
-+		led {
-+			label = "asius:ir";
-+			pwms = <&panda_ir_pwm 0 1000000 0>;
-+			max-brightness = <100>;
-+			default-state = "off";
-+		};
 +	};
 +
 +	panda_audio_in: panda-audio-input {
@@ -762,7 +745,7 @@ index 696fef50f577..20058b7fca04 100644
  &pcie0_clkreq_n {
  	bias-pull-up;
  	drive-strength = <2>;
-@@ -1093,3 +1406,394 @@ &sdc2_data {
+@@ -1093,3 +1406,406 @@ &sdc2_data {
  	bias-pull-up;
  	drive-strength = <10>;
  };
@@ -1043,6 +1026,12 @@ index 696fef50f577..20058b7fca04 100644
 +			led-max-microamp = <18500>;
 +			linux,default-trigger = "asius-boot-4-b";
 +		};
++
++		led@6 {
++			reg = <6>;
++			label = "asius:cam2:ir";
++			led-max-microamp = <180000>;
++		};
 +	};
 +};
 +
@@ -1113,6 +1102,12 @@ index 696fef50f577..20058b7fca04 100644
 +			label = "asius:cam3:blue:2";
 +			led-max-microamp = <18500>;
 +			linux,default-trigger = "asius-boot-1-b";
++		};
++
++		led@6 {
++			reg = <6>;
++			label = "asius:cam3:ir";
++			led-max-microamp = <180000>;
 +		};
 +	};
 +};
