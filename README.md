@@ -306,7 +306,7 @@ selected slot.
 Install a signed HTTP manifest:
 
 ```bash
-sudo vamos-update install https://vamos.asius.ai/vamos/vamos.json --reboot
+sudo vamos-update install https://dist.asius.ai/vamos/vamos.json --reboot
 ```
 
 Install local recovery files without a manifest:
@@ -343,7 +343,7 @@ sudo reboot
 
 ## OTA Publishing
 
-Signed OTA manifests and content-addressed images use `https://vamos.asius.ai`.
+Signed OTA manifests and content-addressed images use `https://dist.asius.ai`.
 Openpilot selects the release through `openpilot/system/hardware/v0/vamos.json`.
 VamOS 18.7 passed download, inactive-slot verification, activation, and boot commit
 through openpilot on Asius 1. This release uses a new signing key.
@@ -368,7 +368,7 @@ Configure these repository secrets:
 - `OPENPILOT_DEPLOY_KEY` (write deploy key for `asiusai/openpilot`)
 
 Set `VAMOS_PUBLIC_URL` to the public R2 custom-domain origin, currently
-`https://vamos.asius.ai`.
+`https://dist.asius.ai`.
 
 ## Kernel Patches
 

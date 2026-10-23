@@ -175,7 +175,7 @@ def main():
   parser.add_argument('--reference', type=Path, action='append', required=True)
   parser.add_argument('--core', type=Path, required=True)
   parser.add_argument('--output', type=Path, required=True)
-  parser.add_argument('--base-url', default='https://vamos.asius.ai/bootloader/objects')
+  parser.add_argument('--base-url', default='https://dist.asius.ai/bootloader/objects')
   args = parser.parse_args()
   args.output.mkdir(parents=True, exist_ok=True)
   variants = [generate(path, args.core, args.output, args.base_url) for path in args.reference]

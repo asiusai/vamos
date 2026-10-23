@@ -22,7 +22,7 @@ def download(url: str, target: Path) -> None:
 
 def main() -> None:
   parser = argparse.ArgumentParser(description=__doc__)
-  parser.add_argument("--manifest", default="https://vamos.asius.ai/openpilot/latest.json")
+  parser.add_argument("--manifest", default="https://dist.asius.ai/openpilot/latest.json")
   parser.add_argument("--output", type=Path, default=ROOT / "build/openpilot/openpilot-v0-chestnut.tar.xz")
   args = parser.parse_args()
   args.output.parent.mkdir(parents=True, exist_ok=True)
