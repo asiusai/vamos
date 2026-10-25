@@ -3,12 +3,14 @@
 import argparse
 import hashlib
 import json
-import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "userspace/root/usr/lib"))
+from vamos.signatures import verify
 
 
 def download(url: str, target: Path) -> None:
@@ -31,11 +33,7 @@ def main() -> None:
     manifest, signature = staging / "release.json", staging / "release.sig"
     download(args.manifest, manifest)
     download(args.manifest + ".sig", signature)
-    subprocess.run([
-      "openssl", "pkeyutl", "-verify", "-pubin", "-rawin",
-      "-inkey", str(ROOT / "userspace/root/usr/share/vamos/update-public.pem"),
-      "-in", str(manifest), "-sigfile", str(signature),
-    ], check=True)
+    verify(manifest.read_bytes(), signature.read_bytes(), (ROOT / "userspace/root/usr/share/vamos/update-public.pem").read_bytes())
     release = json.loads(manifest.read_text())
     if release["target"] != "asius-v0" or release["chestnut"] is not True:
       raise ValueError("The release must include the Asius v0 Chestnut models")

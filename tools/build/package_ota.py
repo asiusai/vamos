@@ -7,10 +7,14 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "userspace/root/usr/lib"))
+from vamos.signatures import sign
+
 BUILD_DIR = ROOT / "build"
 OUTPUT_DIR = BUILD_DIR / "ota"
 PRODUCT = "asius-v0"
@@ -82,12 +86,7 @@ def sign_manifest(manifest_path: Path, signing_key: Path) -> Path:
   signature_path = Path(f"{manifest_path}.sig")
   temporary = signature_path.with_suffix(signature_path.suffix + ".tmp")
   try:
-    subprocess.run([
-      "openssl", "pkeyutl", "-sign", "-inkey", str(signing_key), "-rawin",
-      "-in", str(manifest_path), "-out", str(temporary),
-    ], check=True)
-    if temporary.stat().st_size != 64:
-      raise ValueError(f"OTA signing key did not produce a 64-byte Ed25519 signature")
+    temporary.write_bytes(sign(manifest_path.read_bytes(), signing_key.read_bytes()))
     os.replace(temporary, signature_path)
   finally:
     temporary.unlink(missing_ok=True)
@@ -109,7 +108,7 @@ def main() -> None:
     "--signing-key",
     type=Path,
     default=Path(os.environ["VAMOS_OTA_SIGNING_KEY"]) if os.environ.get("VAMOS_OTA_SIGNING_KEY") else None,
-    help="Ed25519 private PEM key (or set VAMOS_OTA_SIGNING_KEY)",
+    help="ML-DSA-65 private PEM key (or set VAMOS_OTA_SIGNING_KEY)",
   )
   args = parser.parse_args()
 

@@ -41,7 +41,7 @@ the backup GPT, userdata partition, and ext4 filesystem expand to use the
 remaining capacity of larger UFS media.
 
 The sixth GPT entry reserves 64 MiB before userdata for `/persist`. Factory
-flashing preserves this region. First boot generates `/persist/asius/id_ed25519`
+flashing preserves this region. First boot generates `/persist/asius/identity.seed`
 and mounts the filesystem read-only. Openpilot reads the key and derives its
 recording-access key from it. A missing or damaged identity stops openpilot,
 while local recovery access remains available.
@@ -326,7 +326,7 @@ sudo vamos-update verify
 sudo vamos-update activate --reboot
 ```
 
-Remote manifests require an adjacent 64-byte Ed25519 signature at
+Remote manifests require an adjacent 3309-byte ML-DSA-65 signature at
 `<manifest>.sig`. A local manifest is also verified when an adjacent signature
 exists; unsigned manifests are accepted only from local storage for physical
 recovery.

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import subprocess
+from cryptography.hazmat.primitives.asymmetric import mldsa, ed25519
+from cryptography.hazmat.primitives import serialization
+from cryptography.exceptions import InvalidSignature
 import sys
 import tempfile
 import unittest
@@ -31,29 +33,24 @@ class ImagePackagingTest(unittest.TestCase):
 
 
 class ManifestSigningTest(unittest.TestCase):
-  def test_ed25519_signature_is_accepted_by_openssl(self) -> None:
+  def test_mldsa_signature_rejects_tampering_and_classical_keys(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
       directory = Path(temporary)
       private_key = directory / "private.pem"
       public_key = directory / "public.pem"
       manifest = directory / "vamos.json"
       manifest.write_bytes(b'{"version":"test"}\n')
-      subprocess.run(
-        ["openssl", "genpkey", "-algorithm", "Ed25519", "-out", private_key],
-        check=True,
-      )
-      subprocess.run(
-        ["openssl", "pkey", "-in", private_key, "-pubout", "-out", public_key],
-        check=True,
-      )
-
+      key = mldsa.MLDSA65PrivateKey.generate()
+      private_key.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
       signature = package_ota.sign_manifest(manifest, private_key)
-
-      self.assertEqual(signature.stat().st_size, 64)
-      subprocess.run([
-        "openssl", "pkeyutl", "-verify", "-pubin", "-inkey", public_key,
-        "-rawin", "-in", manifest, "-sigfile", signature,
-      ], check=True)
+      self.assertEqual(signature.stat().st_size, 3309)
+      key.public_key().verify(signature.read_bytes(), manifest.read_bytes())
+      with self.assertRaises(InvalidSignature):
+        key.public_key().verify(signature.read_bytes(), manifest.read_bytes() + b" ")
+      old = ed25519.Ed25519PrivateKey.generate()
+      private_key.write_bytes(old.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+      with self.assertRaises(ValueError):
+        package_ota.sign_manifest(manifest, private_key)
 
 
 if __name__ == "__main__":

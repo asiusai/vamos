@@ -93,6 +93,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y dosfstools e2fsprogs gdisk grub2-common jq mtools unzip
 
+      - name: install release signature provider
+        run: |
+          python3 -m venv /tmp/vamos-release-python
+          /tmp/vamos-release-python/bin/pip install cryptography==50.0.2
+          echo "/tmp/vamos-release-python/bin" >> "$GITHUB_PATH"
+
       - name: install AWS CLI
         run: |
           set -euo pipefail
@@ -183,17 +189,11 @@ jobs:
           set -euo pipefail
           umask 077
           key=$(mktemp)
-          public=$(mktemp)
-          trap 'rm -f "$key" "$public"' EXIT
+          trap 'rm -f "$key"' EXIT
           printf '%s\n' "$VAMOS_UPDATE_SIGNING_KEY" > "$key"
-          openssl pkey -in "$key" -pubout -out "$public"
-          cmp "$public" userspace/root/usr/share/vamos/update-public.pem
           cp build/ota/vamos.json build/release/vamos.json
-          for manifest in build/release/*.json; do
-            openssl pkeyutl -sign -inkey "$key" -rawin -in "$manifest" -out "$manifest.sig"
-            test "$(stat -c %s "$manifest.sig")" -eq 64
-            openssl pkeyutl -verify -pubin -inkey "$public" -rawin -in "$manifest" -sigfile "$manifest.sig"
-          done
+          PYTHONPATH=userspace/root/usr/lib python3 -m vamos.signatures \
+            --key "$key" --public userspace/root/usr/share/vamos/update-public.pem build/release/*.json
           cp build/release/vamos.json.sig build/ota/vamos.json.sig
 
       - name: upload signed manifest artifact

@@ -4,7 +4,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 spec = importlib.util.spec_from_file_location('vamos_identity', Path(__file__).resolve().parents[1] / 'userspace/root/usr/lib/vamos/identity.py')
 identity = importlib.util.module_from_spec(spec)
@@ -13,7 +12,7 @@ spec.loader.exec_module(identity)
 
 @pytest.fixture
 def volume(tmp_path, monkeypatch):
-  monkeypatch.setattr(identity, 'KEY', tmp_path / 'asius/id_ed25519')
+  monkeypatch.setattr(identity, 'KEY', tmp_path / 'asius/identity.seed')
   monkeypatch.setattr(identity, 'MARKER', tmp_path / '.provisioned')
   # Tests run as an ordinary user; production runs as root.
   monkeypatch.setattr(identity.os, 'chown', lambda *args: None)
@@ -26,7 +25,8 @@ def test_first_boot_and_repeat_preserve_the_identity(volume):
   first = identity.provision(os.getuid(), os.getgid())
   original = identity.KEY.read_bytes()
   second = identity.provision(os.getuid(), os.getgid())
-  assert first.private_bytes_raw() == second.private_bytes_raw()
+  assert first == second
+  assert len(original) == 104
   assert identity.KEY.read_bytes() == original
   assert identity.KEY.stat().st_mode & 0o777 == 0o600
 
@@ -49,15 +49,31 @@ def test_entropy_failure_and_interrupted_provisioning(volume):
   assert not identity.KEY.exists()
   first = identity.provision(os.getuid(), os.getgid())
   identity.MARKER.unlink()
-  assert identity.provision(os.getuid(), os.getgid()).private_bytes_raw() == first.private_bytes_raw()
+  assert identity.provision(os.getuid(), os.getgid()) == first
 
 
 def test_explicit_replacement_and_import(volume):
   first = identity.provision(os.getuid(), os.getgid())
-  replacement = Ed25519PrivateKey.generate()
+  replacement = identity.secure_key()
   identity.provision(os.getuid(), os.getgid(), replacement)
-  assert identity.load_key(identity.KEY).private_bytes_raw() == replacement.private_bytes_raw()
-  assert first.private_bytes_raw() != replacement.private_bytes_raw()
+  assert identity.load_key(identity.KEY) == replacement
+  assert first != replacement
+
+
+def test_root_damage_and_invalid_import_are_rejected(volume):
+  identity.provision(os.getuid(), os.getgid())
+  original = identity.KEY.read_bytes()
+  for offset in range(len(original)):
+    damaged = bytearray(original)
+    damaged[offset] ^= 1
+    identity.KEY.write_bytes(damaged)
+    with pytest.raises(ValueError):
+      identity.load_key(identity.KEY)
+  identity.KEY.write_bytes(original)
+  for seed in [b'', b'\x00' * 32, b'\x00' * 65]:
+    with pytest.raises(ValueError):
+      identity.provision(os.getuid(), os.getgid(), seed)
+    assert identity.KEY.read_bytes() == original
 
 
 def test_symlink_is_rejected(volume):

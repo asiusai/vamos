@@ -12,6 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import mldsa
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -154,13 +156,10 @@ class ManifestTest(unittest.TestCase):
         ],
       }).encode()
       manifest_path.write_bytes(payload)
-      subprocess.run(["openssl", "genpkey", "-algorithm", "Ed25519", "-out", private_key], check=True)
-      subprocess.run(["openssl", "pkey", "-in", private_key, "-pubout", "-out", public_key], check=True)
-      subprocess.run([
-        "openssl", "pkeyutl", "-sign", "-inkey", private_key, "-rawin",
-        "-in", manifest_path, "-out", signature_path,
-      ], check=True)
-      signature = signature_path.read_bytes()
+      key = mldsa.MLDSA65PrivateKey.generate()
+      public_key.write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+      signature = key.sign(payload)
+
 
       with (
         mock.patch.object(update, "UPDATE_PUBLIC_KEY", public_key),

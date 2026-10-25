@@ -98,7 +98,7 @@ ESP_SIZE = 256 * 1024 * 1024
 SYSTEM_SIZE = 10 * 1024 * 1024 * 1024
 IO_CHUNK_SIZE = 4 * 1024 * 1024
 MAX_MANIFEST_SIZE = 1024 * 1024
-ED25519_SIGNATURE_SIZE = 64
+SIGNATURE_SIZE = 3309
 BOOT_SELECTOR_SOURCE = Path("/usr/share/vamos/BOOTAA64.EFI")
 EDL_APPLICATION_SOURCE = Path("/usr/share/vamos/EDLAA64.EFI")
 ESP_PRIMARY_LOADER = Path("Image")
@@ -259,29 +259,18 @@ def _read_url_bytes(source: str, maximum_size: int) -> bytes:
 
 
 def verify_manifest_signature(payload: bytes, signature: bytes) -> None:
-  if len(signature) != ED25519_SIGNATURE_SIZE:
-    raise UpdateError("update manifest has an invalid Ed25519 signature size")
-  if not UPDATE_PUBLIC_KEY.is_file():
-    raise UpdateError(f"update signing key is missing: {UPDATE_PUBLIC_KEY}")
-
-  with tempfile.TemporaryDirectory(prefix="vamos-signature-") as temporary:
-    manifest_path = Path(temporary) / "manifest"
-    signature_path = Path(temporary) / "signature"
-    manifest_path.write_bytes(payload)
-    signature_path.write_bytes(signature)
-    result = run([
-      "openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(UPDATE_PUBLIC_KEY),
-      "-rawin", "-in", str(manifest_path), "-sigfile", str(signature_path),
-    ], check=False)
-  if result.returncode != 0:
-    raise UpdateError("update manifest signature verification failed")
+  from vamos.signatures import verify
+  try:
+    verify(payload, signature, UPDATE_PUBLIC_KEY.read_bytes())
+  except Exception as error:
+    raise UpdateError("update manifest ML-DSA-65 signature verification failed") from error
 
 
 def _read_json_source(source: str) -> tuple[object, str]:
   parsed = urllib.parse.urlparse(source)
   if parsed.scheme in ("http", "https"):
     payload = _read_url_bytes(source, MAX_MANIFEST_SIZE)
-    signature = _read_url_bytes(source + ".sig", ED25519_SIGNATURE_SIZE)
+    signature = _read_url_bytes(source + ".sig", SIGNATURE_SIZE)
     verify_manifest_signature(payload, signature)
     return json.loads(payload), source
 

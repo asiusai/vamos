@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/local/venv/bin/python3 -I
 import sys
 
 sys.path.insert(0, "/usr/lib")

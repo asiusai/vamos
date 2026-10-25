@@ -3,6 +3,8 @@
 import argparse
 import ctypes
 import fcntl
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -10,11 +12,11 @@ import pwd
 import subprocess
 import tempfile
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, load_pem_private_key
-
 PERSIST = Path("/persist")
-KEY = PERSIST / "asius/id_ed25519"
+KEY = PERSIST / "asius/identity.seed"
+ROOT_MAGIC = b"ASIUSID\x01"
+ROOT_BYTES = 64
+ROOT_FILE_BYTES = len(ROOT_MAGIC) + ROOT_BYTES + 32
 MARKER = PERSIST / ".provisioned"
 READY = Path("/run/vamos-identity-ready")
 SIZE = 64 * 1024 * 1024
@@ -26,22 +28,32 @@ def command(*args):
 
 
 def load_key(path):
-  key = load_pem_private_key(path.read_bytes(), password=None)
-  if not isinstance(key, Ed25519PrivateKey):
-    raise ValueError("Device identity must be Ed25519")
-  return key
+  with path.open("rb") as source:
+    data = source.read(ROOT_FILE_BYTES + 1)
+  if len(data) != ROOT_FILE_BYTES or not data.startswith(ROOT_MAGIC):
+    raise ValueError("Invalid device root-secret format")
+  if not hmac.compare_digest(hashlib.sha256(data[:-32]).digest(), data[-32:]):
+    raise ValueError("Device root-secret checksum mismatch")
+  return data[len(ROOT_MAGIC):-32]
+
+
+def encode_key(seed):
+  if not isinstance(seed, bytes) or len(seed) != ROOT_BYTES:
+    raise ValueError("Device identity requires a 64-byte root secret")
+  body = ROOT_MAGIC + seed
+  return body + hashlib.sha256(body).digest()
 
 
 def secure_key():
   # Block until the kernel CSPRNG is ready, including on Python builds without
-  # os.getrandom. Use the returned CSPRNG bytes as the Ed25519 seed.
+  # os.getrandom. No persistent key is generated from predictable input.
   libc = ctypes.CDLL(None, use_errno=True)
   libc.getrandom.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint]
   libc.getrandom.restype = ctypes.c_ssize_t
-  seed = ctypes.create_string_buffer(32)
-  if libc.getrandom(seed, 32, 0) != 32:
+  seed = ctypes.create_string_buffer(ROOT_BYTES)
+  if libc.getrandom(seed, ROOT_BYTES, 0) != ROOT_BYTES:
     raise OSError(ctypes.get_errno(), "Secure randomness unavailable")
-  return Ed25519PrivateKey.from_private_bytes(seed.raw)
+  return seed.raw
 
 
 def atomic_write(path, data, uid=0, gid=0):
@@ -72,12 +84,13 @@ def provision(uid, gid, replacement=None):
   elif replacement is None and MARKER.exists():
     raise ValueError("Device identity is missing; explicit replacement is required")
   else:
-    key = replacement or secure_key()
+    key = secure_key() if replacement is None else replacement
+    encoded = encode_key(key)
     KEY.parent.mkdir(mode=0o750, exist_ok=True)
     os.chown(KEY.parent, 0, gid)
-    atomic_write(KEY, key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()), uid, gid)
+    atomic_write(KEY, encoded, uid, gid)
   if not MARKER.exists():
-    atomic_write(MARKER, b"asius-identity-v1\n")
+    atomic_write(MARKER, b"asius-root-identity-v1\n")
   return key
 
 
@@ -124,7 +137,7 @@ def mount_identity():
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("action", choices=("initialize", "status", "replace"))
-  parser.add_argument("--from-file", type=Path, help="Import an existing PEM Ed25519 key instead of generating one")
+  parser.add_argument("--from-file", type=Path, help="Import an existing Asius root-secret file instead of generating one")
   parser.add_argument("--confirm-identity-change", action="store_true",
                       help="Accept a new device identity and loss of access through the previous identity")
   args = parser.parse_args()
