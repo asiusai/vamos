@@ -27,6 +27,7 @@ xbps-install -y \
   sudo \
   shadow \
   curl \
+  ca-certificates-20250419+3.132_1 \
   wget \
   alsa-utils \
   avahi \
@@ -160,7 +161,11 @@ ln -sf /etc/sv/agetty-ttyAMA0 /etc/runit/runsvdir/default/ 2>/dev/null
 
 # Install uv (Python package manager)
 export XDG_DATA_HOME="/usr/local"
-curl -LsSf https://astral.sh/uv/install.sh | sh
+curl -LfsS https://github.com/astral-sh/uv/releases/download/0.13.4/uv-aarch64-unknown-linux-gnu.tar.gz -o /tmp/uv.tar.gz
+echo '1ae72b4718729e2ccc4f1ae2c6d1e531ca8467800e0546e9130b3886023a60ab  /tmp/uv.tar.gz' | sha256sum -c -
+tar -xzf /tmp/uv.tar.gz -C /tmp
+install -m 755 /tmp/uv-aarch64-unknown-linux-gnu/uv /tmp/uv-aarch64-unknown-linux-gnu/uvx /usr/local/bin/
+rm -rf /tmp/uv.tar.gz /tmp/uv-aarch64-unknown-linux-gnu
 # XDG_DATA_HOME=/usr/local makes uv's suggested shell path resolve to
 # /usr/local/../bin/env, which is the env ELF binary rather than a shell file.
 # uv is already on the system PATH, so do not source that generated line.

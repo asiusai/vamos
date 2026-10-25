@@ -84,7 +84,7 @@ This also keeps the previous ext4 OS bootable for rollback.
 
 OTA release manifests are signed independently of the bootloader image. Remote
 installs reject an unsigned manifest; create the matching `vamos.json.sig` with
-an Ed25519 release key by setting `VAMOS_OTA_SIGNING_KEY` or passing
+an ML-DSA-65 release key by setting `VAMOS_OTA_SIGNING_KEY` or passing
 `tools/build/package_ota.py --signing-key KEY.pem`. Development builds may emit
 an unsigned local manifest and explicitly remove any stale signature.
 

@@ -6,6 +6,9 @@ requires-python = ">=3.12.3, <3.13"
 description = ""
 dependencies = [
   # Shipping runtime only; development and test tools belong in their jobs.
+  # Remove compromised emSign roots from runtime and package-management TLS.
+  "certifi==2026.10.19",
+  "pip==26.2.2",
 
   # bled.py
   "dbus-fast==5.0.22",
