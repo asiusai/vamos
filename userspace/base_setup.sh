@@ -166,11 +166,6 @@ echo '1ae72b4718729e2ccc4f1ae2c6d1e531ca8467800e0546e9130b3886023a60ab  /tmp/uv.
 tar -xzf /tmp/uv.tar.gz -C /tmp
 install -m 755 /tmp/uv-aarch64-unknown-linux-gnu/uv /tmp/uv-aarch64-unknown-linux-gnu/uvx /usr/local/bin/
 rm -rf /tmp/uv.tar.gz /tmp/uv-aarch64-unknown-linux-gnu
-# XDG_DATA_HOME=/usr/local makes uv's suggested shell path resolve to
-# /usr/local/../bin/env, which is the env ELF binary rather than a shell file.
-# uv is already on the system PATH, so do not source that generated line.
-sed -i '\|/usr/local/../bin/env|d' /root/.profile
-export PATH="$HOME/.local/bin:$PATH"
 
 # Install the exact Python used by the packaged openpilot checkout. If these
 # differ, openpilot's later uv sync recreates the venv and drops vamOS runtime
