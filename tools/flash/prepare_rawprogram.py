@@ -47,7 +47,7 @@ def operations_for_payload(manifest: dict, payload: str) -> list[dict]:
       raise ValueError("flash payload contains an invalid operation")
     offset = operation.get("offset")
     size = operation.get("size")
-    if not isinstance(offset, int) or not isinstance(size, int) or offset < 0 or size <= 0:
+    if type(offset) is not int or type(size) is not int or offset < 0 or size <= 0:
       raise ValueError("flash operation has an invalid byte range")
     if offset < begin + length and offset + size > begin:
       raise ValueError("flash operation overlaps persist")

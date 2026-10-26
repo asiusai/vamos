@@ -48,7 +48,7 @@ stock_is_supported() {
 case "${1:-}" in
   "") ;;
   --restore-stock) restore=1 ;;
-  *) echo "Usage: ./vamos flash uboot [--restore-stock]" >&2; exit 2 ;;
+  *) echo "Usage: ./tools/flash/uboot-local.sh [--restore-stock]" >&2; exit 2 ;;
 esac
 
 if [ ! -f "$LOADER" ]; then

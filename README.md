@@ -18,20 +18,21 @@ the release checklist.
 ./vamos build ota          # build ESP and package a full OTA release
 ./vamos build disk         # build the common factory disk + optional userdata
 ./vamos build disk --storage ufs  # build the 4 KiB-sector UFS factory disk
-./vamos flash kernel --storage ufs  # replace a UFS ESP through EDL
-./vamos flash system --storage ufs  # factory flash UFS with openpilot
-./vamos flash system --storage ufs --without-openpilot  # vamOS-only UFS
-./vamos flash all --storage ufs     # flash system and kernel
+./vamos devices            # list connected Dragons and USB speeds
+./vamos flash              # prepared local VamOS + openpilot build
+./vamos flash --no-openpilot # local VamOS alone
+./vamos flash --remote 18.11 # a specific published release
+./vamos flash --remote     # latest published VamOS + openpilot
+./vamos uboot              # published U-Boot only; preserve OS and data
 ./vamos profile diff A B   # diff two rootfs profiles
-./vamos device-update comma@192.168.88.20
 ```
 
 Factory builds and EDL flashing support UFS modules with 4096-byte logical sectors.
-UFS is the default. `--storage ufs` selects it explicitly.
+UFS is the only flash target. Builds accept `--storage ufs` explicitly.
 The signed QCS6490 programmer cannot safely probe unsupported storage backends.
 CLI transfers default to conservative 64 KiB USB payloads; override that with
 `VAMOS_EDL_MAX_PAYLOAD` when benchmarking a known-stable link.
-System factory flashing and `dragon.py normal` reuse one Firehose connection.
+Factory flashing, U-Boot installation, and `dragon.py normal` each reuse one Firehose connection.
 Writes retain full readback verification. Failed operations stop the session
 without automatic retries. See [the host tool](tools/flash/edl-ng/README.md).
 Factory disks use a 64 GB minimum geometry and a UFS GPT;
@@ -57,16 +58,45 @@ Older five-partition installations need factory provisioning and explicit key
 import once. OTA manifests require updater version 3, so earlier updaters refuse
 the release before changing a slot. Never write a raw full-disk image over an existing identity.
 
-Factory OS flashing keeps the connected SOM's stock UEFI. The optional
-`flash uboot` path first reads and content-addresses that board's XBL backup,
-and refuses firmware revisions that have not passed physical boot testing.
-`VAMOS_XBL_STOCK` selects an explicit backup for recovery; an attended bring-up
-can opt into an unvalidated revision with `VAMOS_ALLOW_UNTESTED_XBL=1`.
+Factory OS flashing preserves the connected SOM's boot firmware.
+Run `vamos uboot` separately when U-Boot installation is needed.
+It verifies the published recipe, saves a complete NOR backup, and rejects unknown firmware revisions before writing.
+Only XBL changes. The complete NOR is verified before reset.
 
 `build disk` also packages and verifies the reusable Firehose inputs for that
-storage target. This work happens once per image build; `flash system` reuses
+storage target. This work happens once per image build; `flash` reuses
 the prepared chunks for every device. Set `VAMOS_SKIP_FLASH_BUNDLE=1` only when
 building a disk artifact that will not be flashed locally.
+
+### Standalone flashing
+
+The `Flash CLI` GitHub Actions workflow builds `vamos-cli-linux-x86_64`.
+Its archive contains one executable. Extract it and run `./vamos devices` or `./vamos flash --remote`.
+It includes Python, release signature verification, libusb, and the native Firehose backend.
+Users do not need the source checkout, source submodules, Docker, compilers, or Python package installation.
+The current build targets Linux x86-64 on Ubuntu 24.04 or a compatible system.
+Windows, macOS, and ARM hosts are not supported by this build.
+USB permissions can require one sudo prompt.
+
+`flash --remote` selects the same signed release as the browser. `flash --remote VERSION` selects a specific signed release.
+Both download and cache verified image chunks and the matching programmer.
+`flash` uses a prepared local factory manifest and its adjacent chunks. Use `--manifest PATH` to select another local manifest.
+It does not rebuild images or require the original full-disk image.
+The standalone executable defaults to `build/flash-ufs/flash.json` in the current directory.
+The source wrapper defaults to that path in this repository.
+Local and remote flashing accept `--no-openpilot`. Openpilot-only flashing is not supported.
+Use `--yes` to confirm an unattended installation.
+
+Flashing VamOS replaces recordings and settings. Device identity is preserved.
+`uboot` preserves the installed OS, recordings, settings, and identity.
+Downloads and NOR backups are stored under `$XDG_CACHE_HOME/vamos`, or `~/.cache/vamos` by default.
+The final line shows elapsed time, average download speed, average write speed, and the USB link generation.
+Write speed excludes verification. Elapsed time includes verification and reset, but not Linux startup.
+
+For source development, use Python 3.12 or newer with `cryptography==50.0.2`.
+Set `VAMOS_PYTHON` to that environment's Python executable.
+The `devices` command and command help need no additional Python packages.
+Build a standalone executable with `bash tools/build/build_cli.sh` after installing `tools/flash/requirements-build.txt` in a virtual environment.
 
 Fresh devices accept `comma/comma` through physical USB NCM at `192.168.42.2` and UART.
 Remote SSH requires an individual authorized key. There is no shared bootstrap key.
@@ -204,12 +234,6 @@ and otherwise remain in the persistent home directory. OTA packages use
 `system.img`, which intentionally contains no userdata payload and cannot add,
 replace, or remove openpilot or other persistent userspace files.
 
-`device-update` packages the locally built `build/system.img` and
-`build/esp.img`, rsyncs them directly to the device, and installs them into the
-inactive vamOS A/B slot. It does not use GitHub, R2, an openpilot branch, or the
-`VAMOS_VERSION` update gate. The image's existing `/VERSION` is used only for
-post-write verification, so rebuilding and reinstalling the same version works.
-
 `system.img` is an EROFS filesystem. The 10 GiB OS partition layout stays
 unchanged, but updates write and verify only the image bytes. EROFS payloads
 transfer without another compression layer. Local update manifests reuse the
@@ -222,8 +246,8 @@ LZMA makes smaller images but increases cold-read and startup times.
 EROFS requires the U-Boot firmware-loading change described in
 [`bootloader/README.md`](bootloader/README.md). The old ext4-only U-Boot cannot
 start an EROFS slot.
-Install the kernel with Zstandard support before using `device-update` for
-the first conversion. EDL can install the new kernel and OS together.
+The first conversion requires a kernel with Zstandard support.
+EDL can install the new kernel and OS together.
 
 Before runit starts, OverlayFS adds a writable layer under `/data/vamos-root`.
 Each EROFS image UUID selects its own layer. Reboot keeps local OS changes;
@@ -266,15 +290,6 @@ state, while `vamos-hypervisor enable` explicitly retries the override. The test
 makes EFI variables unavailable after Linux has booted at EL2; the helper exits
 before mounting efivarfs in that state. Dragon updates use the disk-resident
 selector described below and never require `BootNext`.
-
-Build the images separately, then deploy them. The device reboots into a
-one-shot trial of the new slot:
-
-```bash
-./vamos build system
-./vamos build esp
-./vamos device-update comma@192.168.88.20
-```
 
 ## Dragon OTA Updates
 

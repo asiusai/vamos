@@ -10,6 +10,7 @@ import hashlib
 import os
 import struct
 import tempfile
+import time
 import uuid
 import zlib
 from pathlib import Path
@@ -18,6 +19,7 @@ from userspace.root.usr.lib.vamos.update import (
     BOOT_PHASE_RANK, GRUB_ENV_SIZE, decode_boot_control, encode_boot_control,
 )
 from tools.flash.edl_session import FirehoseSession
+from tools.flash.devices import select_edl, USB_ROOT
 
 
 def require(condition: bool, message: str) -> None:
@@ -27,8 +29,8 @@ def require(condition: bool, message: str) -> None:
 
 class EdlDisk:
     def __init__(self, loader: str, memory: str, max_payload: int | None = None):
-        require(memory == "Ufs", "normal boot requires Ufs")
-        self.sector_size = 4096 if memory == "Ufs" else 512
+        require(memory in ("Ufs", "Spinor"), "unsupported storage")
+        self.sector_size = 4096
         payload = int(os.environ.get("VAMOS_EDL_MAX_PAYLOAD", "65536")) if max_payload is None else max_payload
         require(payload >= 4096, "Firehose payload must be at least 4096 bytes")
         executable = Path(__file__).resolve().parents[1] / "bin/edl-ng-dist/edl-ng"
@@ -36,18 +38,20 @@ class EdlDisk:
                         "--vid=05c6", "--pid=9008", f"--memory={memory}",
                         "--slot=0", f"--loader={loader}"]
         self.session: FirehoseSession | None = None
+        self.write_bytes = 0
+        self.write_seconds = 0.
 
     def __enter__(self):
         # Refuse to select an arbitrary board when multiple EDL devices exist.
-        devices = []
-        for path in Path("/sys/bus/usb/devices").glob("*"):
-            try:
-                if (path / "idVendor").read_text().strip() == "05c6" and \
-                   (path / "idProduct").read_text().strip() == "9008":
-                    devices.append(path)
-            except FileNotFoundError:
-                pass
-        require(len(devices) == 1, f"expected one EDL device, found {len(devices)}")
+        device = select_edl()
+        path = USB_ROOT / device.port
+        bus, address = (int((path / name).read_text()) for name in ('busnum', 'devnum'))
+        node = f'/dev/bus/usb/{bus:03d}/{address:03d}'
+        if os.access(node, os.R_OK | os.W_OK):
+            self.command = self.command[2:]
+        self.command = [f'--vid={device.vendor:04x}' if value.startswith('--vid=') else
+                        f'--pid={device.product_id:04x}' if value.startswith('--pid=') else value
+                        for value in self.command]
         self.session = FirehoseSession(self.command)
         try:
             require(self.session.geometry["sector_size"] == self.sector_size,
@@ -67,7 +71,12 @@ class EdlDisk:
 
     def _request(self, operation: str, **arguments) -> dict:
         require(self.session is not None, "open EdlDisk with a context manager")
-        return self.session.request(operation, **arguments)
+        started = time.monotonic()
+        response = self.session.request(operation, **arguments)
+        if operation == 'write':
+            self.write_bytes += arguments['count'] * self.sector_size
+            self.write_seconds += time.monotonic() - started
+        return response
 
     def _verify(self, condition: bool, message: str) -> None:
         if not condition:

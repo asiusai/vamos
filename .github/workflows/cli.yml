@@ -1,0 +1,42 @@
+name: Flash CLI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - tools/flash/**
+      - tools/bin/edl-ng-dist/**
+      - tools/build/build_cli.sh
+      - userspace/root/usr/lib/vamos/**
+      - userspace/root/usr/share/vamos/update-public.pem
+      - .github/workflows/cli.yml
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x86_64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libusb-1.0-0
+          python3 -m pip install --require-hashes -r tools/flash/requirements-build.txt
+      - name: Test host flashing
+        run: python3 -m unittest discover -s tools/flash -p 'test_*.py'
+      - name: Build standalone flasher
+        run: bash tools/build/build_cli.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vamos-cli-linux-x86_64
+          path: |
+            build/cli/vamos-linux-x86_64.tar.gz
+            build/cli/SHA256SUMS
+          if-no-files-found: error

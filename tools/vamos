@@ -8,47 +8,6 @@ while [ -L "$SOURCE" ]; do
 done
 DIR="$(cd "$(dirname "$SOURCE")/.." >/dev/null && pwd)"
 
-FLASH_ARGS=()
-
-configure_flash_storage() {
-  local storage=""
-
-  FLASH_ARGS=()
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --storage)
-        if [ "$#" -lt 2 ]; then
-          echo "ERROR: --storage requires ufs" >&2
-          exit 2
-        fi
-        storage="$2"
-        shift 2
-        ;;
-      --storage=*)
-        storage="${1#*=}"
-        shift
-        ;;
-      --ufs)
-        storage="${1#--}"
-        shift
-        ;;
-      *)
-        FLASH_ARGS+=("$1")
-        shift
-        ;;
-    esac
-  done
-
-  [ -n "$storage" ] || return 0
-  case "${storage,,}" in
-    ufs) export VAMOS_EDL_MEMORY=Ufs ;;
-    *)
-      echo "ERROR: --storage must be ufs" >&2
-      exit 2
-      ;;
-  esac
-}
-
 configure_build_storage() {
   local storage="ufs"
 
@@ -126,47 +85,14 @@ case "${1:-}" in
         ;;
       *)      echo "Usage: vamos build <uboot|kernel|system|esp|ota|disk|all> [--storage ufs]"; exit 1 ;;
     esac ;;
-  flash)
-    flash_target="${2:-}"
-    shift
-    [ "$#" -eq 0 ] || shift
-    configure_flash_storage "$@"
-    case "$flash_target" in
-      kernel)
-        if [ "${#FLASH_ARGS[@]}" -ne 0 ]; then
-          echo "Usage: vamos flash kernel [--storage ufs]" >&2
-          exit 2
-        fi
-        exec "$DIR/tools/flash/kernel.sh"
-        ;;
-      uboot)
-        if [ "${#FLASH_ARGS[@]}" -gt 1 ] ||
-           { [ "${#FLASH_ARGS[@]}" -eq 1 ] && [ "${FLASH_ARGS[0]}" != "--restore-stock" ]; }; then
-          echo "Usage: vamos flash uboot [--restore-stock]" >&2
-          exit 2
-        fi
-        exec "$DIR/tools/flash/uboot.sh" "${FLASH_ARGS[@]}"
-        ;;
-      system)
-        exec "$DIR/tools/flash/system.sh" "${FLASH_ARGS[@]}"
-        ;;
-      all)
-        VAMOS_NO_RESET=1 "$DIR/tools/flash/system.sh" "${FLASH_ARGS[@]}" && \
-          "$DIR/tools/flash/kernel.sh"
-        ;;
-      *)
-        echo "Usage: vamos flash <uboot|kernel|system|all> [--storage ufs]" >&2
-        exit 1
-        ;;
-    esac ;;
+  devices|flash|uboot)
+    exec "${VAMOS_PYTHON:-python3}" "$DIR/tools/flash/cli.py" "$@"
+    ;;
   profile)
     shift
     exec "$DIR/tools/profile/rootfs.sh" "$@" ;;
-  device-update)
-    shift
-    exec python3 "$DIR/tools/device_update.py" "$@" ;;
   *)
-    echo "Usage: vamos <setup|build|flash|profile|device-update>"
+    echo "Usage: vamos <devices|flash|uboot|setup|build|profile>"
     echo ""
     echo "  setup              Initialize submodules and udev rules"
     echo "  build uboot        Build Dragon Q6A XBL-embedded U-Boot"
@@ -176,11 +102,11 @@ case "${1:-}" in
     echo "  build ota          Package ESP + system → build/ota/vamos.json"
     echo "  build disk         Assemble initial disk image; accepts --storage ufs"
     echo "  build all          Do all three in order; accepts --storage ufs"
-    echo "  flash uboot        Replace SPI XBL; --restore-stock restores backup"
-    echo "  flash system       Flash vamOS; accepts --storage and --without-openpilot"
-    echo "  flash kernel       Flash the ESP; accepts --storage ufs"
-    echo "  flash all          Flash system + kernel; accepts --storage"
+    echo "  devices            List connected Dragon devices and USB speeds"
+    echo "  flash              Flash a prepared local VamOS + openpilot build"
+    echo "  flash --remote [VERSION]  Flash the latest or specified published release"
+    echo "  uboot              Install published U-Boot; preserve OS and data"
+    echo "                     flash accepts --no-openpilot, --manifest PATH, and --yes"
     echo "  profile [diff]     Profile rootfs or diff two profiles"
-    echo "  device-update HOST Install local vamOS images over SSH"
-    exit 1 ;;
+    case "${1:-}" in ""|-h|--help) exit 0 ;; *) exit 2 ;; esac ;;
 esac

@@ -11,8 +11,8 @@ The session validates storage bounds and exact write sizes.
 Any error ends the session. It never reconnects or retries a write automatically.
 The Python caller verifies writes with fresh full readback.
 
-`dragon.py normal` and the system factory flasher use this connection.
-Kernel-only and SPI bootloader flashing still use the existing CLI commands.
+`dragon.py normal`, factory flashing, and published U-Boot installation use this connection.
+Kernel-only and local U-Boot development retain their separate scripts.
 The USB payload limit remains 64 KiB unless `VAMOS_EDL_MAX_PAYLOAD` changes it.
 
 Rebuild on Linux x64 with .NET SDK 9.0.319, Clang, and zlib development files:

@@ -45,7 +45,7 @@ printf '%s\n' "$GPT_OUTPUT"
 
 if grep -Eq 'Name:[[:space:]]+esp_a$' <<<"$GPT_OUTPUT" && grep -Eq 'Name:[[:space:]]+esp_b$' <<<"$GPT_OUTPUT"; then
   # This is the recovery/development path. Keep both ESPs bootable and restore
-  # slot A as the stable choice; use device-update for rollback-safe trials.
+  # slot A as the stable choice; use the A/B updater for rollback-safe trials.
   ESP_PARTITIONS=(esp_a esp_b)
 elif grep -Eq 'Name:[[:space:]]+esp_a$' <<<"$GPT_OUTPUT"; then
   # A freshly written compact image has only slot A. First boot creates the

@@ -14,7 +14,7 @@ Both stored boot stages were `loading`. Recovery succeeded without changing NOR.
 Both firmware logs contain XPU protection errors in trusted-app memory.
 The exact cause remains unresolved; repeated successful boots do not establish full reboot reliability.
 Normal OS updates do not replace SPI NOR firmware.
-`flash uboot` replaces XBL on the existing firmware base; it does not upgrade the other NOR partitions.
+`vamos uboot` replaces XBL on the existing firmware base; it does not upgrade the other NOR partitions.
 Preserve a complete device-specific NOR backup before a full firmware upgrade.
 
 Dragon Q6A does not use RB3 Gen 2's separate `uefi_a`/`uefi_b` layout. Its EDK2
@@ -25,6 +25,9 @@ hypervisor firmware. The complete XBL is then rehashed with Qualcomm's v6
 format. Secure boot is disabled on the Dragon Q6A, so the qtestsign wrapper is
 an image-format requirement rather than a security boundary.
 
+Install the published U-Boot with `./vamos uboot`. This saves and verifies a complete NOR backup.
+
+The commands below are for local firmware development and recovery.
 Build with:
 
 ```sh
@@ -52,7 +55,7 @@ Flash with the device already in EDL, or let the command request EDL from a
 running vamOS system:
 
 ```sh
-./vamos flash uboot
+./tools/flash/uboot-local.sh
 ```
 
 The first flash saves the current XBL as `build/xbl-stock-dragon-q6a.bin`.
@@ -62,7 +65,7 @@ stock XBL on the build host. Keep the stock backup for restoring UEFI.
 Restore it with:
 
 ```sh
-./vamos flash uboot --restore-stock
+./tools/flash/uboot-local.sh --restore-stock
 ```
 
 The fast path samples the UFS connector's active-low card-detect GPIO and

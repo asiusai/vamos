@@ -21,7 +21,6 @@ jobs:
         run: |
           python3 -m unittest \
             tools.camerad_env_quote_test \
-            tools.device_update_test \
             tools.validate_camerad_vfe_test \
             tools.update.test_vamos_update \
             tools.build.test_package_ota

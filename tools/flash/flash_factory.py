@@ -25,7 +25,7 @@ def prepare_operations(manifest_path: Path, output: Path, include_openpilot: boo
     return manifest["sector_size"], operations
 
 
-def flash_operations(disk: EdlDisk, sector_size: int, operations: list, persist: dict | None = None) -> None:
+def flash_operations(disk: EdlDisk, sector_size: int, operations: list, persist: dict | None = None, progress=None) -> None:
     require(disk.sector_size == sector_size, "manifest and device sector sizes differ")
     capacity = disk.session.geometry["sectors"] * sector_size
     # Validate all ranges before the first destructive operation.
@@ -41,13 +41,18 @@ def flash_operations(disk: EdlDisk, sector_size: int, operations: list, persist:
         if initialize_persist(disk.read, sector_size, persist):
             print("Initializing the new identity region on the old disk layout", flush=True)
             disk.erase(begin, length)
-    for operation, path in operations:
+    for index, (operation, path) in enumerate(operations):
         offset, size = operation["offset"], operation["size"]
-        print(f"{operation['operation']}: byte {offset}, {size} bytes", flush=True)
+        if progress is None:
+            print(f"{operation['operation']}: byte {offset}, {size} bytes", flush=True)
+        else:
+            progress(index, len(operations), operation['operation'])
         if path is None:
             disk.erase(offset, size)
         else:
             disk.write_file_verified(offset, path)
+    if progress is not None:
+        progress(len(operations), len(operations), 'verified')
 
 
 def main() -> None:
