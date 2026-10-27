@@ -78,7 +78,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec59a2d442
 --- /dev/null
 +++ b/drivers/media/i2c/os04c10.c
-@@ -0,0 +1,587 @@
+@@ -0,0 +1,591 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * OmniVision OS04C10 CMOS Image Sensor Driver
@@ -122,6 +122,7 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +
 +static const s64 os04c10_link_freq_menu[] = {
 +	OS04C10_LINK_FREQ,
++	364000000ULL,
 +};
 +
 +static const char * const os04c10_supply_name[] = {
@@ -144,6 +145,7 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +	struct gpio_desc *reset_gpio;
 +	struct regulator_bulk_data supplies[ARRAY_SIZE(os04c10_supply_name)];
 +	unsigned long link_freq_bitmap;
++	u32 num_data_lanes;
 +	bool powered;
 +	u32 mbus_code;
 +	u32 active_width;
@@ -461,9 +463,10 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +		goto out;
 +	}
 +
-+	if (ep_cfg.bus.mipi_csi2.num_data_lanes != 2) {
++	sensor->num_data_lanes = ep_cfg.bus.mipi_csi2.num_data_lanes;
++	if (sensor->num_data_lanes != 2 && sensor->num_data_lanes != 4) {
 +		ret = dev_err_probe(dev, -EINVAL,
-+				    "only two CSI-2 data lanes are supported\n");
++				    "only two or four CSI-2 data lanes are supported\n");
 +		goto out;
 +	}
 +
@@ -484,21 +487,22 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +static int os04c10_init_controls(struct os04c10 *sensor)
 +{
 +	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
++	s64 pixel_rate = sensor->num_data_lanes == 4 ? 242666666 : OS04C10_PIXEL_RATE;
 +	int ret;
 +
 +	v4l2_ctrl_handler_init(hdl, 2);
 +
 +	sensor->link_freq = v4l2_ctrl_new_int_menu(
 +		hdl, NULL, V4L2_CID_LINK_FREQ,
-+		ARRAY_SIZE(os04c10_link_freq_menu) - 1, 0,
++		ARRAY_SIZE(os04c10_link_freq_menu) - 1, sensor->num_data_lanes == 4 ? 1 : 0,
 +		os04c10_link_freq_menu);
 +	if (sensor->link_freq)
 +		sensor->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 +
 +	sensor->pixel_rate = v4l2_ctrl_new_std(
 +		hdl, NULL, V4L2_CID_PIXEL_RATE,
-+		OS04C10_PIXEL_RATE, OS04C10_PIXEL_RATE, 1,
-+		OS04C10_PIXEL_RATE);
++		pixel_rate, pixel_rate, 1,
++		pixel_rate);
 +	if (sensor->pixel_rate)
 +		sensor->pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 +

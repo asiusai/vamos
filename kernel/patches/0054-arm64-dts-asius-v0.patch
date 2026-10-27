@@ -859,7 +859,7 @@ index 696fef50f577..20058b7fca04 100644
 +
 +			csiphy0_ep: endpoint {
 +				clock-lanes = <7>;
-+				data-lanes = <0 1>;
++				data-lanes = <0 1 2 3>;
 +				remote-endpoint = <&os04c10_cam1_ep>;
 +			};
 +		};
@@ -903,8 +903,8 @@ index 696fef50f577..20058b7fca04 100644
 +
 +		port {
 +			os04c10_cam1_ep: endpoint {
-+				link-frequencies = /bits/ 64 <456000000>;
-+				data-lanes = <1 2>;
++				link-frequencies = /bits/ 64 <364000000>;
++				data-lanes = <1 2 3 4>;
 +				remote-endpoint = <&csiphy0_ep>;
 +			};
 +		};
