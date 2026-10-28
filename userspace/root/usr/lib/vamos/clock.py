@@ -100,15 +100,22 @@ def restore():
   print(f'clock: restored {target:.3f}', flush=True)
 
 
-def synchronize(target, source):
+def synchronize(target, source, sample_mono=None):
+  mono = time.monotonic()
+  if source == 'gps':
+    if sample_mono is None or not math.isfinite(sample_mono) or not 0 <= mono - sample_mono <= 2:
+      raise ValueError('GPS time sample is stale')
+    target += mono - sample_mono
   build = int(BUILD.read_text())
   if not valid_epoch(target, build):
     raise ValueError('Time sample is outside the image lifetime')
   runtime = read_json(RUNTIME)
-  mono = time.monotonic()
-  # A phone with an incorrect clock must not override a recent NTP fix.
-  if source == 'app' and runtime.get('source') == 'nts' and 0 <= mono - runtime.get('monotonic', -1000) < 600:
-    return {'accepted': False, 'correction': 'network-clock-current'}
+  # Prefer authenticated network time, then device GPS, then an authorized app.
+  if 0 <= mono - runtime.get('monotonic', -1000) < 600:
+    if source in ('app', 'gps') and runtime.get('source') == 'nts':
+      return {'accepted': False, 'correction': 'network-clock-current'}
+    if source == 'app' and runtime.get('source') == 'gps':
+      return {'accepted': False, 'correction': 'gps-clock-current'}
   offset = target - time.time()
   if offset > 0.25:
     slew(0)
@@ -147,7 +154,7 @@ def parse_chrony_tracking(text, now):
 
 def query_nts():
   # Chrony measures time without changing CLOCK_REALTIME. This helper retains
-  # the existing forward-step/backward-slew policy for both NTS and app samples.
+  # the forward-step/backward-slew policy for NTS, GPS and app samples.
   result = subprocess.run(['chronyc', '-h', '/run/chrony/chronyd.sock', '-c', 'tracking'], capture_output=True, text=True, timeout=3, check=True)
   return parse_chrony_tracking(result.stdout, time.time())
 
@@ -193,7 +200,8 @@ def main():
   commands.add_parser('status')
   sync = commands.add_parser('sync')
   sync.add_argument('--unix-ms', required=True, type=float)
-  sync.add_argument('--source', choices=('app',), required=True)
+  sync.add_argument('--source', choices=('app', 'gps'), required=True)
+  sync.add_argument('--sample-mono', type=float)
   args = parser.parse_args()
   if args.command == 'serve':
     serve()
@@ -206,5 +214,5 @@ def main():
       elif args.command == 'status':
         print(json.dumps({'unixTime': time.time(), 'saved': read_json(STATE), 'sync': read_json(RUNTIME)}))
       else:
-        print(json.dumps(synchronize(args.unix_ms / 1000, args.source)))
+        print(json.dumps(synchronize(args.unix_ms / 1000, args.source, args.sample_mono)))
   return 0

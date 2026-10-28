@@ -66,6 +66,34 @@ class ClockTest(unittest.TestCase):
       clock.checkpoint()
     self.assertEqual(clock.read_json(clock.STATE)['unixTime'], BUILD + 100)
 
+  def test_gps_advances_clock_and_accounts_for_sample_age(self):
+    with patch.object(clock.time, 'time', return_value=BUILD), patch.object(clock.time, 'monotonic', return_value=100), \
+         patch.object(clock.time, 'clock_settime') as step, patch.object(clock, 'slew'):
+      self.assertTrue(clock.synchronize(BUILD + 10, 'gps', 99.5)['accepted'])
+      self.assertFalse(clock.synchronize(BUILD + 50, 'app')['accepted'])
+    step.assert_called_once_with(clock.time.CLOCK_REALTIME, BUILD + 10.5)
+    self.assertEqual(clock.read_json(clock.RUNTIME)['source'], 'gps')
+
+  def test_gps_slews_backwards_and_yields_to_recent_network_time(self):
+    with patch.object(clock.time, 'time', return_value=BUILD + 300), patch.object(clock.time, 'monotonic', return_value=100), \
+         patch.object(clock.time, 'clock_settime') as step, patch.object(clock, 'slew') as slew:
+      self.assertEqual(clock.synchronize(BUILD + 100, 'gps', 100)['correction'], 'slew')
+      slew.assert_called_once_with(-200)
+      clock.synchronize(BUILD + 300, 'nts')
+      self.assertFalse(clock.synchronize(BUILD + 400, 'gps', 100)['accepted'])
+      with patch.object(clock.time, 'monotonic', return_value=701):
+        self.assertTrue(clock.synchronize(BUILD + 300, 'gps', 701)['accepted'])
+    step.assert_not_called()
+
+  def test_stale_gps_never_touches_clock(self):
+    with patch.object(clock.time, 'monotonic', return_value=100), \
+         patch.object(clock.time, 'clock_settime') as step, patch.object(clock, 'slew') as slew:
+      for mono in (None, float('nan'), 97.99, 100.01):
+        with self.assertRaises(ValueError):
+          clock.synchronize(BUILD + 100, 'gps', mono)
+    step.assert_not_called()
+    slew.assert_not_called()
+
   def test_invalid_samples_never_touch_clock(self):
     with patch.object(clock.time, 'clock_settime') as step, patch.object(clock, 'slew') as slew:
       for value in (0, BUILD - 1, float('nan'), float('inf'), BUILD + clock.TEN_YEARS + 1):

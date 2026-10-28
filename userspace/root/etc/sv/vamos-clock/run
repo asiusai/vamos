@@ -1,5 +1,5 @@
 #!/bin/sh
 exec 2>&1
-# One clock owner for NTS and app samples. Restoring the persistent floor
+# One clock owner for NTS, GPS, and app samples. Restoring the persistent floor
 # happens in stage 1; restarting this service must never reset the clock.
 exec /usr/bin/vamos-clock serve
