@@ -202,10 +202,11 @@ provides autonomous bridge recovery. Normal reboot and shutdown are unchanged.
 
 ## Model acceleration and builds
 
-Openpilot uses tinygrad's Qualcomm GPU backend (`QCOM`) on Dragon.
-Chestnut uses `USB+AMD:LLVM`. The image does not include QNN, QAIRT,
-ONNX Runtime, or the unused FastRPC userspace libraries.
-The pinned ADSP and CDSP firmware remains available for board initialization and audio.
+Openpilot uses tinygrad's Qualcomm GPU backend (`QCOM`) on Dragon by default.
+Chestnut uses `USB+AMD:LLVM`.
+The image build installs the pinned QNN HTP v68 runtime and FastRPC libraries for experimental native inference.
+Model conversion uses QAIRT on the host. The image does not install ONNX Runtime.
+The pinned ADSP and CDSP firmware supports board initialization, audio, and experimental HTP inference.
 
 Clang builds openpilot on the device. LLVM compiles GPU and CPU kernels.
 GCC, development headers, and the separate Panda ARM cross-compiler remain available.

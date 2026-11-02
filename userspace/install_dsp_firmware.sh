@@ -33,6 +33,12 @@ for firmware in adsp.mbn adspr.jsn adspua.jsn cdsp.mbn cdspr.jsn; do
   install -m644 "$firmware_boot/$firmware" \
     "/lib/firmware/qcom/qcs6490/radxa/dragon-q6a/$firmware"
 done
+# FastRPC loads the unsigned CDSP shell from this canonical path during startup.
+firmware_cdsp="$work_dir/firmware/usr/share/qcom/qcs6490/radxa/dragon-q6a/dsp/cdsp"
+install -d /usr/lib/dsp
+for library in fastrpc_shell_unsigned_3 libc++.so.1 libc++abi.so.1; do
+  install -m644 "$firmware_cdsp/$library" "/usr/lib/dsp/$library"
+done
 install -m644 "$audio_topology" \
   /lib/firmware/qcom/qcs6490/radxa/dragon-q6a/QCS6490-Radxa-Dragon-Q6A-tplg.bin
 ln -sfn radxa/dragon-q6a/QCS6490-Radxa-Dragon-Q6A-tplg.bin \

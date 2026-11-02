@@ -24,8 +24,7 @@ ARG USERNAME=comma
 COPY ./userspace/base_setup.sh /tmp/vamos/
 RUN /tmp/vamos/base_setup.sh
 
-# Qualcomm DSP firmware remains necessary for audio and board initialization.
-# Model inference uses the GPU; no QNN or FastRPC userspace runtime is installed.
+# Qualcomm DSP firmware supports audio, board initialization, and HTP inference.
 COPY ./userspace/audio/QCS6490-Asius-Panda-tplg.bin /tmp/vamos/audio/
 COPY ./userspace/install_dsp_firmware.sh ./userspace/dsp_firmware.sh /tmp/vamos/
 RUN /tmp/vamos/install_dsp_firmware.sh && rm -rf /tmp/vamos/install_dsp_firmware.sh /tmp/vamos/audio
@@ -132,6 +131,10 @@ RUN rm -rf \
       /usr/lib/libsync.so* /usr/lib/libsysutils.so* /usr/lib/libtime_genoff.so* \
       /usr/lib/libunwind.so.0 /usr/lib/libunwind.so.0.0.0 \
       /usr/lib/libutils.so* /usr/lib/libxml.so*
+
+# Install the current HTP runtime after removing the old Android DSP libraries.
+COPY ./userspace/install_qnn_runtime.sh /tmp/install_qnn_runtime.sh
+RUN bash /tmp/install_qnn_runtime.sh && rm /tmp/install_qnn_runtime.sh
 
 COPY ./build/BOOTAA64.EFI /usr/share/vamos/BOOTAA64.EFI
 COPY ./build/EDLAA64.EFI /usr/share/vamos/EDLAA64.EFI
