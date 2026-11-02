@@ -75,6 +75,10 @@ COPY ./kernel/firmware/qcom/qcm6490/qupv3fw.elf /lib/firmware/qcom/qcm6490/qupv3
 COPY ./kernel/firmware/qcom/vpu-2.0/venus.mbn /lib/firmware/qcom/vpu-2.0/venus.mbn
 COPY ./kernel/firmware/LICENSES/LICENSE.qcom ./kernel/firmware/LICENSES/NOTICE.qcom /usr/share/licenses/linux-firmware/
 
+# Install AMD firmware after staging the exact openpilot/tinygrad revision.
+COPY ./userspace/install_amd_firmware.py /tmp/vamos/
+COPY ./kernel/firmware/LICENSES/LICENSE.amdgpu /usr/share/licenses/linux-firmware/
+
 # Kernel modules are installed after Docker export in build_system.sh
 # (in-tree and AIC8800 modules built together in build/modules_install)
 

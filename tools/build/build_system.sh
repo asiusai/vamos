@@ -214,6 +214,8 @@ if [ -d "$OP_SRC" ]; then
     /usr/local/venv/bin/python -c "import acados, av, capnproto, certifi, dbus_fast, ffmpeg, json11, libdatachannel, ncurses, paramiko, PIL, pip, smbus2, usb, zstd; \
       from importlib.metadata import version; \
       assert version(\"certifi\") == \"2026.10.19\"; assert version(\"pip\") == \"26.2.2\"; assert version(\"cryptography\") == \"50.0.2\""
+    PYTHONPATH=/data/openpilot/tinygrad_repo /usr/local/venv/bin/python /tmp/vamos/install_amd_firmware.py
+    rm /tmp/vamos/install_amd_firmware.py
     rm -rf /data/tmp /data/uv-cache
     chmod -R a+rX /usr/local/venv /usr/local/uv
   '
