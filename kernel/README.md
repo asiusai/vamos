@@ -179,7 +179,13 @@ This interface supports explicit firmware maintenance over SSH.
 Automatic U-Boot and firmware installation through OS or openpilot updates is not implemented.
 Preserve a verified device-specific backup before writing boot firmware.
 Asius 1 passed full NOR reads and erase/write/restore tests in unallocated space.
-Replacing an active boot-firmware partition through this interface remains untested.
+On 2026-11-12, Dragon `5fe4fd01` passed active XBL replacement through this interface from stock UEFI Linux with kernel `7.2.7-vamos`.
+The test used the signed U-Boot recipe, two matching full NOR backups, and a verified host backup.
+Each changed 4 KiB sector passed erase and write readback. Final full NOR verification confirmed preservation outside XBL.
+Automatic warm and cold boots passed after selecting the installed OS slot.
+Dragon `b3ecb144` also passed active XBL replacement, full NOR verification, and automatic warm and cold boots on the same date.
+Its stock firmware required a locally signed recipe built from its own NOR and the exact published U-Boot core.
+That additional recipe has not been published. These results validate two boards and their recipes, not all firmware replacements.
 One EDL return failed before Linux started. See the bootloader README for this unresolved boot limitation.
 
 ## Video driver selection
