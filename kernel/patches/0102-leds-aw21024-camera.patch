@@ -1,0 +1,202 @@
+From: Asius <dev@asius.ai>
+Subject: [PATCH] leds: support AW21024 camera RGB and grouped IR outputs
+
+diff --git a/drivers/leds/leds-aw21024.c b/drivers/leds/leds-aw21024.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/leds/leds-aw21024.c
+@@ -0,0 +1,169 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* OUT1..10: joined IR sinks; OUT11..12: unused; OUT13..24: four RGB LEDs. */
++#include <linux/delay.h>
++#include <linux/i2c.h>
++#include <linux/leds.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/property.h>
++
++#define AW21024_BR_BASE 0x01
++#define AW21024_UPDATE 0x49
++#define AW21024_RGB_COUNT 12
++/* RSET 4.32 kohm: 10 * (0.4 * 200 / 4320) * 206 / 256 < 150 mA. */
++#define AW21024_IR_MAX_BR 206
++
++struct aw21024;
++struct aw21024_led {
++	struct led_classdev cdev;
++	struct aw21024 *chip;
++	u8 channel;
++};
++
++struct aw21024 {
++	struct i2c_client *client;
++	struct mutex lock;
++	struct aw21024_led leds[AW21024_RGB_COUNT + 1];
++};
++
++static int aw21024_write(struct aw21024 *chip, u8 reg, u8 value)
++{
++	return i2c_smbus_write_byte_data(chip->client, reg, value);
++}
++
++static int aw21024_brightness_set(struct led_classdev *cdev,
++				 enum led_brightness brightness)
++{
++	struct aw21024_led *led = container_of(cdev, struct aw21024_led, cdev);
++	struct aw21024 *chip = led->chip;
++	bool ir = led->channel == AW21024_RGB_COUNT;
++	int first = ir ? 0 : 12 + led->channel;
++	int count = ir ? 10 : 1;
++	u8 value = ir ? min_t(unsigned int, brightness, 100) * AW21024_IR_MAX_BR / 100 : brightness;
++	int i, ret;
++
++	/* UPDATE latches every BR register. Serialize RGB and the joined IR group. */
++	mutex_lock(&chip->lock);
++	for (i = first; i < first + count; i++) {
++		ret = aw21024_write(chip, AW21024_BR_BASE + i, value);
++		if (ret < 0)
++			goto clear;
++	}
++	ret = aw21024_write(chip, AW21024_UPDATE, 0);
++	if (ret < 0)
++		goto clear;
++	mutex_unlock(&chip->lock);
++	return 0;
++clear:
++	/* Do not leave part of the IR group enabled after an incomplete update. */
++	aw21024_write(chip, 0x00, 0);
++	for (i = first; i < first + count; i++)
++		aw21024_write(chip, AW21024_BR_BASE + i, 0);
++	aw21024_write(chip, AW21024_UPDATE, 0);
++	mutex_unlock(&chip->lock);
++	return ret;
++}
++
++static void aw21024_off(void *data)
++{
++	struct aw21024 *chip = data;
++	int i;
++
++	mutex_lock(&chip->lock);
++	aw21024_write(chip, 0x00, 0);
++	for (i = 0; i < 24; i++)
++		aw21024_write(chip, AW21024_BR_BASE + i, 0);
++	aw21024_write(chip, AW21024_UPDATE, 0);
++	mutex_unlock(&chip->lock);
++}
++
++static int aw21024_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct aw21024 *chip;
++	unsigned long used = 0;
++	int ret, i;
++
++	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA))
++		return -EOPNOTSUPP;
++	ret = i2c_smbus_read_byte_data(client, 0x7f);
++	if (ret < 0)
++		return ret;
++	if (ret != 0x18)
++		return -ENODEV;
++	chip = devm_kzalloc(dev, sizeof(*chip), GFP_KERNEL);
++	if (!chip)
++		return -ENOMEM;
++	chip->client = client;
++	mutex_init(&chip->lock);
++	i2c_set_clientdata(client, chip);
++	ret = devm_add_action_or_reset(dev, aw21024_off, chip);
++	if (ret)
++		return ret;
++
++	/* Reset disables all sinks. Keep them zero while configuring current. */
++	ret = aw21024_write(chip, 0x7f, 0);
++	if (ret < 0)
++		return ret;
++	usleep_range(2000, 3000);
++	for (i = 0; i < 24; i++) {
++		ret = aw21024_write(chip, AW21024_BR_BASE + i, 0);
++		if (ret < 0)
++			return ret;
++		ret = aw21024_write(chip, 0x4a + i, 255);
++		if (ret < 0)
++			return ret;
++	}
++	ret = aw21024_write(chip, AW21024_UPDATE, 0);
++	if (ret < 0)
++		return ret;
++	/* RSET sets 18.52 mA nominal full scale. White-balance defaults are 255. */
++	ret = aw21024_write(chip, 0x6e, 255);
++	if (ret < 0)
++		return ret;
++	ret = aw21024_write(chip, 0x00, 1);
++	if (ret < 0)
++		return ret;
++
++	device_for_each_child_node_scoped(dev, child) {
++		struct led_init_data init_data = { .fwnode = child };
++		struct aw21024_led *led;
++		u32 channel;
++
++		ret = fwnode_property_read_u32(child, "reg", &channel);
++		if (ret || channel > AW21024_RGB_COUNT || test_and_set_bit(channel, &used))
++			return -EINVAL;
++		led = &chip->leds[channel];
++		led->chip = chip;
++		led->channel = channel;
++		led->cdev.max_brightness = channel == AW21024_RGB_COUNT ? 100 : 255;
++		led->cdev.brightness_set_blocking = aw21024_brightness_set;
++		ret = devm_led_classdev_register_ext(dev, &led->cdev, &init_data);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
++static void aw21024_shutdown(struct i2c_client *client)
++{
++	aw21024_off(i2c_get_clientdata(client));
++}
++
++static const struct of_device_id aw21024_of_match[] = {
++	{ .compatible = "awinic,aw21024-camera" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, aw21024_of_match);
++
++static struct i2c_driver aw21024_driver = {
++	.driver = {
++		.name = "aw21024-camera",
++		.of_match_table = aw21024_of_match,
++	},
++	.probe = aw21024_probe,
++	.shutdown = aw21024_shutdown,
++};
++module_i2c_driver(aw21024_driver);
++MODULE_DESCRIPTION("AW21024 camera RGB LEDs and current-limited IR");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/leds/Kconfig b/drivers/leds/Kconfig
+--- a/drivers/leds/Kconfig
++++ b/drivers/leds/Kconfig
+@@ -832,6 +832,13 @@
+ 	  This driver can also be built as a module. If so the module
+ 	  will be called leds-menf21bmc.
+ 
++config LEDS_AW21024_CAMERA
++	tristate "AW21024 camera RGB LEDs"
++	depends on LEDS_CLASS && I2C
++	help
++	  Control twelve RGB outputs on each Asius camera board.
++	  Ten joined IR sinks form one current-limited output.
++
+ config LEDS_IS31FL319X
+ 	tristate "LED Support for ISSI IS31FL319x I2C LED controller family"
+ 	depends on LEDS_CLASS && I2C
+diff --git a/drivers/leds/Makefile b/drivers/leds/Makefile
+--- a/drivers/leds/Makefile
++++ b/drivers/leds/Makefile
+@@ -126,3 +126,4 @@
+ 
+ # Simatic LED drivers
+ obj-y					+= simatic/
++obj-$(CONFIG_LEDS_AW21024_CAMERA)		+= leds-aw21024.o

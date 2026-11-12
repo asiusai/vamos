@@ -200,7 +200,7 @@ index 696fef50f577..20058b7fca04 100644
  };
  
  &apps_rsc {
-@@ -275,8 +366,13 @@ regulators-0 {
+@@ -275,8 +349,13 @@ regulators-0 {
  		vdd-s8-supply = <&vph_pwr>;
  		vdd-l1-l4-l12-l15-supply = <&vreg_s7b_0p536>;
  		vdd-l2-l7-supply = <&vreg_bob_3p296>;
@@ -214,7 +214,7 @@ index 696fef50f577..20058b7fca04 100644
  
  		vreg_s1b_1p84: smps1 {
  			regulator-name = "vreg_s1b_1p84";
-@@ -284,6 +380,12 @@ vreg_s1b_1p84: smps1 {
+@@ -284,6 +363,12 @@ vreg_s1b_1p84: smps1 {
  			regulator-max-microvolt = <2040000>;
  		};
  
@@ -227,7 +227,7 @@ index 696fef50f577..20058b7fca04 100644
  		vreg_s7b_0p536: smps7 {
  			regulator-name = "vreg_s7b_0p536";
  			regulator-min-microvolt = <536000>;
-@@ -299,12 +401,9 @@ vreg_s8b_1p2: smps8 {
+@@ -299,12 +384,9 @@ vreg_s8b_1p2: smps8 {
  
  		vreg_l1b_0p912: ldo1 {
  			regulator-name = "vreg_l1b_0p912";
@@ -241,7 +241,7 @@ index 696fef50f577..20058b7fca04 100644
  		};
  
  		vreg_l2b_3p072: ldo2 {
-@@ -312,19 +411,34 @@ vreg_l2b_3p072: ldo2 {
+@@ -312,19 +394,34 @@ vreg_l2b_3p072: ldo2 {
  			regulator-min-microvolt = <2704000>;
  			regulator-max-microvolt = <3544000>;
  			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
@@ -283,7 +283,7 @@ index 696fef50f577..20058b7fca04 100644
  		};
  
  		vreg_l7b_2p96: ldo7 {
-@@ -337,6 +451,13 @@ vreg_l7b_2p96: ldo7 {
+@@ -337,6 +434,13 @@ vreg_l7b_2p96: ldo7 {
  							RPMH_REGULATOR_MODE_HPM>;
  		};
  
@@ -297,7 +297,7 @@ index 696fef50f577..20058b7fca04 100644
  		vreg_l9b_1p2: ldo9 {
  			regulator-name = "vreg_l9b_1p2";
  			regulator-min-microvolt = <1200000>;
-@@ -347,6 +468,48 @@ vreg_l9b_1p2: ldo9 {
+@@ -347,6 +451,48 @@ vreg_l9b_1p2: ldo9 {
  						   RPMH_REGULATOR_MODE_HPM>;
  		};
  
@@ -346,7 +346,7 @@ index 696fef50f577..20058b7fca04 100644
  		vreg_l17b_1p8: ldo17 {
  			regulator-name = "vreg_l17b_1p8";
  			regulator-min-microvolt = <1800000>;
-@@ -388,18 +551,77 @@ regulators-1 {
+@@ -388,18 +534,77 @@ regulators-1 {
  		vdd-s9-supply = <&vph_pwr>;
  		vdd-s10-supply = <&vph_pwr>;
  		vdd-l1-l12-supply = <&vreg_s1b_1p84>;
@@ -427,7 +427,7 @@ index 696fef50f577..20058b7fca04 100644
  		};
  
  		vreg_l6c_2p96: ldo6 {
-@@ -412,6 +634,20 @@ vreg_l6c_2p96: ldo6 {
+@@ -412,6 +617,20 @@ vreg_l6c_2p96: ldo6 {
  						   RPMH_REGULATOR_MODE_HPM>;
  		};
  
@@ -448,7 +448,7 @@ index 696fef50f577..20058b7fca04 100644
  		vreg_l9c_2p96: ldo9 {
  			regulator-name = "vreg_l9c_2p96";
  			regulator-min-microvolt = <2704000>;
-@@ -427,9 +663,27 @@ vreg_l10c_0p88: ldo10 {
+@@ -427,9 +646,27 @@ vreg_l10c_0p88: ldo10 {
  			regulator-min-microvolt = <720000>;
  			regulator-max-microvolt = <1048000>;
  			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
@@ -479,7 +479,7 @@ index 696fef50f577..20058b7fca04 100644
  		};
  
  		vreg_bob_3p296: bob {
-@@ -448,6 +702,9 @@ &gcc {
+@@ -448,6 +685,9 @@ &gcc {
  			   <GCC_MSS_Q6SS_BOOT_CLK_SRC>,
  			   <GCC_MSS_Q6_MEMNOC_AXI_CLK>,
  			   <GCC_MSS_SNOC_AXI_CLK>,
@@ -489,7 +489,7 @@ index 696fef50f577..20058b7fca04 100644
  			   <GCC_SEC_CTRL_CLK_SRC>,
  			   <GCC_WPSS_AHB_BDG_MST_CLK>,
  			   <GCC_WPSS_AHB_CLK>,
-@@ -467,13 +724,13 @@ &gpu {
+@@ -467,13 +707,13 @@ &gpu {
  };
  
  &gpu_zap_shader {
@@ -507,7 +507,7 @@ index 696fef50f577..20058b7fca04 100644
  };
  
  /* Pin 27, 28 in GPIO header */
-@@ -542,19 +799,18 @@ &pcie1 {
+@@ -542,19 +782,18 @@ &pcie1 {
  	perst-gpios = <&tlmm 2 GPIO_ACTIVE_LOW>;
  	wake-gpios = <&tlmm 3 GPIO_ACTIVE_HIGH>;
  
@@ -537,7 +537,7 @@ index 696fef50f577..20058b7fca04 100644
  
  	status = "okay";
  };
-@@ -572,6 +828,14 @@ pm7325_adc_default: adc-default-state {
+@@ -572,6 +811,14 @@ pm7325_adc_default: adc-default-state {
  		function = PMIC_GPIO_FUNC_NORMAL;
  		bias-high-impedance;
  	};
@@ -552,7 +552,7 @@ index 696fef50f577..20058b7fca04 100644
  };
  
  &pm7325_temp_alarm {
-@@ -662,23 +926,27 @@ channel@14a {
+@@ -662,23 +909,27 @@ channel@14a {
  };
  
  &pon_pwrkey {
@@ -586,7 +586,7 @@ index 696fef50f577..20058b7fca04 100644
  		reg = <0>;
  
  		spi-max-frequency = <104000000>;
-@@ -703,7 +971,7 @@ &remoteproc_adsp {
+@@ -703,7 +954,7 @@ &remoteproc_adsp {
  };
  
  &remoteproc_cdsp {
@@ -595,7 +595,7 @@ index 696fef50f577..20058b7fca04 100644
  	status = "okay";
  };
  
-@@ -715,7 +983,7 @@ &sdhc_1 {
+@@ -715,7 +966,7 @@ &sdhc_1 {
  	vmmc-supply = <&vreg_l7b_2p96>;
  	vqmmc-supply = <&vreg_l19b_1p8>;
  
@@ -604,7 +604,7 @@ index 696fef50f577..20058b7fca04 100644
  };
  
  &sdhc_2 {
-@@ -726,27 +994,43 @@ &sdhc_2 {
+@@ -726,27 +977,43 @@ &sdhc_2 {
  	vqmmc-supply = <&vreg_l6c_2p96>;
  
  	cd-gpios = <&tlmm 91 GPIO_ACTIVE_LOW>;
@@ -654,7 +654,7 @@ index 696fef50f577..20058b7fca04 100644
  		};
  
  		platform {
-@@ -754,15 +1038,15 @@ platform {
+@@ -754,15 +1021,15 @@ platform {
  		};
  	};
  
@@ -676,7 +676,7 @@ index 696fef50f577..20058b7fca04 100644
  		};
  
  		platform {
-@@ -774,17 +1058,23 @@ platform {
+@@ -774,17 +1041,23 @@ platform {
  /* Pin 11, 29, 31, 32 in GPIO header */
  &spi7 {
  	qcom,enable-gsi-dma;
@@ -703,7 +703,7 @@ index 696fef50f577..20058b7fca04 100644
 +	/* Header pin 22 (GPIO57) controls the Panda IR illuminator. */
 +	status = "disabled";
  };
-@@ -953,6 +1243,21 @@ wcd_default: wcd-reset-n-active-state {
+@@ -953,6 +1226,21 @@ wcd_default: wcd-reset-n-active-state {
  		bias-disable;
  		output-low;
  	};
@@ -725,7 +725,7 @@ index 696fef50f577..20058b7fca04 100644
  };
  
  &uart5 {
-@@ -1021,10 +1326,18 @@ &usb_2_hsphy {
+@@ -1021,10 +1309,18 @@ &usb_2_hsphy {
  };
  
  &venus {
@@ -745,7 +745,7 @@ index 696fef50f577..20058b7fca04 100644
  &pcie0_clkreq_n {
  	bias-pull-up;
  	drive-strength = <2>;
-@@ -1093,3 +1406,406 @@ &sdc2_data {
+@@ -1093,3 +1389,424 @@ &sdc2_data {
  	bias-pull-up;
  	drive-strength = <10>;
  };
@@ -910,9 +910,9 @@ index 696fef50f577..20058b7fca04 100644
 +		};
 +	};
 +
-+	cam1_leds: led-controller@5b {
-+		compatible = "awinic,aw9523-camera";
-+		reg = <0x5b>;
++	cam1_leds: led-controller@30 {
++		compatible = "awinic,aw21024-camera";
++		reg = <0x30>;
 +		#address-cells = <1>;
 +		#size-cells = <0>;
 +
@@ -936,21 +936,27 @@ index 696fef50f577..20058b7fca04 100644
 +
 +		led@3 {
 +			reg = <3>;
-+			label = "asius:cam1:red:2";
++			label = "asius:cam1:red:1";
 +			led-max-microamp = <18500>;
 +		};
 +
 +		led@4 {
 +			reg = <4>;
-+			label = "asius:cam1:green:2";
++			label = "asius:cam1:green:1";
 +			led-max-microamp = <18500>;
 +		};
 +
 +		led@5 {
 +			reg = <5>;
-+			label = "asius:cam1:blue:2";
++			label = "asius:cam1:blue:1";
 +			led-max-microamp = <18500>;
 +		};
++		led@6 { reg = <6>; label = "asius:cam1:red:2"; led-max-microamp = <18500>; };
++		led@7 { reg = <7>; label = "asius:cam1:green:2"; led-max-microamp = <18500>; };
++		led@8 { reg = <8>; label = "asius:cam1:blue:2"; led-max-microamp = <18500>; };
++		led@9 { reg = <9>; label = "asius:cam1:red:3"; led-max-microamp = <18500>; };
++		led@a { reg = <10>; label = "asius:cam1:green:3"; led-max-microamp = <18500>; };
++		led@b { reg = <11>; label = "asius:cam1:blue:3"; led-max-microamp = <18500>; };
 +	};
 +};
 +
@@ -979,9 +985,9 @@ index 696fef50f577..20058b7fca04 100644
 +		};
 +	};
 +
-+	cam2_leds: led-controller@5b {
-+		compatible = "awinic,aw9523-camera";
-+		reg = <0x5b>;
++	cam2_leds: led-controller@30 {
++		compatible = "awinic,aw21024-camera";
++		reg = <0x30>;
 +		#address-cells = <1>;
 +		#size-cells = <0>;
 +
@@ -989,46 +995,52 @@ index 696fef50f577..20058b7fca04 100644
 +			reg = <0>;
 +			label = "asius:cam2:red:0";
 +			led-max-microamp = <18500>;
-+			linux,default-trigger = "asius-boot-6-r";
++			linux,default-trigger = "asius-boot-1-r";
 +		};
 +
 +		led@1 {
 +			reg = <1>;
 +			label = "asius:cam2:green:0";
 +			led-max-microamp = <18500>;
-+			linux,default-trigger = "asius-boot-6-g";
++			linux,default-trigger = "asius-boot-1-g";
 +		};
 +
 +		led@2 {
 +			reg = <2>;
 +			label = "asius:cam2:blue:0";
 +			led-max-microamp = <18500>;
-+			linux,default-trigger = "asius-boot-6-b";
++			linux,default-trigger = "asius-boot-1-b";
 +		};
 +
 +		led@3 {
 +			reg = <3>;
-+			label = "asius:cam2:red:2";
++			label = "asius:cam2:red:1";
 +			led-max-microamp = <18500>;
-+			linux,default-trigger = "asius-boot-4-r";
++			linux,default-trigger = "asius-boot-1-r";
 +		};
 +
 +		led@4 {
 +			reg = <4>;
-+			label = "asius:cam2:green:2";
++			label = "asius:cam2:green:1";
 +			led-max-microamp = <18500>;
-+			linux,default-trigger = "asius-boot-4-g";
++			linux,default-trigger = "asius-boot-1-g";
 +		};
 +
 +		led@5 {
 +			reg = <5>;
-+			label = "asius:cam2:blue:2";
++			label = "asius:cam2:blue:1";
 +			led-max-microamp = <18500>;
-+			linux,default-trigger = "asius-boot-4-b";
++			linux,default-trigger = "asius-boot-1-b";
 +		};
 +
-+		led@6 {
-+			reg = <6>;
++		led@6 { reg = <6>; label = "asius:cam2:red:2"; linux,default-trigger = "asius-boot-1-r"; };
++		led@7 { reg = <7>; label = "asius:cam2:green:2"; linux,default-trigger = "asius-boot-1-g"; };
++		led@8 { reg = <8>; label = "asius:cam2:blue:2"; linux,default-trigger = "asius-boot-1-b"; };
++		led@9 { reg = <9>; label = "asius:cam2:red:3"; linux,default-trigger = "asius-boot-1-r"; };
++		led@a { reg = <10>; label = "asius:cam2:green:3"; linux,default-trigger = "asius-boot-1-g"; };
++		led@b { reg = <11>; label = "asius:cam2:blue:3"; linux,default-trigger = "asius-boot-1-b"; };
++		led@c {
++			reg = <12>;
 +			label = "asius:cam2:ir";
 +			led-max-microamp = <150000>;
 +		};
@@ -1056,9 +1068,9 @@ index 696fef50f577..20058b7fca04 100644
 +		};
 +	};
 +
-+	cam3_leds: led-controller@5b {
-+		compatible = "awinic,aw9523-camera";
-+		reg = <0x5b>;
++	cam3_leds: led-controller@30 {
++		compatible = "awinic,aw21024-camera";
++		reg = <0x30>;
 +		#address-cells = <1>;
 +		#size-cells = <0>;
 +
@@ -1066,46 +1078,52 @@ index 696fef50f577..20058b7fca04 100644
 +			reg = <0>;
 +			label = "asius:cam3:red:0";
 +			led-max-microamp = <18500>;
-+			linux,default-trigger = "asius-boot-3-r";
++			linux,default-trigger = "asius-boot-1-r";
 +		};
 +
 +		led@1 {
 +			reg = <1>;
 +			label = "asius:cam3:green:0";
 +			led-max-microamp = <18500>;
-+			linux,default-trigger = "asius-boot-3-g";
++			linux,default-trigger = "asius-boot-1-g";
 +		};
 +
 +		led@2 {
 +			reg = <2>;
 +			label = "asius:cam3:blue:0";
 +			led-max-microamp = <18500>;
-+			linux,default-trigger = "asius-boot-3-b";
++			linux,default-trigger = "asius-boot-1-b";
 +		};
 +
 +		led@3 {
 +			reg = <3>;
-+			label = "asius:cam3:red:2";
++			label = "asius:cam3:red:1";
 +			led-max-microamp = <18500>;
 +			linux,default-trigger = "asius-boot-1-r";
 +		};
 +
 +		led@4 {
 +			reg = <4>;
-+			label = "asius:cam3:green:2";
++			label = "asius:cam3:green:1";
 +			led-max-microamp = <18500>;
 +			linux,default-trigger = "asius-boot-1-g";
 +		};
 +
 +		led@5 {
 +			reg = <5>;
-+			label = "asius:cam3:blue:2";
++			label = "asius:cam3:blue:1";
 +			led-max-microamp = <18500>;
 +			linux,default-trigger = "asius-boot-1-b";
 +		};
 +
-+		led@6 {
-+			reg = <6>;
++		led@6 { reg = <6>; label = "asius:cam3:red:2"; linux,default-trigger = "asius-boot-1-r"; };
++		led@7 { reg = <7>; label = "asius:cam3:green:2"; linux,default-trigger = "asius-boot-1-g"; };
++		led@8 { reg = <8>; label = "asius:cam3:blue:2"; linux,default-trigger = "asius-boot-1-b"; };
++		led@9 { reg = <9>; label = "asius:cam3:red:3"; linux,default-trigger = "asius-boot-1-r"; };
++		led@a { reg = <10>; label = "asius:cam3:green:3"; linux,default-trigger = "asius-boot-1-g"; };
++		led@b { reg = <11>; label = "asius:cam3:blue:3"; linux,default-trigger = "asius-boot-1-b"; };
++		led@c {
++			reg = <12>;
 +			label = "asius:cam3:ir";
 +			led-max-microamp = <150000>;
 +		};

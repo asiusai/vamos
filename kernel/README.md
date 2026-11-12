@@ -10,11 +10,12 @@ The external USB PHY uses the mainline lane mapping. Transmit calibration is
 selected in the board device tree: mode 0 and QMP v4 tap 31 on the external
 Dragon port. The shared SoC defaults and internal USB controller are unchanged.
 
-The AW9523 camera LED driver exposes six RGB sinks per board. It initializes
-all sixteen currents to zero before LED mode. Each road board also exposes
-one IR output, from 0 to 100 percent. Ten joined sinks are capped at DIM 206,
-giving 149.45 mA nominal total. The cabin board has no IR control.
-The global half-current setting limits RGB full scale to 18.5 mA nominal.
+The AW21024 camera LED driver exposes twelve RGB sinks per board at I2C address 0x30.
+It initializes all 24 brightness registers to zero before enabling outputs.
+Each road board also exposes one IR output, from 0 to 100 percent.
+Ten joined sinks are capped at BR 206, giving 149.02 mA nominal total with RSET 4.32 kohm.
+The cabin board has no IR control. RSET limits each RGB sink to 18.52 mA nominal.
+RGB and IR updates share a mutex and the hardware UPDATE latch.
 
 ## Patch scope and provenance
 
