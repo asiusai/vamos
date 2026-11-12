@@ -19,7 +19,8 @@ jobs:
           python-version: '3.12'
 
       - name: install pinned host dependencies
-        run: python3 -m pip install --require-hashes --only-binary=:all: -r tools/flash/requirements-build.txt
+        run: |
+          python3 -m pip install --require-hashes --only-binary=:all: -r tools/flash/requirements-build.txt
 
       - name: run host-side tests
         env:
