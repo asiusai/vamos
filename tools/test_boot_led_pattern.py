@@ -14,14 +14,15 @@ class BootLedPatternTests(unittest.TestCase):
     self.assertIn("asius_boot_color[3] = { 0, 0, 255 }", patch)
 
   def test_breath_has_visible_floor_on_all_eight_leds(self):
-    self.assertEqual(levels(0), [1] * 8)
-    self.assertEqual(levels(1.2), [6] * 8)
+    self.assertEqual(levels(0), [257] * 8)
+    self.assertEqual(levels(1.2), [1285] * 8)
     for frame in range(180):
       values = levels(frame / 60.)
       self.assertEqual(values, levels(frame / 60. + 3.))
       self.assertEqual(len(values), 8)
       self.assertEqual(len(set(values)), 1)
-      self.assertTrue(1 <= values[0] <= 6)
+      self.assertTrue(257 <= values[0] <= 1285)
+    self.assertGreater(len({levels(frame / 60.)[0] for frame in range(180)}), 100)
 
 
 if __name__ == "__main__":

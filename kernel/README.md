@@ -16,6 +16,8 @@ Each road board also exposes one IR output, from 0 to 100 percent.
 Ten joined sinks are capped at BR 206, giving 149.02 mA nominal total with RSET 4.32 kohm.
 The cabin board has no IR control. RSET limits each RGB sink to 18.52 mA nominal.
 RGB and IR updates share a mutex and the hardware UPDATE latch.
+RGB brightness uses a 0-65535 scale, with per-channel current scaling and PWM for smooth dim fades.
+The blue startup curve peaks at 5/255 equivalent brightness. IR retains its existing 0-100 scale and current cap.
 
 ## Patch scope and provenance
 

@@ -5,7 +5,7 @@ diff --git a/drivers/leds/leds-aw21024.c b/drivers/leds/leds-aw21024.c
 new file mode 100644
 --- /dev/null
 +++ b/drivers/leds/leds-aw21024.c
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,195 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/* OUT1..10: joined IR sinks; OUT11..12: unused; OUT13..24: four RGB LEDs. */
 +#include <linux/delay.h>
@@ -18,6 +18,7 @@ new file mode 100644
 +#define AW21024_BR_BASE 0x01
 +#define AW21024_UPDATE 0x49
 +#define AW21024_RGB_COUNT 12
++#define AW21024_RGB_MAX 65535
 +/* RSET 4.32 kohm: 10 * (0.4 * 200 / 4320) * 206 / 256 < 150 mA. */
 +#define AW21024_IR_MAX_BR 206
 +
@@ -31,6 +32,7 @@ new file mode 100644
 +struct aw21024 {
 +	struct i2c_client *client;
 +	struct mutex lock;
++	u8 color_scale[24];
 +	struct aw21024_led leds[AW21024_RGB_COUNT + 1];
 +};
 +
@@ -47,11 +49,34 @@ new file mode 100644
 +	bool ir = led->channel == AW21024_RGB_COUNT;
 +	int first = ir ? 0 : 12 + led->channel;
 +	int count = ir ? 10 : 1;
-+	u8 value = ir ? min_t(unsigned int, brightness, 100) * AW21024_IR_MAX_BR / 100 : brightness;
++	u8 value, scale = 255;
 +	int i, ret;
++
++	if (ir) {
++		value = min_t(unsigned int, brightness, 100) * AW21024_IR_MAX_BR / 100;
++	} else {
++		/* Full PWM resolution at the dim 1..6/255 startup levels. */
++		brightness = min_t(unsigned int, brightness, AW21024_RGB_MAX);
++		scale = max_t(unsigned int, 6, DIV_ROUND_UP(brightness, 257));
++		value = brightness ? max_t(unsigned int, 1,
++			DIV_ROUND_CLOSEST(brightness * 255, 257 * scale)) : 0;
++	}
 +
 +	/* UPDATE latches every BR register. Serialize RGB and the joined IR group. */
 +	mutex_lock(&chip->lock);
++	if (!ir && chip->color_scale[first] != scale) {
++		/* COL is immediate; blank before changing current to avoid a flash. */
++		ret = aw21024_write(chip, AW21024_BR_BASE + first, 0);
++		if (ret < 0)
++			goto clear;
++		ret = aw21024_write(chip, AW21024_UPDATE, 0);
++		if (ret < 0)
++			goto clear;
++		ret = aw21024_write(chip, 0x4a + first, scale);
++		if (ret < 0)
++			goto clear;
++		chip->color_scale[first] = scale;
++	}
 +	for (i = first; i < first + count; i++) {
 +		ret = aw21024_write(chip, AW21024_BR_BASE + i, value);
 +		if (ret < 0)
@@ -121,6 +146,7 @@ new file mode 100644
 +		ret = aw21024_write(chip, 0x4a + i, 255);
 +		if (ret < 0)
 +			return ret;
++		chip->color_scale[i] = 255;
 +	}
 +	ret = aw21024_write(chip, AW21024_UPDATE, 0);
 +	if (ret < 0)
@@ -144,7 +170,7 @@ new file mode 100644
 +		led = &chip->leds[channel];
 +		led->chip = chip;
 +		led->channel = channel;
-+		led->cdev.max_brightness = channel == AW21024_RGB_COUNT ? 100 : 255;
++		led->cdev.max_brightness = channel == AW21024_RGB_COUNT ? 100 : AW21024_RGB_MAX;
 +		led->cdev.brightness_set_blocking = aw21024_brightness_set;
 +		ret = devm_led_classdev_register_ext(dev, &led->cdev, &init_data);
 +		if (ret)
