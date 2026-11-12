@@ -85,6 +85,8 @@ COPY ./kernel/firmware/LICENSES/LICENSE.amdgpu /usr/share/licenses/linux-firmwar
 # Root filesystem overlay — all userspace files at their final paths
 COPY ./userspace/root/ /
 RUN rm -f /etc/sv/dnsmasq/down
+COPY ./userspace/install_resource_policy.sh /tmp/vamos/
+RUN sh /tmp/vamos/install_resource_policy.sh && rm /tmp/vamos/install_resource_policy.sh
 
 # Screenless setup/reset implementations. The source overlay retains the AGNOS
 # zipapps for reference, but they cannot be operated on v1 and waste 47 MiB.

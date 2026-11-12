@@ -1,8 +1,8 @@
 import importlib.util
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import call, patch
 
 
@@ -42,15 +42,16 @@ class HardwarePolicyTest(unittest.TestCase):
     default = self.write(hardware.PROC / "irq/default_smp_affinity", "ff")
     _, governor, frequency = self.gpu()
     affinities = []
-    for irq, action in enumerate(("msm_vidc", "i2c_geni,other", "spi_geni", "spi_geni_extra")):
+    for irq, action in enumerate(("msm_vidc", "i2c_geni,other", "spi_geni", "spi_geni_extra",
+                                  "venus", "988000.i2c", "998000.i2c", "a88000.i2c", "a90000.spi")):
       self.write(hardware.SYS / f"kernel/irq/{irq}/actions", action)
       affinities.append(self.write(hardware.PROC / f"irq/{irq}/smp_affinity_list", "0-7"))
 
     with patch.object(hardware.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "101\n102\n")) as run:
       hardware.initialize()
 
-    self.assertEqual([p.read_text() for p in affinities], ["1", "1", "3", "0-7"])
-    self.assertEqual(default.read_text(), "f")
+    self.assertEqual([p.read_text() for p in affinities], ["2", "2", "3", "0-7", "2", "2", "2", "2", "3"])
+    self.assertEqual(default.read_text(), "ff")
     self.assertEqual(kmsg.stat().st_mode & 0o777, 0o622)
     self.assertEqual(stats.stat().st_mode & 0o777, 0o644)
     self.assertEqual(governor.read_text(), "userspace")

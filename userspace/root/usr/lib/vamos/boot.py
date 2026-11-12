@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
-from vamos import bootdiag
+from vamos import bootdiag, resources
 
 from vamos.update import (
   HEALTHY_MARKER,
@@ -170,6 +170,10 @@ def commit() -> None:
     raise UpdateError("runit stage 1 did not complete")
   if not os.path.ismount("/data"):
     raise UpdateError("persistent userdata is not mounted")
+  try:
+    resources.healthy()
+  except (OSError, RuntimeError) as exc:
+    raise UpdateError(f"resource policy is not healthy: {exc}") from exc
 
   if trial:
     state = load_state()

@@ -27,7 +27,8 @@ if [ -f /ASIUS ] && [ -x /usr/bin/vamos-boot ]; then
 fi
 
 mountpoint -q /dev/pts || mount -t devpts devpts /dev/pts -o mode=0620,gid=5,nosuid,noexec
-mountpoint -q /dev/shm || mount -t tmpfs shm /dev/shm -o mode=1777,nosuid,nodev
+mountpoint -q /dev/shm || mount -t tmpfs shm /dev/shm -o mode=1777,nosuid,nodev,nr_inodes=1M
+mount -o remount,nr_inodes=1M /dev/shm
 
 # Start the audio/compute DSP firmware directly from the already-mounted root
 # while storage recovery and the rest of stage 1 continue. The remoteproc
@@ -39,7 +40,7 @@ fi
 
 # Mount /var, /tmp, /rwtmp as tmpfs early (from fstab, but we need it before services start)
 mountpoint -q /var || mount -t tmpfs tmpfs /var -o rw,nosuid,nodev,size=128M,mode=755
-mountpoint -q /tmp || mount -t tmpfs tmpfs /tmp -o rw,nosuid,nodev,size=150M,mode=1777
+mountpoint -q /tmp || mount -t tmpfs tmpfs /tmp -o rw,nosuid,nodev,size=150M,nr_inodes=1M,mode=1777
 mountpoint -q /rwtmp || mount -t tmpfs tmpfs /rwtmp -o rw,nosuid,nodev,size=100M,mode=1777
 mkdir -p /var/run /var/run/pppd/lock /var/log /var/tmp /var/lib /var/cache /var/chroot/ssh /var/db \
          /var/spool/cron /var/lib/logrotate
@@ -61,16 +62,16 @@ fi
 # debugfs - mount with mode=0755 so non-root users can traverse (needed for msm_vidc)
 mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug -o mode=0755 2>/dev/null || echo "WARN: debugfs not available"
 
-# cgroups - try cgroup2 first, fall back to cgroup1, or skip entirely
+# Native cgroup v2 policy. Recovery services still start after a setup error;
+# boot health refuses activation rather than silently accepting an unbounded OS.
 echo "=> Setting up cgroups..."
 mkdir -p /sys/fs/cgroup
-if mount -t cgroup2 cgroup2 /sys/fs/cgroup -o nosuid,noexec,nodev 2>/dev/null; then
+if mountpoint -q /sys/fs/cgroup || mount -t cgroup2 cgroup2 /sys/fs/cgroup -o nosuid,noexec,nodev; then
     echo "=> cgroup2 mounted successfully"
-elif mount -t cgroup cgroup /sys/fs/cgroup -o nosuid,noexec,nodev 2>/dev/null; then
-    echo "=> cgroup1 mounted successfully"
 else
-    echo "WARN: cgroups not available, continuing without"
+    echo "ERROR: cgroup v2 mount failed"
 fi
+/usr/bin/vamos-resources initialize || echo "ERROR: resource isolation failed; boot health will reject this image"
 
 # Mount /firmware early (before udev) so firmware is available when drivers load
 # The symlink /lib/firmware/updates -> /firmware/image requires /firmware to be mounted

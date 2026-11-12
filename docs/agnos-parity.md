@@ -11,6 +11,7 @@ Source review does not establish hardware validation.
 | Capability | AGNOS | VamOS / Asius v0 |
 | --- | --- | --- |
 | Service supervision | systemd | runit, with a small `systemctl` compatibility shim for operator/openpilot workflows |
+| Background resource isolation | CPU, I/O, memory, and task policy using mixed cgroup controllers | Native cgroup v2 service limits, task I/O priority, and authenticated session promotion |
 | Immutable OS | read-only root with RAM-backed mutable state | read-only root with tmpfs `/var` and `/tmp`; `/home` binds persistent `/data/home` when userdata is available |
 | Persistent state | userdata mounted at `/data` | userdata mounted at `/data` |
 | Rollback-safe OS update | A/B partitions and `abctl` | signed A/B updater, one-shot trial boot, hardware-watchdog rollback, and redundant on-disk state |
@@ -33,8 +34,8 @@ Source review does not establish hardware validation.
 
 | Change | VamOS assessment |
 | --- | --- |
-| Background CPU, I/O, memory, and process limits (`f51a901`) | Useful follow-up. Adapt to native cgroup v2 and runit, then measure camera, model, audio, and service behavior under load. Not implemented here. |
-| Sensor and encoder work moves off background CPUs | Openpilot assigns sensor processing and its detected Dragon GPIO IRQ to CPU 2. Broader Dragon IRQ placement needs separate validation. |
+| Background CPU, I/O, memory, and process limits (`f51a901`) | Implemented with native cgroup v2, runit restart protection, and PAM session promotion. See the policy and bench results below. |
+| Sensor and encoder work moves off background CPUs | Default IRQs use CPUs 0-1. Dragon Venus and camera I2C use CPU 2; Panda SPI uses CPU 3. Openpilot assigns its sensor GPIO IRQ to CPU 2. |
 | Faster OTA hashing (`d0c5415`) | Already covered by 4 MiB reads in `tools/build/package_ota.py`. Android sparse-image parsing does not apply to the EROFS/ESP payloads. |
 | Boot consolidation and udev removal | Retain VamOS udev and board-specific boot ordering. AGNOS input hotplug permissions repair its udev removal and need no equivalent replacement here. |
 | Boot CPU frequency cap removed (`56acf43`) | Do not copy SDM845 frequency values to Dragon. Keep the current Dragon thermal and power policy. |
@@ -43,8 +44,45 @@ Source review does not establish hardware validation.
 | Nuitka setup and display applications | Screenless setup remains separate. Openpilot's updater packaging changes arrive through the openpilot rebase. |
 
 AGNOS uses mixed cgroup v1/v2 controllers for its older kernel.
-VamOS already gives openpilot a cgroup for complete service cleanup.
-CPU partitioning and memory limits require a separate tested policy; copying AGNOS limits could starve essential Dragon services.
+VamOS uses native cgroup v2 and retains openpilot's existing cgroup cleanup.
+
+### Resource policy
+
+`vamos-resources` configures the hierarchy before runit starts normal services.
+Runit supervises each process outside its resource group, so exhaustion does not kill the restart mechanism.
+
+| Group | CPU and I/O policy | Memory and task limits |
+| --- | --- | --- |
+| Background services combined | CPUs 0-1, CPU weight 6, idle I/O | 512 MiB, no swap, 512 tasks |
+| Each background service or logger | Inherits the background CPU policy | 128 MiB, 128 tasks, complete group killed on OOM |
+| Openpilot | All online CPUs, weight 100, best-effort I/O priority 4, OOM adjustment -500 | No background limits |
+| Authenticated SSH/login sessions and exempt services | All online CPUs, weight 100, best-effort I/O priority 4 | No background limits |
+
+Tasks include threads. Empty foreground CPU sets inherit cores brought online after power saving.
+Exempt services are openpilot's supervisor, the opt-in build runner, serial gettys, boot commit, and hypervisor reboot.
+Early boot daemons, including udev and the boot watchdog, remain outside these service groups.
+PAM promotes authenticated sessions without changing authentication or moving the listening SSH process.
+
+The Dragon's mq-deadline scheduler uses task I/O priorities.
+Its exposed BFQ weights are inactive, so this policy does not promise proportional I/O bandwidth.
+`/tmp` and `/dev/shm` allow 1,048,576 inodes while retaining their byte limits.
+
+Setup failures create `/run/vamos-resources-error` and keep recovery access available.
+Openpilot startup and boot-health commitment require a healthy policy.
+A failed trial retains its rollback watchdog; the boot-commit command cannot bypass this check.
+
+### Resource validation, 2026-11-12
+
+Host validation passed 65 resource, hardware, and updater tests. The ARM userspace image built and passed inspection.
+Four Dragon kernel tests verified CPU inheritance, foreground CPU expansion, memory containment, restart, and task limits.
+Actual runit restarted a disposable service after its 160 MiB allocation exceeded the 128 MiB limit.
+SSH sessions escaped the bounded listener group after authentication.
+Tailscale, Bluetooth, chrony, clock, varwatch, and SSH services remained within their limits during the bench check.
+
+With four CPU workers in the background group, 26 sensor, MSM GPU, encoder, and audio-timing tests passed without skips.
+These checks include camera encoding and segment rotation, but do not establish vehicle performance or an I/O throughput improvement.
+The temporary bench overlay was restored and verified. No OS image was flashed or rebooted for this check.
+Full image boot, A/B trial and rollback, ignition cycles, and sustained vehicle operation remain release checks.
 
 The headless setup and reset behavior intentionally differs from AGNOS. A
 screenless device must not format away its only installer and then wait for UI

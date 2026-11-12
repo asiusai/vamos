@@ -2,10 +2,9 @@
 
 import argparse
 import fcntl
-from pathlib import Path
 import subprocess
 import time
-
+from pathlib import Path
 
 SYS = Path("/sys")
 PROC = Path("/proc")
@@ -92,16 +91,15 @@ def initialize() -> None:
   kmsg.chmod(kmsg.stat().st_mode | 0o222)
   for stats in (SYS / "kernel/debug/ufshcd").glob("*/stats"):
     stats.chmod(stats.stat().st_mode | 0o444)
-  default_affinity = PROC / "irq/default_smp_affinity"
-  if default_affinity.exists():
-    default_affinity.write_text("f")
-
-  affine_irq(1, "msm_vidc")
-  affine_irq(1, "i2c_geni")
+  # Boot resource policy keeps unrelated IRQs on CPUs 0-1. Route workload
+  # interrupts by action name; mainline Dragon uses different names from AGNOS.
+  for action in ("msm_vidc", "venus", "i2c_geni", "988000.i2c", "998000.i2c", "a88000.i2c"):
+    affine_irq(2, action)
   set_gpu_clock()
   raise_thermal_limits()
 
   affine_irq(3, "spi_geni")
+  affine_irq(3, "a90000.spi")
   # pgrep can return more than one SPI worker. Apply the policy to each PID.
   workers = subprocess.run(["pgrep", "-f", "spi0"], capture_output=True, text=True, check=False)
   for pid in workers.stdout.split():

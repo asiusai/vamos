@@ -17,6 +17,7 @@ for svc in /etc/runit/runsvdir/default/*; do
     esac
 
     # Copy the actual service directory (not symlink) to /run
+    rm -rf "/run/runit/service/$name"
     cp -a "$target" "/run/runit/service/$name"
 done
 
@@ -39,6 +40,7 @@ if [ -f /data/github-runner/.runner ]; then
 fi
 
 # Create /var/service pointing to our writable copy
+/usr/bin/vamos-resources prepare /run/runit/service || echo "ERROR: service resource setup failed; recovery remains available"
 ln -sf /run/runit/service /var/service
 
 # Create utmp file for agetty

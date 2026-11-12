@@ -67,7 +67,7 @@ else
   # sudo -u properly inherits groups and applies /etc/security/limits.conf
   RUN_AS_COMMA="sudo -u comma"
 fi
-PANE_CMD="sudo -n /bin/sh -c 'mkdir -p /sys/fs/cgroup/openpilot; echo \$\$ > /sys/fs/cgroup/openpilot/cgroup.procs; exec $RUN_AS_COMMA /usr/bin/bash -l -c /usr/comma/comma.sh'; exec /usr/bin/bash -l"
+PANE_CMD="sudo -n /usr/bin/vamos-resources openpilot $RUN_AS_COMMA /usr/bin/bash -l -c /usr/comma/comma.sh; exec /usr/bin/bash -l"
 
 if sudo -u comma /usr/bin/tmux has-session -t openpilot 2>/dev/null; then
   sudo -u comma /usr/bin/tmux respawn-pane -k -t openpilot:0.0 "$PANE_CMD"

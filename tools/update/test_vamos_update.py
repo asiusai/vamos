@@ -832,7 +832,7 @@ class BootSafetyTest(unittest.TestCase):
     }
     self.patchers = [mock.patch.object(boot, name, path) for name, path in self.paths.items()]
     self.patchers += [mock.patch.object(bootdiag, "BOOTSTATUS", self.directory / "bootstatus"),
-                      mock.patch.object(bootdiag, "diagnose")]
+                      mock.patch.object(bootdiag, "diagnose"), mock.patch.object(boot.resources, "healthy")]
     for patcher in self.patchers:
       patcher.start()
     self.paths["TRIAL_MARKER"].touch()
@@ -849,6 +849,21 @@ class BootSafetyTest(unittest.TestCase):
       with self.assertRaises(update.UpdateError):
         boot.commit()
     commit_boot.assert_not_called()
+
+  def test_resource_failure_keeps_trial_uncommitted_and_watchdog_armed(self) -> None:
+    self.paths["WATCHDOG_READY_MARKER"].touch()
+    with (
+      mock.patch.object(boot.os.path, "ismount", return_value=True),
+      mock.patch.object(boot.resources, "healthy", side_effect=RuntimeError("missing CPU controller")),
+      mock.patch.object(boot, "commit_boot") as commit_boot,
+    ):
+      with self.assertRaisesRegex(update.UpdateError, "resource policy"):
+        boot.commit()
+    commit_boot.assert_not_called()
+    bootdiag.diagnose.assert_not_called()
+    self.assertFalse(self.paths["HEALTHY_MARKER"].exists())
+    self.assertFalse(self.paths["WATCHDOG_DISARMED_MARKER"].exists())
+    self.assertTrue(self.paths["TRIAL_MARKER"].exists())
 
   def test_watchdog_launcher_uses_absolute_python_path(self) -> None:
     self.paths["TRIAL_MARKER"].unlink()
