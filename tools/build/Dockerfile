@@ -75,8 +75,6 @@ COPY ./kernel/firmware/qcom/qcm6490/qupv3fw.elf /lib/firmware/qcom/qcm6490/qupv3
 COPY ./kernel/firmware/qcom/vpu-2.0/venus.mbn /lib/firmware/qcom/vpu-2.0/venus.mbn
 COPY ./kernel/firmware/LICENSES/LICENSE.qcom ./kernel/firmware/LICENSES/NOTICE.qcom /usr/share/licenses/linux-firmware/
 
-# Install AMD firmware after staging the exact openpilot/tinygrad revision.
-COPY ./userspace/install_amd_firmware.py /tmp/vamos/
 COPY ./kernel/firmware/LICENSES/LICENSE.amdgpu /usr/share/licenses/linux-firmware/
 
 # Kernel modules are installed after Docker export in build_system.sh
@@ -219,6 +217,10 @@ RUN chmod +x /usr/local/bin/rootfs-*.sh
 # Read-only rootfs setup
 COPY ./userspace/readonly_setup.sh /tmp/vamos/
 RUN /tmp/vamos/readonly_setup.sh
+
+# Stage this after temporary-directory cleanup. build_system.sh installs the
+# exact openpilot/tinygrad firmware and removes the helper after Docker export.
+COPY ./userspace/install_amd_firmware.py /tmp/vamos/
 
 # Drop non-English locales, man/doc/info pages, and xbps cache
 RUN find /usr/share/locale -maxdepth 1 -mindepth 1 ! -name en_US ! -name en -exec rm -rf {} + && \
