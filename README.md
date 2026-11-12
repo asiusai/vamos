@@ -264,10 +264,10 @@ VamOS locks only its additional Python runtime dependencies. The managed
 openpilot checkout supplies its own dependencies and lock file during image
 assembly. Do not keep a second openpilot dependency snapshot in VamOS.
 
-Clang and Mesa use the same LLVM 22 runtime. Raylib uses the system EGL, GLES
-and DRM libraries, which support Dragon hardware rendering. Its bundled Mesa
-copy lacks the Dragon driver and is removed. Vulkan drivers for unrelated GPUs
-are also removed. `userspace/trim.py` owns this cleanup and uses LLVM strip.
+Clang and Mesa use the same LLVM 22 runtime. The current raylib package contains
+static archives without bundled EGL, GLES or DRM libraries. System graphics
+libraries remain available for Dragon rendering. `userspace/trim.py` checks these
+libraries, removes unrelated Vulkan drivers, and uses LLVM strip for debug sections.
 
 The onboard hub driver loads before AIC8800 firmware. This prevents a late hub
 reset from restarting the radio firmware download.

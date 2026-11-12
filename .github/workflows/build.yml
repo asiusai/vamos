@@ -31,6 +31,7 @@ jobs:
             tools.validate_camerad_vfe_test \
             tools.test_resources \
             tools.test_hardware \
+            tools.test_trim \
             tools.update.test_vamos_update \
             tools.build.test_package_ota
 

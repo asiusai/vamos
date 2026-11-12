@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Trim the staged image after its final dependency installation."""
 import argparse
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 
 def trim(root: Path, strip: str) -> None:
@@ -23,18 +23,12 @@ def trim(root: Path, strip: str) -> None:
       if path.is_file() and not path.is_symlink():
         subprocess.run([strip, "--strip-debug", str(path)], check=True)
 
-  # Raylib's bundled Mesa lacks the Dragon msm driver. Use the system Mesa
-  # libraries for both EGL users and raylib, including hardware rendering.
-  raylib = site / "raylib/install/lib"
+  # Current raylib packages contain static archives only. Graphics consumers
+  # use the system runtime, which must remain present in the staged image.
   for name in ("libEGL.so.1", "libGLESv2.so.2", "libdrm.so.2"):
     source = root / "usr/lib" / name
-    destination = raylib / name
-    if not source.exists() or not (destination.exists() or destination.is_symlink()):
+    if not source.is_file():
       raise ValueError(f"missing graphics runtime: {name}")
-    destination.unlink()
-    destination.symlink_to(f"/usr/lib/{name}")
-  for path in raylib.glob("libgallium-*.so"):
-    path.unlink()
 
   # These Vulkan drivers target other GPUs. Keep freedreno and the software
   # renderer for Dragon operation and diagnostics.

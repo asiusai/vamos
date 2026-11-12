@@ -239,7 +239,7 @@ else
 fi
 
 # Run after both dependency installations so the final uv sync cannot restore
-# test suites, debug information or the redundant software-only Mesa runtime.
+# test suites or debug information. Check the system graphics runtime as well.
 echo "Trimming runtime dependencies"
 exec_as_root python3 "$DIR/userspace/trim.py" "$ROOTFS_DIR" --strip /usr/lib/llvm21/bin/llvm-strip
 echo "Deduplicating immutable Python environment files"
