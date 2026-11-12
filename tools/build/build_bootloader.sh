@@ -10,7 +10,7 @@ EDL_SOURCE="$DIR/tools/boot/edl_efi.S"
 
 GRUB_PACKAGE_VERSION="2.12-1ubuntu7.3"
 GRUB_PACKAGE_SHA256="d43219525621449cd795dd0a932f28729ea7da391115d84436c90521ab30ed31"
-GRUB_PACKAGE_URL="https://launchpad.net/ubuntu/+archive/primary/+files/grub-efi-arm64-bin_${GRUB_PACKAGE_VERSION}_arm64.deb"
+GRUB_PACKAGE_URL="https://ports.ubuntu.com/pool/main/g/grub2-unsigned/grub-efi-arm64-bin_${GRUB_PACKAGE_VERSION}_arm64.deb"
 GRUB_CACHE="$BUILD_DIR/grub-arm64"
 
 if ! command -v grub-mkstandalone >/dev/null 2>&1; then
