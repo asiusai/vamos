@@ -40,6 +40,8 @@ class HardwarePolicyTest(unittest.TestCase):
     stats = self.write(hardware.SYS / "kernel/debug/ufshcd/ufs/stats", "")
     stats.chmod(0o600)
     default = self.write(hardware.PROC / "irq/default_smp_affinity", "ff")
+    camera_latency = self.write(hardware.SYS / "devices/system/cpu/cpu6/power/pm_qos_resume_latency_us", "0")
+    other_latency = self.write(hardware.SYS / "devices/system/cpu/cpu7/power/pm_qos_resume_latency_us", "0")
     _, governor, frequency = self.gpu()
     affinities = []
     for irq, action in enumerate(("msm_vidc", "i2c_geni,other", "spi_geni", "spi_geni_extra",
@@ -52,6 +54,8 @@ class HardwarePolicyTest(unittest.TestCase):
 
     self.assertEqual([p.read_text() for p in affinities], ["2", "2", "3", "0-7", "2", "2", "2", "2", "3"])
     self.assertEqual(default.read_text(), "ff")
+    self.assertEqual(camera_latency.read_text(), "100")
+    self.assertEqual(other_latency.read_text(), "0")
     self.assertEqual(kmsg.stat().st_mode & 0o777, 0o622)
     self.assertEqual(stats.stat().st_mode & 0o777, 0o644)
     self.assertEqual(governor.read_text(), "userspace")

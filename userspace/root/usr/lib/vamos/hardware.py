@@ -95,6 +95,10 @@ def initialize() -> None:
   # interrupts by action name; mainline Dragon uses different names from AGNOS.
   for action in ("msm_vidc", "venus", "i2c_geni", "988000.i2c", "998000.i2c", "a88000.i2c"):
     affine_irq(2, action)
+  # Camera DMA timestamps are sampled in the IRQ on CPU 6. Its deep idle
+  # states take over 1 ms to exit, exceeding the camera timing budget.
+  # WFI remains available; openpilot offlines this core while idle.
+  (SYS / "devices/system/cpu/cpu6/power/pm_qos_resume_latency_us").write_text("100")
   set_gpu_clock()
   raise_thermal_limits()
 
