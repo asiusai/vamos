@@ -55,6 +55,9 @@ jobs:
             ccache-kernel-${{ steps.kernel-submodule.outputs.ref }}-
             ccache-kernel-
 
+      - name: test AudioReach topology bounds
+        run: python3 -m unittest tools.test_audioreach_topology
+
       - name: build kernel
         run: ./vamos build kernel
 

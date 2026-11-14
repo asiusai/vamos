@@ -82,7 +82,13 @@ def raise_thermal_limits() -> None:
         trip_type = (zone / f"trip_point_{i}_type").read_text().strip()
       except (OSError, ValueError):
         continue
-      if trip_type in ("passive", "hot") and temp in trip_overrides:
+      if trip_type not in ("passive", "hot"):
+        continue
+      if zone_type.startswith("gpuss") and i < 3:
+        # The Dragon DTS orders GPU passive trips before its critical trip.
+        # Select fixed limits so repeated initialization cannot raise them again.
+        temp_path.write_text(str((105000, 108000, 109000)[i]))
+      elif temp in trip_overrides:
         temp_path.write_text(str(trip_overrides[temp]))
 
 

@@ -58,6 +58,31 @@ by subsystem. Original authors remain credited in patch headers and source.
 | 0098 | Resolve AIC8800D80 private Bluetooth addresses in Linux to preserve the pairing address transcript |
 | 0099-0101 | TrustZone SPI NOR access through SCM and MTD, from Junhao Xie and Armbian; limit transfers to 64 KiB |
 | 0102 | Give Dragon EL2 shared buffers access for both the current caller and HLOS |
+| 0103-0105 | Bound GENI GPI SPI transfers, handle missing IOMMU trace devices, and fix standalone GPI I2C reads |
+| 0106-0108 | Restore GCC power-domain retention flags and runtime PM |
+| 0109-0114 | Correct AudioReach buffer release, graph teardown, ring wrap and hardware-pointer reset |
+| 0115, 0117 | Bound AudioReach topology configuration copies, tuple headers and offsets |
+| 0116 | Add intermediate GPU thermal trips before the critical trip |
+
+Patches 0103-0116 come from the pinned
+[Armbian QCS6490 series](https://github.com/armbian/build/tree/c17c62a7c4cf435de60e650831274a9291ced2c2/patch/kernel/archive/qcs6490-7.3).
+Their headers retain the original authors and upstream commit references.
+Patch 0117 completes the topology parser bounds checks.
+Run `python3 -m unittest tools.test_audioreach_topology` to test the actual patched parser with AddressSanitizer and UndefinedBehaviorSanitizer.
+Cases cover valid configuration blobs, truncated headers, invalid sizes, tuple traversal and allocation failure.
+
+The new GPU passive trips start at 100 and 105 degrees Celsius.
+Userspace sets the three GPU passive trips to 105, 108 and 109 degrees Celsius, including after repeated initialization.
+The critical trip remains 110 degrees Celsius.
+Qualify audio restart, IMU transfers, storage, USB, PCIe and thermal policy after kernel changes.
+
+The 2026-11-14 Dragon Q6A bench run passed 12 PCM playback cycles and three forced-underrun recoveries.
+Three sound-card reattachments with playback passed; the previous kernel failed its first reattachment with a DSP buffer-allocation error.
+The native camera suite passed eight tests with two expected platform skips. All three live video streams passed at 20 FPS.
+Storage write/read verification, repeated GPU policy initialization, and simulated uncommitted-trial fallback also passed.
+The installed kernel, both DTBs, hardware policy, and module files matched the built artifacts.
+Direct `qcom-apm` unbind/rebind failed because APR removed its service port without registering it again. Reboot restored audio.
+Panda SPI, IMU transfers, audible speaker output, full suspend/resume, and thermal-load behavior still require hardware qualification.
 
 The upstream Dragon DTS uses a different firmware memory layout. Its board
 support replaces the old full-board addition, but the Asius carveouts and

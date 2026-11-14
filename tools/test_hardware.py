@@ -93,6 +93,21 @@ class HardwarePolicyTest(unittest.TestCase):
     hardware.raise_thermal_limits()
     self.assertEqual([p.read_text() for p in temps], ["100000", "105000", "100000", "90000", "85000"])
 
+  def test_gpu_trips_remain_ordered_across_repeated_initialization(self):
+    trips = []
+    for index in range(2):
+      zone = hardware.SYS / f"class/thermal/thermal_zone{index}"
+      self.write(zone / "type", f"gpuss{index}-thermal")
+      temps = []
+      for trip, temp in enumerate((95000, 100000, 105000, 110000)):
+        self.write(zone / f"trip_point_{trip}_type", "critical" if trip == 3 else "passive")
+        temps.append(self.write(zone / f"trip_point_{trip}_temp", str(temp)))
+      trips.append(temps)
+    for _ in range(3):
+      hardware.raise_thermal_limits()
+      for temps in trips:
+        self.assertEqual([p.read_text() for p in temps], ["105000", "108000", "109000", "110000"])
+
   def panda_pins(self, base):
     root = hardware.SYS / "class/gpio"
     self.write(root / f"gpiochip{base}/label", "f100000.pinctrl\n")
