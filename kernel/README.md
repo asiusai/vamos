@@ -19,6 +19,9 @@ RGB and IR updates share a mutex and the hardware UPDATE latch.
 RGB brightness uses a 0-65535 scale, with per-channel current scaling and PWM for smooth dim fades.
 The blue startup curve peaks at 5/255 equivalent brightness. IR retains its existing 0-100 scale and current cap.
 
+CAM1 uses four CSI-2 lanes at 364 MHz link frequency. CAM2 and CAM3 use two lanes.
+The sensor and receiver endpoints must agree. Deploy the matching kernel and device tree together.
+
 ## Patch scope and provenance
 
 The 6.18 series had 57 patches. The 7.2 series consolidates the remaining changes
