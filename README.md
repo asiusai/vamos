@@ -99,6 +99,8 @@ The `devices` command and command help need no additional Python packages.
 Build a standalone executable with `bash tools/build/build_cli.sh` after installing `tools/flash/requirements-build.txt` in a virtual environment.
 
 Fresh devices accept `comma/comma` through physical USB NCM at `192.168.42.2` and UART.
+The openpilot and app Developer settings provide a **Default USB/UART passwords** toggle, enabled by default.
+Changing it requires confirmed ignition-off status. Pairing and claiming do not change it.
 Remote SSH requires an individual authorized key. There is no shared bootstrap key.
 Users can change their password with `passwd`. Normal OS updates preserve this change.
 The boot firmware

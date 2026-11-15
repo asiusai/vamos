@@ -92,4 +92,4 @@ UsePAM yes
 # Password access is only for USB NCM. The sshd service installs the ingress
 # firewall before listening, so a packet addressed here on Wi-Fi is rejected.
 Match LocalAddress 192.168.42.2 User comma
-    PasswordAuthentication yes
+    Include /run/vamos-physical-ssh.conf

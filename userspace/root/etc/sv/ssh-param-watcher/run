@@ -1,5 +1,5 @@
 #!/bin/sh
-# ssh-param-watcher - watches /data/params/d/SshEnabled and runs set_ssh.sh on value changes
+# Apply manual SSH and physical password settings after atomic parameter changes.
 exec 2>&1
 
 WATCH_FILE="/data/params/d/SshEnabled"
@@ -13,6 +13,7 @@ get_value() {
 
 # Run once at startup
 /usr/comma/set_ssh.sh 2>/dev/null || true
+/usr/bin/python3 /usr/lib/vamos/physical_login.py --reload
 get_value > "$STATE_FILE"
 
 # Wait for the params directory to exist
@@ -24,6 +25,10 @@ done
 # inode atomically, which would otherwise terminate the watcher.
 WATCH_FILENAME=$(basename "$WATCH_FILE")
 exec inotifywait -m -e modify,create,delete,move "$WATCH_DIR" 2>/dev/null | while read -r dir event file; do
+  if [ "$file" = "PhysicalPasswordLogin" ]; then
+    /usr/bin/python3 /usr/lib/vamos/physical_login.py --reload
+    continue
+  fi
   [ "$file" = "$WATCH_FILENAME" ] || continue
   NEW_VALUE=$(get_value)
   LAST_VALUE=$(cat "$STATE_FILE" 2>/dev/null || echo "")

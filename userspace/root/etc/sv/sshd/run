@@ -2,6 +2,7 @@
 set -eu
 exec 2>&1
 umask 077
+/usr/bin/python3 /usr/lib/vamos/physical_login.py || exit 1
 mkdir -p /data/etc/ssh /var/chroot/ssh
 
 # Install the interface guard before accepting any connections.

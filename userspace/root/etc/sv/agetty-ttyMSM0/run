@@ -1,3 +1,4 @@
 #!/bin/sh
 # Serial console on Qualcomm MSM serial port
+[ -f /run/vamos-physical-login-enabled ] || exec sleep infinity
 exec agetty -L 115200 ttyMSM0 linux

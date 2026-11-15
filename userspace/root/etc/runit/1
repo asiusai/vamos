@@ -240,6 +240,7 @@ chmod 700 /data/etc/NetworkManager/system-connections 2>/dev/null || true
 /usr/comma/persist-password restore || exit 1
 # Keep physical recovery available when identity storage is damaged.
 /usr/bin/vamos-identity initialize || echo "ERROR: identity unavailable; openpilot will not start"
+/usr/bin/python3 /usr/lib/vamos/physical_login.py || echo "ERROR: physical password policy unavailable"
 echo "=> Setting hostname..."
 /usr/comma/set-hostname.sh
 
