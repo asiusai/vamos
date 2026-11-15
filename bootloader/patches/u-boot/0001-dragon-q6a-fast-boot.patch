@@ -1581,9 +1581,9 @@ index 00000000000..80e9f537dcc
 +	   dspboot ${dspfw_addr_r} ${filesize} 1 8b800000 2800000 &&
 +	   fatload ${vamos_interface} ${vamos_device}:${vamos_esp} ${dspfw_addr_r} EFI/vamos/cdsp.mbn &&
 +	   dspboot ${dspfw_addr_r} ${filesize} 12 8e000000 1e00000 &&
-+	   sllaunch &&
 +	   fatload ${vamos_interface} ${vamos_device}:${vamos_esp} ${qupfw_addr_r} EFI/vamos/qupv3fw.elf &&
 +	   genifw ${qupfw_addr_r} ${filesize} &&
++	   sllaunch &&
 +	   fatload ${vamos_interface} ${vamos_device}:${vamos_esp} ${kernel_addr_r} EFI/vamos/Image &&
 +	   fatload ${vamos_interface} ${vamos_device}:${vamos_esp} ${fdt_addr_r} ${vamos_dtb}; then
 +		fdt addr ${fdt_addr_r};

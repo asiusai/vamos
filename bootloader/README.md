@@ -77,7 +77,9 @@ raw arm64 `Image` plus the slot DTB. This deliberately keeps the current OTA
 state format readable by both U-Boot and the old GRUB/UEFI path during rollout.
 
 U-Boot loads `adsp.mbn`, `cdsp.mbn` and `qupv3fw.elf` from the selected ESP's
-`EFI/vamos` directory. It does not read the OS filesystem. EROFS compression
+`EFI/vamos` directory. Initialize GENI firmware before the Secure Launch EL2 handoff.
+This ordering avoids the cold-start reset observed on Dragon.
+U-Boot does not read the OS filesystem. EROFS compression
 therefore needs only a Linux decoder. `./vamos build esp` includes the same
 pinned DSP firmware used by the Linux runtime.
 
