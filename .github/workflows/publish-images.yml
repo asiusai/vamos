@@ -29,8 +29,8 @@ jobs:
       AWS_DEFAULT_REGION: auto
       AWS_REQUEST_CHECKSUM_CALCULATION: when_required
       AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
       VAMOS_PUBLIC_URL: ${{ vars.VAMOS_PUBLIC_URL }}
     steps:
       - name: check out release source
@@ -205,14 +205,6 @@ jobs:
             build/release/*.json.sig
           if-no-files-found: error
           retention-days: 90
-
-      - name: configure browser download CORS
-        run: |
-          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3api put-bucket-cors \
-            --bucket "$R2_BUCKET" \
-            --endpoint-url "$endpoint" \
-            --cors-configuration '{"CORSRules":[{"AllowedHeaders":["*"],"AllowedMethods":["GET","HEAD"],"AllowedOrigins":["https://flash.asius.ai","http://localhost:4173","http://localhost:5173"],"ExposeHeaders":["Content-Length","ETag"],"MaxAgeSeconds":3600}]}'
 
       - name: upload immutable R2 images
         run: |
