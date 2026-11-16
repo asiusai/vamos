@@ -17,6 +17,7 @@ import time
 ROOT = Path('/run/vamos-local-video')
 SOCKET = ROOT / 'control.sock'
 INTERFACE = 'wlan0'
+AP_INTERFACE = 'asiusap0'
 ADDRESS = '192.168.43.1'
 LEASE_SECONDS = 120
 
@@ -38,27 +39,20 @@ def stop_with_parent():
 class AccessPoint:
   def __init__(self):
     self.children = []
-    self.restore = None
 
   def start(self, ssid, password):
     if not Path(f'/sys/class/net/{INTERFACE}').exists():
       raise RuntimeError('Device Wi-Fi is unavailable')
+    if Path(f'/sys/class/net/{AP_INTERFACE}').exists():
+      raise RuntimeError('Local video Wi-Fi is already active')
     try:
-      # AIC8800 cannot reliably run the extra AP interface alongside its station.
-      # Temporarily borrow wlan0; retain every saved NetworkManager profile.
-      managed = command('nmcli', '-g', 'GENERAL.NM-MANAGED', 'device', 'show', INTERFACE)
-      if managed != 'yes':
-        raise RuntimeError('Device Wi-Fi is already controlled by another service')
-      uuid = command('nmcli', '-g', 'GENERAL.CON-UUID', 'device', 'show', INTERFACE)
-      self.restore = {'uuid': uuid if uuid != '--' else ''}
-      (ROOT / 'restore.json').write_text(json.dumps(self.restore))
-      command('nmcli', 'device', 'disconnect', INTERFACE, check=False)
-      command('nmcli', 'device', 'set', INTERFACE, 'managed', 'no')
-      time.sleep(1)
-      command('ip', 'address', 'add', ADDRESS + '/24', 'dev', INTERFACE)
+      # NetworkManager owns wlan0; hostapd exclusively owns the reserved AP interface.
+      command('iw', 'dev', INTERFACE, 'interface', 'add', AP_INTERFACE, 'type', '__ap')
+      command('nmcli', 'device', 'set', AP_INTERFACE, 'managed', 'no')
+      command('ip', 'address', 'add', ADDRESS + '/24', 'dev', AP_INTERFACE)
       config = ROOT / 'hostapd.conf'
       config.write_text('\n'.join([
-        f'interface={INTERFACE}', 'driver=nl80211', f'ssid={ssid}',
+        f'interface={AP_INTERFACE}', f'ctrl_interface={ROOT / "hostapd"}', 'driver=nl80211', f'ssid={ssid}',
         'hw_mode=a', 'channel=36', 'ieee80211n=1', 'ieee80211ac=1', 'wmm_enabled=1',
         'ht_capab=[HT40+]', 'vht_oper_chwidth=1', 'vht_oper_centr_freq_seg0_idx=42',
         'auth_algs=1', 'wpa=2', 'wpa_key_mgmt=WPA-PSK',
@@ -70,19 +64,35 @@ class AccessPoint:
       with (ROOT / 'dnsmasq.log').open('w') as output:
         self.children.append(subprocess.Popen([
         'dnsmasq', '--keep-in-foreground', '--conf-file=/dev/null', '--port=0', '--bind-interfaces',
-        f'--interface={INTERFACE}', '--dhcp-range=192.168.43.10,192.168.43.50,255.255.255.0,5m',
+        f'--interface={AP_INTERFACE}', '--dhcp-range=192.168.43.10,192.168.43.50,255.255.255.0,5m',
         '--dhcp-option=3', '--dhcp-option=6', '--dhcp-authoritative',
         f'--dhcp-leasefile={ROOT / "leases"}', f'--pid-file={ROOT / "dnsmasq.pid"}',
         ], stdout=output, stderr=output, preexec_fn=stop_with_parent))
-      time.sleep(1)
-      if not self.healthy():
-        raise RuntimeError('The device could not start local video Wi-Fi')
+      deadline = time.monotonic() + 8
+      while not self.healthy():
+        if any(child.poll() is not None for child in self.children) or time.monotonic() >= deadline:
+          raise RuntimeError('The device could not start local video Wi-Fi')
+        time.sleep(.1)
     except Exception:
       self.stop()
       raise
 
   def healthy(self):
-    return len(self.children) == 2 and all(child.poll() is None for child in self.children)
+    if len(self.children) != 2 or any(child.poll() is not None for child in self.children):
+      return False
+    # A live hostapd process can still have a disabled AP.
+    client_path = ROOT / ('status-' + secrets.token_hex(4))
+    try:
+      with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as client:
+        client.settimeout(.5)
+        client.bind(str(client_path))
+        client.connect(str(ROOT / 'hostapd' / AP_INTERFACE))
+        client.send(b'STATUS')
+        return b'state=ENABLED' in client.recv(16384).splitlines()
+    except OSError:
+      return False
+    finally:
+      client_path.unlink(missing_ok=True)
 
   def stop(self):
     for child in self.children:
@@ -94,15 +104,8 @@ class AccessPoint:
           child.kill()
           child.wait()
     self.children.clear()
-    if self.restore is not None:
-      command('ip', 'address', 'del', ADDRESS + '/24', 'dev', INTERFACE, check=False)
-      command('ip', 'link', 'set', INTERFACE, 'down', check=False)
-      command('iw', 'dev', INTERFACE, 'set', 'type', 'managed', check=False)
-      command('nmcli', 'device', 'set', INTERFACE, 'managed', 'yes')
-      if self.restore['uuid']:
-        command('nmcli', '--wait', '0', 'connection', 'up', 'uuid', self.restore['uuid'], check=False)
-      self.restore = None
-      (ROOT / 'restore.json').unlink(missing_ok=True)
+    if Path(f'/sys/class/net/{AP_INTERFACE}').exists():
+      command('iw', 'dev', AP_INTERFACE, 'del', check=False)
     for name in ('hostapd.conf', 'leases', 'dnsmasq.pid'):
       (ROOT / name).unlink(missing_ok=True)
 
@@ -159,9 +162,7 @@ def serve():
     daemon_lock.close()
     return
   session = Session(AccessPoint())
-  if (ROOT / 'restore.json').exists():
-    session.ap.restore = json.loads((ROOT / 'restore.json').read_text())
-    session.ap.stop()
+  session.ap.stop()
   # SIGTERM must release the radio just like a normal session close.
   def shutdown(_signal, _frame):
     raise SystemExit()

@@ -1,1 +1,2 @@
-OPTS="-u -M -c /etc/wpa_supplicant/wpa_supplicant.conf"
+# NetworkManager adds station interfaces over D-Bus. A catch-all also claims hostapd's interface.
+OPTS="-u"
