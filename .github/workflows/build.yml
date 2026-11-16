@@ -32,8 +32,9 @@ jobs:
             tools.test_resources \
             tools.test_hardware \
             tools.test_physical_login \
-            tools.test_trim \
-            tools.update.test_vamos_update \
+             tools.test_trim \
+             tools.test_download_prebuilt \
+             tools.update.test_vamos_update \
             tools.build.test_package_ota
 
   build-kernel:

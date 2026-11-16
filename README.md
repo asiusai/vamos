@@ -219,12 +219,12 @@ realign the managed checkout, then update its submodules. Release builds set
 reproducible even if `master` moves. System builds use it for openpilot dependencies.
 
 Factory disks use a native ARM64 openpilot build with compiled Chestnut models.
-Run `python3 tools/build/download_prebuilt.py` to download and verify the signed release.
+Run `python3 tools/build/download_prebuilt.py` to fetch and verify the compiled `release-ci` checkout from GitHub.
 Alternatively, put native `tools/release/build_release.sh` output at
 `build/openpilot/openpilot-v0-chestnut.tar.xz`.
 `VAMOS_OPENPILOT_ARCHIVE` selects another archive within this repository.
 Disk builds produce a common `dragon.img` with blank userdata and an optional
-`userdata-openpilot.img` with the flattened, prebuilt `master-ci` checkout. The manual flasher and flash.asius.ai can apply
+`userdata-openpilot.img` with the flattened, prebuilt `release-ci` checkout. The manual flasher and flash.asius.ai can apply
 that payload for a driving device or omit it for a general-purpose vamOS
 device. No profile or role is recorded: executable `/data/continue.sh` is the
 sole opt-in to the openpilot workload.
@@ -366,23 +366,27 @@ VamOS 18.7 passed download, inactive-slot verification, activation, and boot com
 through openpilot on Asius 1. This release uses a new signing key.
 Devices with the retired key need an explicit trust-key update or a factory flash.
 
-The `build and publish vamOS images` workflow runs manually or for an exact
-`vamos-v<VERSION>` tag. It builds the kernel, system image, and ESP on ARM64.
-It downloads the signed native openpilot archive and builds UFS factory images.
+The `build and publish vamOS images` workflow runs when `master` is promoted to `release`.
+Use `git push origin master:release` from the reviewed source checkout. Manual runs also require the `release` branch.
+Increment `userspace/root/VERSION` before each new release. Existing version tags must match the exact source commit.
+It builds the kernel, system image, and ESP on ARM64.
+It fetches compiled openpilot from `release-ci` before building the OS. Publish openpilot first when updating both components.
+Git and LFS integrity checks reject incomplete checkouts. Factory images retain signed manifests and content checksums.
 It signs the OTA manifest and both factory manifests, then uploads objects to R2.
 Factory manifests use `vamos/releases/<VERSION>/flash-ufs.json`. The signed `vamos.json` and
 `vamos.json.sig` are retained both as a 90-day workflow artifact and as durable
 assets on the matching GitHub source release. Finally, the workflow commits
 those same files to the Asius openpilot fork.
 
-Configure these repository secrets:
+Configure these secrets in the `vamos-release` environment:
 
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
-- `R2_ACCOUNT_ID`
-- `R2_BUCKET`
 - `VAMOS_UPDATE_SIGNING_KEY`
 - `OPENPILOT_DEPLOY_KEY` (write deploy key for `asiusai/openpilot`)
+
+Set `R2_ACCOUNT_ID` and `R2_BUCKET` as environment variables. The upload credential needs object access only to `asius-vamos`.
+Bucket CORS is managed separately. Each successful release updates the stable R2 manifest after its versioned objects are uploaded.
 
 Set `VAMOS_PUBLIC_URL` to the public R2 custom-domain origin, currently
 `https://dist.asius.ai`.

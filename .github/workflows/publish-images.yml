@@ -2,15 +2,8 @@ name: build and publish vamOS images
 
 on:
   workflow_dispatch:
-    inputs:
-      publish_latest:
-        description: Update the stable vamos.json pointer
-        required: true
-        type: boolean
-        default: false
   push:
-    tags:
-      - "vamos-v*"
+    branches: [release]
 
 concurrency:
   group: vamos-image-release
@@ -18,6 +11,7 @@ concurrency:
 
 jobs:
   build-and-publish:
+    if: github.ref == 'refs/heads/release'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 240
     environment: vamos-release
@@ -65,14 +59,9 @@ jobs:
             echo "invalid userspace/root/VERSION: $version" >&2
             exit 1
           fi
-          if [[ "$GITHUB_REF" == refs/tags/* ]] && [ "$GITHUB_REF_NAME" != "vamos-v${version}" ]; then
-            echo "tag $GITHUB_REF_NAME does not match VERSION $version (expected vamos-v${version})" >&2
-            exit 1
-          fi
           source_tag="vamos-v${version}"
           if git ls-remote --exit-code origin "refs/tags/$source_tag" >/dev/null 2>&1; then
-            # actions/checkout creates the triggering annotated tag locally.
-            # Force-refresh it so fetching the same tag object is idempotent.
+            # Compare the immutable version tag with this release source.
             git fetch --force origin "refs/tags/$source_tag:refs/tags/$source_tag"
             tagged_commit=$(git rev-list -n 1 "$source_tag")
             if [ "$tagged_commit" != "$GITHUB_SHA" ]; then
@@ -133,12 +122,16 @@ jobs:
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3api head-bucket --bucket "$R2_BUCKET" --endpoint-url "$endpoint"
 
+      - name: fetch compiled openpilot release-ci
+        run: |
+          python3 -m unittest tools.test_download_prebuilt
+          python3 tools/build/download_prebuilt.py
+
       - name: build kernel, root filesystem, ESP, and factory disk
         run: |
           ./vamos build kernel
           ./vamos build system
           ./vamos build esp
-          python3 tools/build/download_prebuilt.py
           ./vamos build disk --storage ufs
 
       - name: validate release images
@@ -259,7 +252,6 @@ jobs:
           git push origin HEAD:master
 
       - name: publish stable R2 manifest last
-        if: startsWith(github.ref, 'refs/tags/vamos-v') || inputs.publish_latest
         run: |
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp build/ota/vamos.json.sig "s3://${R2_BUCKET}/vamos/vamos.json.sig" \

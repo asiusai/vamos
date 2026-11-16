@@ -261,7 +261,7 @@ test ! -e "$OP_DST/.gitmodules"
 python3 - "$OP_DST/build.json" <<"PYMETA"
 import json, sys
 metadata = json.load(open(sys.argv[1]))
-assert metadata["channel"] == "master-ci"
+assert metadata["channel"] == "release-ci"
 assert metadata["openpilot"]["build_style"] == "prebuilt"
 print("Packaged native openpilot " + metadata["openpilot"]["git_commit"])
 PYMETA
