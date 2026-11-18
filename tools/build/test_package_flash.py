@@ -9,6 +9,7 @@ from unittest.mock import patch
 from package_flash import (
   CHUNK_SIZE,
   load_object_cache,
+  main,
   package_base_image,
   package_delta,
   package_programmer,
@@ -17,6 +18,27 @@ from package_flash import (
 
 
 class PackageFlashTest(unittest.TestCase):
+  def test_standalone_factory_packages_without_workload_images(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+      root = Path(temporary)
+      disk = root / "disk.img"
+      disk.write_bytes(b"vamOS" + bytes(16384 - 5))
+      layout = root / "layout.json"
+      layout.write_text(json.dumps({"sector_size": 4096, "partitions": {
+        "persist": {"start_sector": 1, "sectors": 1}, "userdata": {"start_sector": 2},
+      }}))
+      loader = root / "programmer.bin"
+      loader.write_bytes(b"programmer")
+      output = root / "out"
+      with patch("sys.argv", ["package_flash.py", "--image", str(disk), "--layout", str(layout),
+                             "--programmer", str(loader), "--output-dir", str(output), "--version", "18.13"]), \
+           patch("package_flash.OUTPUT_DIR"), patch("package_flash.OBJECT_CACHE"):
+        main()
+      manifest = json.loads((output / "flash.json").read_text())
+      self.assertEqual(manifest["optional_payloads"], {})
+      self.assertEqual(manifest["base"]["image"]["size"], 16384)
+      self.assertTrue(any(operation["operation"] == "program" for operation in manifest["base"]["operations"]))
+
   def test_base_preserves_identity_in_both_erase_and_program_ranges(self) -> None:
     with tempfile.TemporaryDirectory() as temporary:
       root = Path(temporary)

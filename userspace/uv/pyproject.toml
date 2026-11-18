@@ -29,8 +29,30 @@ dependencies = [
   "Pillow==13.0.0",
   # SConstruct imports this even when openpilot's optional tools are disabled.
   "comma-deps-ncurses==6.5.post103",
+
+  # Device workload ABI and build tools. Keep these pinned in VamOS so image
+  # builds do not fetch workload source, models, or build metadata.
+  "sounddevice==0.5.6",
+  "requests==2.34.2",
+  "tqdm==4.70.1",
+  "scons==4.11.1",
+  "pycapnp==2.1.0",
+  "numpy==2.5.3",
+  "comma-deps-capnproto==1.0.1.post103",
+  "comma-deps-acados==0.2.2.post103",
+  "Cython==3.3.1",
+  "comma-deps-ffmpeg==7.1.0.post103",
+  "comma-deps-zstd==1.5.6.post103",
+  "comma-deps-json11==20170411.0.post103",
+  "comma-deps-gcc-arm-none-eabi==13.2.1.post103",
+  "PyJWT[crypto]==2.15.1",
+  "websocket-client==1.9.2",
+  "inputs==0.5",
+  "setproctitle==1.3.7",
+  "jeepney==0.9.0",
+  "zstandard==0.25.0",
+  "comma-deps-raylib==6.0.0.1.post111",
 ]
 
 [tool.uv]
 environments = ["python_version >= '3.12' and python_version < '3.13' and sys_platform == 'linux'"]
-

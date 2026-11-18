@@ -76,9 +76,6 @@ jobs:
             fi
           fi
           echo "VAMOS_VERSION=$version" >> "$GITHUB_ENV"
-          openpilot_ref=$(git ls-remote --exit-code https://github.com/asiusai/openpilot.git refs/heads/master | cut -f1)
-          [[ "$openpilot_ref" =~ ^[0-9a-f]{40}$ ]]
-          echo "VAMOS_OPENPILOT_REF=$openpilot_ref" >> "$GITHUB_ENV"
 
       - name: free runner disk space
         run: |
@@ -118,23 +115,15 @@ jobs:
 
       - name: validate release configuration
         env:
-          OPENPILOT_DEPLOY_KEY: ${{ secrets.OPENPILOT_DEPLOY_KEY }}
           VAMOS_UPDATE_SIGNING_KEY: ${{ secrets.VAMOS_UPDATE_SIGNING_KEY }}
         run: |
           set -euo pipefail
           test -n "$R2_ACCOUNT_ID"
           test -n "$R2_BUCKET"
           test -n "$VAMOS_PUBLIC_URL"
-          test -n "$OPENPILOT_DEPLOY_KEY"
           test -n "$VAMOS_UPDATE_SIGNING_KEY"
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3api head-bucket --bucket "$R2_BUCKET" --endpoint-url "$endpoint"
-
-      - name: fetch compiled openpilot release-ci
-        if: ${{ !inputs.ota_only }}
-        run: |
-          python3 -m unittest tools.test_download_prebuilt
-          python3 tools/build/download_prebuilt.py
 
       - name: build kernel, root filesystem, and ESP
         run: |
@@ -144,6 +133,8 @@ jobs:
 
       - name: build factory disk
         if: ${{ !inputs.ota_only }}
+        env:
+          VAMOS_SKIP_FLASH_BUNDLE: '1'
         run: |
           ./vamos build disk --storage ufs
 
@@ -162,14 +153,10 @@ jobs:
           set -euo pipefail
           test "$(stat -c %s "build/dragon-ufs.img")" -eq 62537072640
           e2fsck -fn "build/userdata-ufs.img"
-          e2fsck -fn "build/userdata-openpilot-ufs.img"
           if debugfs -R 'stat /openpilot' "build/userdata-ufs.img" 2>&1 | grep -q 'Inode:'; then
             echo 'blank userdata unexpectedly contains openpilot' >&2
             exit 1
           fi
-          for file in /openpilot/.git/HEAD /openpilot/prebuilt /continue.sh; do
-            debugfs -R "stat $file" "build/userdata-openpilot-ufs.img" 2>&1 | grep -q 'Inode:'
-          done
 
       - name: package content-addressed update
         run: |
@@ -190,7 +177,6 @@ jobs:
             --image "build/dragon-ufs.img" \
             --layout "build/factory-layout-ufs.json" \
             --userdata "build/userdata-ufs.img" \
-            --openpilot-userdata "build/userdata-openpilot-ufs.img" \
             --output-dir "build/flash-ufs"
           cp "build/flash-ufs/flash.json" "build/release/flash-ufs.json"
 
@@ -246,31 +232,6 @@ jobs:
               --endpoint-url "$endpoint" --cache-control "public,max-age=300" --content-type "$content_type"
           done
 
-      - name: check out openpilot fork
-        uses: actions/checkout@v4
-        with:
-          repository: asiusai/openpilot
-          ssh-key: ${{ secrets.OPENPILOT_DEPLOY_KEY }}
-          path: openpilot
-          ref: master
-
-      - name: publish manifest to openpilot
-        run: |
-          set -euo pipefail
-          destination=openpilot/openpilot/system/hardware/v0
-          cp build/ota/vamos.json "$destination/vamos.json"
-          cp build/ota/vamos.json.sig "$destination/vamos.json.sig"
-          cd openpilot
-          if [ -z "$(git status --porcelain -- openpilot/system/hardware/v0/vamos.json openpilot/system/hardware/v0/vamos.json.sig)" ]; then
-            echo "openpilot already contains this manifest"
-            exit 0
-          fi
-          git add openpilot/system/hardware/v0/vamos.json openpilot/system/hardware/v0/vamos.json.sig
-          git -c user.name="github-actions[bot]" \
-            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -m "Update vamOS manifest to $VAMOS_VERSION"
-          git push origin HEAD:master
-
       - name: publish stable R2 manifest last
         run: |
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
@@ -282,6 +243,15 @@ jobs:
             --endpoint-url "$endpoint" \
             --cache-control "no-cache" \
             --content-type application/json
+
+      - name: publish stable factory manifest
+        if: ${{ !inputs.ota_only }}
+        run: |
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp build/release/flash-ufs.json.sig "s3://${R2_BUCKET}/vamos/flash-ufs.json.sig" \
+            --endpoint-url "$endpoint" --cache-control "no-cache" --content-type application/octet-stream
+          aws s3 cp build/release/flash-ufs.json "s3://${R2_BUCKET}/vamos/flash-ufs.json" \
+            --endpoint-url "$endpoint" --cache-control "no-cache" --content-type application/json
 
       - name: create source release
         env:

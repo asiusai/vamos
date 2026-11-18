@@ -50,11 +50,9 @@ SYSTEM_SIZE=$((10 * 1024 * 1024 * 1024))
 PERSIST_SIZE=$((64 * 1024 * 1024))
 START_SECTOR=$((1024 * 1024 / SECTOR_SIZE))
 
-# Factory releases contain a native build, including the compiled Chestnut models.
-# Keep the archive under the repository so the builder container can read it.
-OP_ARCHIVE="${VAMOS_OPENPILOT_ARCHIVE:-$BUILD_DIR/openpilot/openpilot-v0-chestnut.tar.xz}"
-OP_ARCHIVE="$(realpath "$OP_ARCHIVE")"
-if [ ! -f "$OP_ARCHIVE" ]; then
+# An explicitly supplied local archive can add a native workload payload.
+OP_ARCHIVE="${VAMOS_OPENPILOT_ARCHIVE:-}"
+if [ -n "$OP_ARCHIVE" ] && [ ! -f "$OP_ARCHIVE" ]; then
   echo "ERROR: native openpilot archive not found: $OP_ARCHIVE" >&2
   echo "Set VAMOS_OPENPILOT_ARCHIVE to tools/release/build_release.sh output." >&2
   exit 1
@@ -242,6 +240,7 @@ docker exec "$MOUNT_CONTAINER_ID" chown 1000:1000 "$MOUNT_DIR"
 unmount_image
 e2fsck -fn "$USERDATA_IMG"
 
+if [ -n "$OP_ARCHIVE" ]; then
 echo "== Building optional openpilot userdata =="
 cp --reflink=auto --sparse=always "$USERDATA_IMG" "$USERDATA_OPENPILOT_IMG"
 mount_image "$USERDATA_OPENPILOT_IMG"
@@ -290,6 +289,7 @@ df -h "$(dirname "$OP_DST")"
 
 unmount_image
 e2fsck -fn "$USERDATA_OPENPILOT_IMG"
+fi
 
 echo "== Assembling common factory disk =="
 write_partition "$ESP_A_IMG" "$(partition_start 1)"
@@ -310,6 +310,7 @@ jq -n \
   --argjson persist_sectors "$PERSIST_SECTORS" \
   --argjson userdata_start "$(partition_start 5)" \
   --argjson userdata_sectors "$USERDATA_SECTORS" \
+  --arg workload "$OP_ARCHIVE" \
   '{
     sector_size: $sector_size,
     storage_sectors: $storage_sectors,
@@ -321,13 +322,13 @@ jq -n \
       persist: {start_sector: $persist_start, sectors: $persist_sectors},
       userdata: {start_sector: $userdata_start, sectors: $userdata_sectors}
     },
-    optional_payloads: {
+    optional_payloads: (if $workload == "" then {} else {
       openpilot: {
         baseline: "userdata.img",
         image: "userdata-openpilot.img",
         target_partition: "userdata"
       }
-    }
+    } end)
   }' > "$LAYOUT_JSON"
 
 docker container rm -f "$MOUNT_CONTAINER_ID" >/dev/null
@@ -340,8 +341,11 @@ fi
 trap - EXIT
 
 echo "== Verifying factory images =="
-ls -lh "$DISK_IMG" "$USERDATA_IMG" "$USERDATA_OPENPILOT_IMG" "$LAYOUT_JSON"
-du -h "$DISK_IMG" "$USERDATA_IMG" "$USERDATA_OPENPILOT_IMG"
+ls -lh "$DISK_IMG" "$USERDATA_IMG" "$LAYOUT_JSON"
+du -h "$DISK_IMG" "$USERDATA_IMG"
+if [ -n "$OP_ARCHIVE" ]; then
+  ls -lh "$USERDATA_OPENPILOT_IMG"
+fi
 if [ "$SECTOR_SIZE" -eq 512 ]; then
   sgdisk --print "$DISK_IMG"
 else
@@ -353,13 +357,19 @@ fi
 
 if [ "${VAMOS_SKIP_FLASH_BUNDLE:-0}" != "1" ]; then
   echo "== Building reusable verified factory flash bundle =="
+  flash_args=()
+  payloads=(base)
+  if [ -n "$OP_ARCHIVE" ]; then
+    flash_args+=(--openpilot-userdata "$USERDATA_OPENPILOT_IMG")
+    payloads+=(openpilot)
+  fi
   python3 "$DIR/tools/build/package_flash.py" \
     --image "$DISK_IMG" \
     --layout "$LAYOUT_JSON" \
     --userdata "$USERDATA_IMG" \
-    --openpilot-userdata "$USERDATA_OPENPILOT_IMG" \
+    "${flash_args[@]}" \
     --output-dir "$FLASH_DIR"
-  for payload in base openpilot; do
+  for payload in "${payloads[@]}"; do
     python3 "$DIR/tools/flash/prepare_rawprogram.py" \
       "$FLASH_DIR/flash.json" "$RAWPROGRAM_DIR/$payload" --payload "$payload"
   done

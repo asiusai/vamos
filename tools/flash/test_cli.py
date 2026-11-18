@@ -139,17 +139,19 @@ class ReleaseTest(unittest.TestCase):
 
   def test_latest_and_custom_release_select_same_factory_manifest(self):
     manifest = self.manifest
-    for version in (None, '18.11'):
-      def signed(url):
-        value = {'version': '18.11'} if url == releases.LATEST_URL else manifest
-        return json.dumps(value).encode(), value
+    manifest['optional_payloads'] = {}
+    for version, url in ((None, releases.LATEST_STANDALONE_FACTORY_URL), ('18.11', releases.factory_url('18.11'))):
       downloads = releases.Downloads()
-      with patch.object(releases, 'signed_json', side_effect=signed) as request, \
+      with patch.object(releases, 'signed_json', return_value=(json.dumps(manifest).encode(), manifest)) as request, \
            patch.object(downloads, 'verified'), redirect_stdout(io.StringIO()):
         path = downloads.factory(self.root / 'cache', version, False)
       self.assertEqual(json.loads(path.read_text()), manifest)
-      self.assertEqual(request.call_args.args, (releases.factory_url('18.11'),))
-      self.assertEqual(request.call_count, 2 if version is None else 1)
+      request.assert_called_once_with(url)
+
+  def test_standalone_factory_rejects_requested_openpilot(self):
+    self.manifest['optional_payloads'] = {}
+    with self.assertRaisesRegex(ValueError, '--no-openpilot'):
+      releases.validate_factory(self.manifest, True)
 
   def test_signed_manifest_rejects_changed_bytes(self):
     from cryptography.hazmat.primitives import serialization

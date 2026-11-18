@@ -252,7 +252,7 @@ def main() -> None:
   parser.add_argument("--image", type=Path, default=BUILD_DIR / "dragon-ufs.img")
   parser.add_argument("--layout", type=Path, default=BUILD_DIR / "factory-layout-ufs.json")
   parser.add_argument("--userdata", type=Path, default=BUILD_DIR / "userdata-ufs.img")
-  parser.add_argument("--openpilot-userdata", type=Path, default=BUILD_DIR / "userdata-openpilot-ufs.img")
+  parser.add_argument("--openpilot-userdata", type=Path, help="Add an explicit workload image as an optional payload")
   parser.add_argument("--programmer", type=Path, default=PROGRAMMER)
   parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
   parser.add_argument(
@@ -269,14 +269,17 @@ def main() -> None:
   persist_layout = layout["partitions"]["persist"]
   persist = {"offset": persist_layout["start_sector"] * sector_size, "size": persist_layout["sectors"] * sector_size}
   operations, image_size = package_base_image(args.image, args.base_url, sector_size, persist)
-  userdata_offset = layout["partitions"]["userdata"]["start_sector"] * sector_size
-  openpilot_operations, userdata_size = package_delta(
-    args.userdata,
-    args.openpilot_userdata,
-    userdata_offset,
-    args.base_url,
-    sector_size,
-  )
+  optional_payloads = {}
+  if args.openpilot_userdata is not None:
+    userdata_offset = layout["partitions"]["userdata"]["start_sector"] * sector_size
+    workload_operations, userdata_size = package_delta(args.userdata, args.openpilot_userdata, userdata_offset, args.base_url, sector_size)
+    optional_payloads["openpilot"] = {
+      "description": "Prebuilt Asius openpilot with Chestnut models; no first-boot compilation.",
+      "label": "vamOS + openpilot",
+      "operations": workload_operations,
+      "result": {"size": userdata_size},
+      "target": "userdata",
+    }
   manifest = {
     "base": {
       "image": {"size": image_size},
@@ -285,15 +288,7 @@ def main() -> None:
     "persist": persist,
     "chunk_size": CHUNK_SIZE,
     "manifest_version": MANIFEST_VERSION,
-    "optional_payloads": {
-      "openpilot": {
-        "description": "Prebuilt Asius openpilot with Chestnut models; no first-boot compilation.",
-        "label": "vamOS + openpilot",
-        "operations": openpilot_operations,
-        "result": {"size": userdata_size},
-        "target": "userdata",
-      },
-    },
+    "optional_payloads": optional_payloads,
     "product": PRODUCT,
     "programmer": package_programmer(args.programmer, args.base_url),
     "sector_size": sector_size,
@@ -304,7 +299,7 @@ def main() -> None:
   prune_unreferenced_objects(manifest)
   print(
     f"Wrote {manifest_path}: {len(operations)} base operations, "
-    f"{len(openpilot_operations)} optional openpilot operations, {image_size} bytes"
+    f"{len(optional_payloads)} optional payloads, {image_size} bytes"
   )
 
 

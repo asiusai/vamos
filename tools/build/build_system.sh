@@ -16,14 +16,6 @@ for module in aic_load_fw/aic_load_fw aic8800_fdrv/aic8800_fdrv; do
     exit 1
   fi
 done
-. "$DIR/tools/build/openpilot_checkout.sh"
-
-update_openpilot_checkout
-OPENPILOT_PYTHON_VERSION="$(tr -d '[:space:]' < "$OP_SRC/.python-version")"
-if ! [[ "$OPENPILOT_PYTHON_VERSION" =~ ^3[.]12[.][0-9]+$ ]]; then
-  echo "ERROR: unsupported openpilot Python version: $OPENPILOT_PYTHON_VERSION" >&2
-  exit 1
-fi
 "$DIR/tools/build/build_bootloader.sh"
 
 DOWNLOADS_DIR="$DIR/build/downloads"
@@ -70,7 +62,6 @@ fi
 # Check Dockerfile
 export DOCKER_BUILDKIT=1
 docker buildx build -f tools/build/Dockerfile --check \
-  --build-arg OPENPILOT_PYTHON_VERSION="$OPENPILOT_PYTHON_VERSION" \
   "$DIR"
 
 # Setup mount container for macOS and CI support
@@ -124,7 +115,6 @@ docker buildx build -f tools/build/Dockerfile --platform=linux/arm64 \
   --output "type=tar,dest=-" \
   --provenance=false \
   --build-arg VOID_ROOTFS="${VOID_ROOTFS_FILE#"$DIR/"}" \
-  --build-arg OPENPILOT_PYTHON_VERSION="$OPENPILOT_PYTHON_VERSION" \
   --build-arg KVER="${KVER}" \
   "$DIR" | docker exec -i "$MOUNT_CONTAINER_ID" tar -xf - -C "$ROOTFS_DIR"
 echo "Build and extraction complete"
@@ -174,72 +164,7 @@ exec_as_root mkdir -p "$ROOTFS_DIR/lib/modules"
 exec_as_root cp -a "$KMOD_SRC" "$ROOTFS_DIR/lib/modules/$KVER"
 exec_as_root depmod -b "$ROOTFS_DIR" -a "$KVER"
 
-# Use the same managed checkout packaged by build_disk to refresh the system
-# Python environment.
-# /data is a separate userdata partition at runtime, so files baked below that
-# mount point would be hidden and only waste image space.
-echo "Staging tracked openpilot sources from $OP_SRC"
-if [ -d "$OP_SRC" ]; then
-  exec_as_root mkdir -p "$ROOTFS_DIR/data/openpilot"
-  GIT_LFS_SKIP_SMUDGE=1 git -C "$OP_SRC" archive HEAD |
-    docker exec -i "$MOUNT_CONTAINER_ID" tar -xf - -C "$ROOTFS_DIR/data/openpilot"
-  while read -r sub_path; do
-    sub_src="$OP_SRC/$sub_path"
-    [ -d "$sub_src" ] || {
-      echo "Missing openpilot submodule checkout: $sub_path"
-      exit 1
-    }
-    exec_as_root mkdir -p "$ROOTFS_DIR/data/openpilot/$sub_path"
-    GIT_LFS_SKIP_SMUDGE=1 git -C "$sub_src" archive HEAD |
-      docker exec -i "$MOUNT_CONTAINER_ID" tar -xf - -C "$ROOTFS_DIR/data/openpilot/$sub_path"
-  done < <(git -C "$OP_SRC" config --file .gitmodules --get-regexp path | awk '{print $2}')
-
-  echo "Installing openpilot Python dependencies"
-  exec_as_root mkdir -p "$ROOTFS_DIR/dev" "$ROOTFS_DIR/proc" "$ROOTFS_DIR/sys" "$ROOTFS_DIR/run"
-  exec_as_root cp /etc/resolv.conf "$ROOTFS_DIR/run/resolv.conf"
-  exec_as_root mount --bind /dev "$ROOTFS_DIR/dev"
-  exec_as_root mount -t proc proc "$ROOTFS_DIR/proc"
-  exec_as_root mount --bind /sys "$ROOTFS_DIR/sys"
-  set +e
-  exec_as_root chroot "$ROOTFS_DIR" sh -c '
-    set -e
-    mkdir -p /data/tmp /data/uv-cache
-    chmod 1777 /data/tmp
-    cd /data/openpilot
-    XDG_DATA_HOME=/usr/local \
-    TMPDIR=/data/tmp \
-    UV_CACHE_DIR=/data/uv-cache \
-    UV_PROJECT_ENVIRONMENT=/usr/local/venv \
-      uv sync --frozen --inexact --no-install-project
-    /usr/local/venv/bin/python -c "import acados, av, capnproto, certifi, dbus_fast, ffmpeg, json11, libdatachannel, ncurses, paramiko, PIL, pip, smbus2, usb, zstd; \
-      from importlib.metadata import version; \
-      assert version(\"certifi\") == \"2026.10.19\"; assert version(\"pip\") == \"26.2.2\"; assert version(\"cryptography\") == \"50.0.2\""
-    PYTHONPATH=/data/openpilot/tinygrad_repo /usr/local/venv/bin/python /tmp/vamos/install_amd_firmware.py
-    rm /tmp/vamos/install_amd_firmware.py
-    rm -rf /data/tmp /data/uv-cache
-    chmod -R a+rX /usr/local/venv /usr/local/uv
-  '
-  UV_STATUS=$?
-  set -e
-  exec_as_root umount "$ROOTFS_DIR/sys"
-  exec_as_root umount "$ROOTFS_DIR/proc"
-  exec_as_root umount "$ROOTFS_DIR/dev"
-  exec_as_root rm -rf "$ROOTFS_DIR/data/openpilot"
-  [ "$UV_STATUS" -eq 0 ] || exit "$UV_STATUS"
-
-  # openpilot's packaged FFmpeg development tree includes an OpenCL-only
-  # header. V1 has no OpenCL runtime or backend, so do not reintroduce that
-  # otherwise inert file after the Docker-stage cleanup.
-  exec_as_root find "$ROOTFS_DIR/usr/local/venv" -type f \
-    -path '*/site-packages/ffmpeg/install/include/libavutil/hwcontext_opencl.h' \
-    -delete
-else
-  echo "ERROR: managed openpilot checkout is missing: $OP_SRC" >&2
-  exit 1
-fi
-
-# Run after both dependency installations so the final uv sync cannot restore
-# test suites or debug information. Check the system graphics runtime as well.
+# Trim the complete frozen runtime and check the system graphics libraries.
 echo "Trimming runtime dependencies"
 exec_as_root python3 "$DIR/userspace/trim.py" "$ROOTFS_DIR" --strip /usr/lib/llvm21/bin/llvm-strip
 echo "Deduplicating immutable Python environment files"

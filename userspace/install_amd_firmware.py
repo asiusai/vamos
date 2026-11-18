@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Install the AMD firmware required by the packaged tinygrad, before going offline."""
+"""Install the pinned AMD firmware before going offline."""
 
 import argparse
 import hashlib
 import io
+import json
 import sys
 import tarfile
 import time
@@ -13,7 +14,7 @@ from pathlib import Path
 
 import zstandard
 
-# Match tinygrad.helpers.fetch_fw. Hashes come from the packaged runtime below.
+# Keep the archive revision and the VamOS hash manifest in sync.
 FIRMWARE_REVISION = "0a6871b19abf5d6e024b5d208b101ae53e7fa0de"
 FIRMWARE_URL = f"https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+archive/{FIRMWARE_REVISION}/amdgpu.tar.gz"
 
@@ -78,10 +79,9 @@ def install(root: Path, hashes: dict[str, str], source: Path | None = None) -> N
 
 
 if __name__ == "__main__":
-  from tinygrad.runtime.autogen.am.fw import hashes
-
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--root", type=Path, default=Path("/"))
   parser.add_argument("--source", type=Path, help="Directory of previously downloaded firmware files")
   args = parser.parse_args()
-  install(args.root, hashes, args.source)
+  manifest = Path(__file__).with_name('amd-firmware-sha256.json')
+  install(args.root, json.loads(manifest.read_text()), args.source)

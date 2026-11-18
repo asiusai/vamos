@@ -1,15 +1,10 @@
 # vamOS Void Linux Build
 # check=error=true
 
-ARG OPENPILOT_PYTHON_VERSION=3.12.13
-
 # ################## #
 # ###### Base ###### #
 # ################## #
 FROM scratch AS void-base
-
-ARG OPENPILOT_PYTHON_VERSION
-ENV OPENPILOT_PYTHON_VERSION=${OPENPILOT_PYTHON_VERSION}
 
 # Add Void Linux aarch64 rootfs
 ARG VOID_ROOTFS
@@ -21,7 +16,7 @@ RUN mkdir -p /tmp/vamos
 ARG USERNAME=comma
 
 # Base system setup
-COPY ./userspace/base_setup.sh /tmp/vamos/
+COPY ./userspace/base_setup.sh ./userspace/uv/.python-version /tmp/vamos/
 RUN /tmp/vamos/base_setup.sh
 
 # Qualcomm DSP firmware remains necessary for audio and board initialization.
@@ -62,7 +57,12 @@ ENV PATH="/root/.local/bin:$XDG_DATA_HOME/venv/bin:$PATH"
 COPY ./userspace/uv /tmp/vamos/uv
 RUN cd /tmp/vamos/uv && \
     MAKEFLAGS="-j$(nproc)" UV_CONCURRENT_BUILDS=4 UV_NO_CACHE=1 UV_PROJECT_ENVIRONMENT=$XDG_DATA_HOME/venv \
-    uv sync --frozen --inexact
+    uv sync --frozen --inexact && \
+    python -c 'import acados, av, capnproto, certifi, dbus_fast, ffmpeg, json11, libdatachannel, ncurses, paramiko, PIL, pip, smbus2, usb, zstd'
+
+# Install the firmware with the VamOS-owned manifest and verify every blob.
+COPY ./userspace/install_amd_firmware.py ./userspace/amd-firmware-sha256.json /tmp/vamos/
+RUN python /tmp/vamos/install_amd_firmware.py
 
 # Install AIC8800 USB WiFi/BT firmware.
 COPY ./kernel/firmware/aic8800_fw/USB /lib/firmware/aic8800_fw/USB
@@ -217,10 +217,6 @@ RUN chmod +x /usr/local/bin/rootfs-*.sh
 # Read-only rootfs setup
 COPY ./userspace/readonly_setup.sh /tmp/vamos/
 RUN /tmp/vamos/readonly_setup.sh
-
-# Stage this after temporary-directory cleanup. build_system.sh installs the
-# exact openpilot/tinygrad firmware and removes the helper after Docker export.
-COPY ./userspace/install_amd_firmware.py /tmp/vamos/
 
 # Drop non-English locales, man/doc/info pages, and xbps cache
 RUN find /usr/share/locale -maxdepth 1 -mindepth 1 ! -name en_US ! -name en -exec rm -rf {} + && \

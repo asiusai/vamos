@@ -167,13 +167,8 @@ tar -xzf /tmp/uv.tar.gz -C /tmp
 install -m 755 /tmp/uv-aarch64-unknown-linux-gnu/uv /tmp/uv-aarch64-unknown-linux-gnu/uvx /usr/local/bin/
 rm -rf /tmp/uv.tar.gz /tmp/uv-aarch64-unknown-linux-gnu
 
-# Install the exact Python used by the packaged openpilot checkout. If these
-# differ, openpilot's later uv sync recreates the venv and drops vamOS runtime
-# dependencies such as dbus-fast, smbus2, PyUSB, and Paramiko.
-OPENPILOT_PYTHON_VERSION="${OPENPILOT_PYTHON_VERSION:-3.12.13}"
-uv python install "$OPENPILOT_PYTHON_VERSION"
-
-# Create the shared venv with that interpreter.
-uv venv $XDG_DATA_HOME/venv --seed --python "$OPENPILOT_PYTHON_VERSION"
+python_version=$(cat /tmp/vamos/.python-version)
+uv python install "$python_version"
+uv venv "$XDG_DATA_HOME/venv" --seed --python "$python_version"
 
 echo "base_setup.sh complete"

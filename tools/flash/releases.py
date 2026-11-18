@@ -15,6 +15,7 @@ from tools.flash.prepare_rawprogram import operations_for_payload
 ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_KEY = ROOT / 'userspace/root/usr/share/vamos/update-public.pem'
 LATEST_URL = 'https://dist.asius.ai/openpilot/vamos.json'
+LATEST_STANDALONE_FACTORY_URL = 'https://dist.asius.ai/vamos/flash-ufs.json'
 UBOOT_URL = 'https://dist.asius.ai/bootloader/uboot.json'
 VERSION = re.compile(r'\d+\.\d+(?:\.\d+)?')
 HASH = re.compile(r'[a-f0-9]{64}')
@@ -138,10 +139,14 @@ class Downloads:
         temporary.unlink(missing_ok=True)
 
   def factory(self, cache: Path, version: str | None, include_openpilot: bool) -> Path:
-    if version is None:
-      _, latest = signed_json(LATEST_URL)
-      version = check_version(latest.get('version'))
-    raw, manifest = signed_json(factory_url(version))
+    if version is None and not include_openpilot:
+      raw, manifest = signed_json(LATEST_STANDALONE_FACTORY_URL)
+      version = check_version(manifest.get('version'))
+    else:
+      if version is None:
+        _, latest = signed_json(LATEST_URL)
+        version = check_version(latest.get('version'))
+      raw, manifest = signed_json(factory_url(version))
     if manifest.get('version') != version:
       raise ValueError('Factory manifest does not match the selected release.')
     objects = validate_factory(manifest, include_openpilot)

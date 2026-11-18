@@ -19,10 +19,11 @@ the release checklist.
 ./vamos build disk         # build the common factory disk + optional userdata
 ./vamos build disk --storage ufs  # build the 4 KiB-sector UFS factory disk
 ./vamos devices            # list connected Dragons and USB speeds
-./vamos flash              # prepared local VamOS + openpilot build
+./vamos flash              # prepared local bundle with an openpilot payload
 ./vamos flash --no-openpilot # local VamOS alone
 ./vamos flash --remote 18.11 # a specific published release
 ./vamos flash --remote     # latest published VamOS + openpilot
+./vamos flash --remote --no-openpilot # latest standalone VamOS factory image
 ./vamos uboot              # published U-Boot only; preserve OS and data
 ./vamos profile diff A B   # diff two rootfs profiles
 ```
@@ -78,7 +79,8 @@ The current build targets Linux x86-64 on Ubuntu 24.04 or a compatible system.
 Windows, macOS, and ARM hosts are not supported by this build.
 USB permissions can require one sudo prompt.
 
-`flash --remote` selects the same signed release as the browser. `flash --remote VERSION` selects a specific signed release.
+`flash --remote` selects the signed driving bundle used by the browser.
+`flash --remote --no-openpilot` selects the latest signed standalone image. Specify a version to select that factory release.
 Both download and cache verified image chunks and the matching programmer.
 `flash` uses a prepared local factory manifest and its adjacent chunks. Use `--manifest PATH` to select another local manifest.
 It does not rebuild images or require the original full-disk image.
@@ -212,22 +214,13 @@ The pinned ADSP and CDSP firmware remains available for board initialization and
 Clang builds openpilot on the device. LLVM compiles GPU and CPU kernels.
 GCC, development headers, and the separate Panda ARM cross-compiler remain available.
 
-The first system build clones the Asius `openpilot` `master` branch into
-the gitignored `.openpilot/` checkout. Later builds fetch that ref and safely
-realign the managed checkout, then update its submodules. Release builds set
-`VAMOS_OPENPILOT_REF` to the resolved openpilot commit so the image is
-reproducible even if `master` moves. System builds use it for openpilot dependencies.
+VamOS pins its Python interpreter, packages, and firmware in this repository.
+System builds do not check out openpilot.
 
-Factory disks use a native ARM64 openpilot build with compiled Chestnut models.
-Run `python3 tools/build/download_prebuilt.py` to fetch and verify the compiled `release-ci` checkout from GitHub.
-Alternatively, put native `tools/release/build_release.sh` output at
-`build/openpilot/openpilot-v0-chestnut.tar.xz`.
-`VAMOS_OPENPILOT_ARCHIVE` selects another archive within this repository.
-Disk builds produce a common `dragon.img` with blank userdata and an optional
-`userdata-openpilot.img` with the flattened, prebuilt `release-ci` checkout. The manual flasher and flash.asius.ai can apply
-that payload for a driving device or omit it for a general-purpose vamOS
-device. No profile or role is recorded: executable `/data/continue.sh` is the
-sole opt-in to the openpilot workload.
+Factory builds produce a VamOS disk with blank userdata.
+For a local driving-device bundle, set `VAMOS_OPENPILOT_ARCHIVE` to a compiled ARM64 openpilot archive within this repository.
+Use `python3 tools/build/download_prebuilt.py` to fetch and verify that archive from `release-ci`.
+The optional userdata image adds the prebuilt checkout and executable `/data/continue.sh`.
 
 A driving device boots without downloading or compiling openpilot. A vamOS-only device gets the same
 writable OS, A/B layout, and persistent `/data` and `/home`, with no
@@ -323,7 +316,7 @@ selected slot.
 Install a signed HTTP manifest:
 
 ```bash
-sudo vamos-update install https://dist.asius.ai/openpilot/vamos.json --reboot
+sudo vamos-update install https://dist.asius.ai/vamos/vamos.json --reboot
 ```
 
 Install local recovery files without a manifest:
@@ -371,21 +364,18 @@ Use `git push origin master:release` from the reviewed source checkout. Manual r
 Select `ota_only` in a manual run to publish a signed update without a factory image.
 Increment `userspace/root/VERSION` before each new release. Existing version tags must match the exact source commit.
 It builds the kernel, system image, and ESP on ARM64.
-Full releases fetch compiled openpilot from `release-ci` before building the factory image.
-Publish openpilot first when updating both components for a full release.
-Git and LFS integrity checks reject incomplete checkouts. Factory images retain signed manifests and content checksums.
+Full VamOS releases publish a standalone factory image with blank userdata.
+Git and LFS integrity checks reject incomplete VamOS checkouts. Factory images retain signed manifests and content checksums.
 It signs the OTA manifest and any factory manifest, then uploads objects to R2.
 Factory manifests use `vamos/releases/<VERSION>/flash-ufs.json`. The signed `vamos.json` and
 `vamos.json.sig` are retained both as a 90-day workflow artifact and as durable
-assets on the matching GitHub source release. Finally, the workflow commits
-those same files to the Asius openpilot fork.
+assets on the matching GitHub source release. Openpilot maintainers pin the signed OTA in their own repository.
 
 Configure these secrets in the `vamos-release` environment:
 
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 - `VAMOS_UPDATE_SIGNING_KEY`
-- `OPENPILOT_DEPLOY_KEY` (write deploy key for `asiusai/openpilot`)
 
 Set `R2_ACCOUNT_ID` and `R2_BUCKET` as environment variables. The upload credential needs object access only to `asius-vamos`.
 Bucket CORS is managed separately. Each successful release updates the stable R2 manifest after its versioned objects are uploaded.

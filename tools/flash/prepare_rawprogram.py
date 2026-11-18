@@ -34,6 +34,8 @@ def operations_for_payload(manifest: dict, payload: str) -> list[dict]:
     raise ValueError("unsupported local flash sector size")
   if manifest.get("manifest_version") != 3:
     raise ValueError("unsupported local flash manifest; rebuild with persist support")
+  if payload == "openpilot" and "openpilot" not in manifest["optional_payloads"]:
+    raise ValueError("This factory release contains VamOS alone. Select --no-openpilot.")
   operations = manifest["base"]["operations"] if payload == "base" else manifest["optional_payloads"]["openpilot"]["operations"]
   persist = manifest["persist"]
   begin, length = persist["offset"], persist["size"]
