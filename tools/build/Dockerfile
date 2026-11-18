@@ -58,7 +58,8 @@ COPY ./userspace/uv /tmp/vamos/uv
 RUN cd /tmp/vamos/uv && \
     MAKEFLAGS="-j$(nproc)" UV_CONCURRENT_BUILDS=4 UV_NO_CACHE=1 UV_PROJECT_ENVIRONMENT=$XDG_DATA_HOME/venv \
     uv sync --frozen --inexact && \
-    python -c 'import acados, av, capnproto, certifi, dbus_fast, ffmpeg, json11, libdatachannel, ncurses, paramiko, PIL, pip, smbus2, usb, zstd'
+    python -c 'import acados, av, capnproto, certifi, dbus_fast, ffmpeg, json11, libdatachannel, ncurses, paramiko, PIL, pip, smbus2, usb, zstd' && \
+    python -c 'import setuptools, eigen, libusb_package, nanobind, sympy, usb1; from Crypto.Cipher import AES'
 
 # Install the firmware with the VamOS-owned manifest and verify every blob.
 COPY ./userspace/install_amd_firmware.py ./userspace/amd-firmware-sha256.json /tmp/vamos/

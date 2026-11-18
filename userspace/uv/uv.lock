@@ -131,6 +131,15 @@ wheels = [
 ]
 
 [[package]]
+name = "comma-deps-eigen"
+version = "3.4.0.post103"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6f/23/02407262cc7cb6509bd95b237535b3b32e6447b24abc32200aed6e9b4745/comma_deps_eigen-3.4.0.post103-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:5f18b5ae2b007f5422ce67f1e1e805bb07404885d3a8718a0341daca748a0980", size = 2272674, upload-time = "2026-09-11T22:31:57.274Z" },
+    { url = "https://files.pythonhosted.org/packages/40/43/a5001078c02a5f6c28e26e3d0458a7e53826d77e9945f3196921df620a41/comma_deps_eigen-3.4.0.post103-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:e07754a4f6062285545f70c597321a5736e193aa5a600ebe189af9e43ad965ff", size = 2272674, upload-time = "2026-09-11T22:32:01.084Z" },
+]
+
+[[package]]
 name = "comma-deps-ffmpeg"
 version = "7.1.0.post103"
 source = { registry = "https://pypi.org/simple" }
@@ -272,6 +281,15 @@ wheels = [
 ]
 
 [[package]]
+name = "importlib-resources"
+version = "7.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/06/b56dfa750b44e86157093bc8fca0ab81dccbf5260510de4eaf1cb69b5b99/importlib_resources-7.1.0.tar.gz", hash = "sha256:0722d4c6212489c530f2a145a34c0a7a3b4721bc96a15fada5930e2a0b760708", size = 44985, upload-time = "2026-04-12T16:36:09.232Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8a/db/55a262f3606bebcae07cc14095338471ad7c0bbcaa37707e6f0ee49725b7/importlib_resources-7.1.0-py3-none-any.whl", hash = "sha256:1bd7b48b4088eddb2cd16382150bb515af0bd2c70128194392725f82ad2c96a1", size = 37232, upload-time = "2026-04-12T16:36:08.219Z" },
+]
+
+[[package]]
 name = "inputs"
 version = "0.5"
 source = { registry = "https://pypi.org/simple" }
@@ -307,6 +325,47 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/09/a8/0dc7d3fe80fc247ec165dbd455bc2a1a307ef65702a43e24473202c2bf42/libdatachannel_py-2026.1.0.dev2-cp312-cp312-manylinux_2_35_x86_64.whl", hash = "sha256:339a79fcbc8c6caf91c620f6e4a0f1b8ccb6a941a966d10a3135c980ae4651a6", size = 1718006, upload-time = "2026-05-19T03:37:11.891Z" },
     { url = "https://files.pythonhosted.org/packages/6d/86/30904a8753e9db60d8c3cf8efda09585fc68f2004d3d7aa2910c93a8eed5/libdatachannel_py-2026.1.0.dev2-cp312-cp312-manylinux_2_38_aarch64.whl", hash = "sha256:b9f476cb065b50856ab2e53bf774ccca9c6a66454b7ce903aaf6dfcdef2a4482", size = 1643757, upload-time = "2026-05-19T03:37:12.207Z" },
     { url = "https://files.pythonhosted.org/packages/d7/9d/1e10131396d28e84a8088a63c14978cc215f6677dc85acdd96b6068f0664/libdatachannel_py-2026.1.0.dev2-cp312-cp312-manylinux_2_38_x86_64.whl", hash = "sha256:1f31db7347549edcd69fcc1ecb8b31e7183894808ccf9387afc49a4d68debaae", size = 1751748, upload-time = "2026-05-19T03:37:06.98Z" },
+]
+
+[[package]]
+name = "libusb-package"
+version = "1.0.30.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "importlib-resources", marker = "sys_platform == 'linux'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/12/9ba8fa91dc95b1cbfa4a68207d4048b08b900fd3686fa72b99846608de01/libusb_package-1.0.30.0-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c71b5f8c65b286425c02c7d624eee1fd7f08bfb1dfa492ddc20e27f06fee3829", size = 76166, upload-time = "2026-06-30T07:41:04.462Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/e1/a7c83535749332825f02d6693868f8ee9ae99c4104e60a483773bb652c0e/libusb_package-1.0.30.0-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f502ad5a0527b8c0431de817662325c88a1bba2cc334173665b04ad168d7b6d3", size = 76159, upload-time = "2026-06-30T07:41:05.543Z" },
+    { url = "https://files.pythonhosted.org/packages/de/56/a1fb1726fc96a8ee3bd0e04e5e505500f022dd310dd348ecebf5cdae7a60/libusb_package-1.0.30.0-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:7a2a1c82f6ef85d9920cbe2898aa6927d4c487744ef9f20b0d7d6d95705095bb", size = 77162, upload-time = "2026-06-30T07:41:06.581Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/03/264cefc51275ecb047194c4973bc40b3b278566a64bbe6e74f86bf1e0afc/libusb_package-1.0.30.0-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:2ee5ef8ac6f08402b4e8334f7404850316bdd26037c9a97f2a7456ee9a5d1550", size = 76676, upload-time = "2026-06-30T07:41:07.505Z" },
+]
+
+[[package]]
+name = "libusb1"
+version = "3.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/89/35/f9d2a990d092d647b47540cd229e1d68432c0f51183484ca189612a4824c/libusb1-3.4.0.tar.gz", hash = "sha256:9cf5638506d54f21bf36550d97ea63189111a23c4d8078f630103a2052135f45", size = 91206, upload-time = "2026-05-16T20:59:19.315Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d4/64/d4b59444e4d3b6979aa5eb58840634465a24b41a9ab03dcf8434c9b89551/libusb1-3.4.0-py3-none-any.whl", hash = "sha256:e83d034e44c3efe1c4599c6281d34bca50a38c12cab3b7b6217d583161a01ffd", size = 67373, upload-time = "2026-05-16T20:59:13.142Z" },
+]
+
+[[package]]
+name = "mpmath"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e0/47/dd32fa426cc72114383ac549964eecb20ecfd886d1e5ccf5340b55b02f57/mpmath-1.3.0.tar.gz", hash = "sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f", size = 508106, upload-time = "2023-03-07T16:47:11.061Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl", hash = "sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c", size = 536198, upload-time = "2023-03-07T16:47:09.197Z" },
+]
+
+[[package]]
+name = "nanobind"
+version = "3.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/1f/e28fae715401e8f57400e72aeaff4fde12046d31828164f34f61f0816da8/nanobind-3.1.0.tar.gz", hash = "sha256:6661e3dc1434d78781ccf7913442d90361dab395c3424efadb63bbb6ddea7ea3", size = 1145390, upload-time = "2026-09-18T15:59:42.726Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/36/c1/6fd56f7a02a478d54a1a3e6000eccd34b446b1c45cbf0d002fe5d2937126/nanobind-3.1.0-py3-none-any.whl", hash = "sha256:96984dbe8154ffb86e653b1b60aaeed6985c710c5e75ad0279eb87943c66292d", size = 316917, upload-time = "2026-09-18T15:59:37.796Z" },
 ]
 
 [[package]]
@@ -382,6 +441,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fe/cf/d2d3b9f5699fb1e4615c8e32ff220203e43b248e1dfcc6736ad9057731ca/pycparser-2.23.tar.gz", hash = "sha256:78816d4f24add8f10a06d6f05b4d424ad9e96cfebf68a4ddc99c65c0720d00c2", size = 173734, upload-time = "2025-09-09T13:23:47.91Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a0/e3/59cd50310fc9b59512193629e1984c1f95e5c8ae6e5d8c69532ccc65a7fe/pycparser-2.23-py3-none-any.whl", hash = "sha256:e5c6e8d3fbad53479cab09ac03729e0a9faf2bee3db8208a550daf5af81a5934", size = 118140, upload-time = "2025-09-09T13:23:46.651Z" },
+]
+
+[[package]]
+name = "pycryptodome"
+version = "3.23.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/a6/8452177684d5e906854776276ddd34eca30d1b1e15aa1ee9cefc289a33f5/pycryptodome-3.23.0.tar.gz", hash = "sha256:447700a657182d60338bab09fdb27518f8856aecd80ae4c6bdddb67ff5da44ef", size = 4921276, upload-time = "2025-05-17T17:21:45.242Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/52/adaf4c8c100a8c49d2bd058e5b551f73dfd8cb89eb4911e25a0c469b6b4e/pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:67bd81fcbe34f43ad9422ee8fd4843c8e7198dd88dd3d40e6de42ee65fbe1490", size = 2182625, upload-time = "2025-05-17T17:20:52.866Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/e9/a09476d436d0ff1402ac3867d933c61805ec2326c6ea557aeeac3825604e/pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c8987bd3307a39bc03df5c8e0e3d8be0c4c3518b7f044b0f4c15d1aa78f52575", size = 2268954, upload-time = "2025-05-17T17:20:55.027Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/c5/ffe6474e0c551d54cab931918127c46d70cab8f114e0c2b5a3c071c2f484/pycryptodome-3.23.0-cp37-abi3-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:aa0698f65e5b570426fc31b8162ed4603b0c2841cbb9088e2b01641e3065915b", size = 2308534, upload-time = "2025-05-17T17:20:57.279Z" },
+    { url = "https://files.pythonhosted.org/packages/18/28/e199677fc15ecf43010f2463fde4c1a53015d1fe95fb03bca2890836603a/pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:53ecbafc2b55353edcebd64bf5da94a2a2cdf5090a6915bcca6eca6cc452585a", size = 2181853, upload-time = "2025-05-17T17:20:59.322Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/ea/4fdb09f2165ce1365c9eaefef36625583371ee514db58dc9b65d3a255c4c/pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_i686.whl", hash = "sha256:156df9667ad9f2ad26255926524e1c136d6664b741547deb0a86a9acf5ea631f", size = 2342465, upload-time = "2025-05-17T17:21:03.83Z" },
+    { url = "https://files.pythonhosted.org/packages/22/82/6edc3fc42fe9284aead511394bac167693fb2b0e0395b28b8bedaa07ef04/pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:dea827b4d55ee390dc89b2afe5927d4308a8b538ae91d9c6f7a5090f397af1aa", size = 2267414, upload-time = "2025-05-17T17:21:06.72Z" },
 ]
 
 [[package]]
@@ -465,6 +538,15 @@ wheels = [
 ]
 
 [[package]]
+name = "setuptools"
+version = "84.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/73/eb/7e5f628ee2eb168fecbf8026de7856b2543d6d609cc85f086b9a91ac93d6/setuptools-84.1.0.tar.gz", hash = "sha256:23657205b63d4d31395ab917815247f694aafad28cd21316bf5fd45a51048ea0", size = 1171783, upload-time = "2026-10-19T20:11:43.489Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/18/02/b4bbb90f8f29e334898ff45c6d9b1fffaa6f378017052b3023a06262b5f7/setuptools-84.1.0-py3-none-any.whl", hash = "sha256:5231689c6ac8156cd155cfb98c3fd6fb252c3e7e9bd3d78b64d3c55f132624c9", size = 819380, upload-time = "2026-10-19T20:11:41.684Z" },
+]
+
+[[package]]
 name = "smbus2"
 version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -483,6 +565,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ec/db/0c890e2d9aab9ba284021efc02e1d3aebfecab1b611762d7434602209bcf/sounddevice-0.5.6.tar.gz", hash = "sha256:8ec9fbfde2e32f020b167e348f3ab3bac6625a5f15af524d790108ac7147a410", size = 1120094, upload-time = "2026-08-17T07:55:05.048Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/72/1f/62eef605172bddc1017508469a12f75bc7c4194ece35c734f822795f53b1/sounddevice-0.5.6-py3-none-any.whl", hash = "sha256:de099612311ad81e55d31ccbd83f43ea6bf4d87b48f9b6ea55a1fbcde0eee4e0", size = 32793, upload-time = "2026-08-17T07:54:57.507Z" },
+]
+
+[[package]]
+name = "sympy"
+version = "1.14.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mpmath", marker = "sys_platform == 'linux'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517", size = 7793921, upload-time = "2025-04-27T18:05:01.611Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5", size = 6299353, upload-time = "2025-04-27T18:04:59.103Z" },
 ]
 
 [[package]]
@@ -512,6 +606,7 @@ dependencies = [
     { name = "certifi", marker = "sys_platform == 'linux'" },
     { name = "comma-deps-acados", marker = "sys_platform == 'linux'" },
     { name = "comma-deps-capnproto", marker = "sys_platform == 'linux'" },
+    { name = "comma-deps-eigen", marker = "sys_platform == 'linux'" },
     { name = "comma-deps-ffmpeg", marker = "sys_platform == 'linux'" },
     { name = "comma-deps-gcc-arm-none-eabi", marker = "sys_platform == 'linux'" },
     { name = "comma-deps-json11", marker = "sys_platform == 'linux'" },
@@ -524,18 +619,24 @@ dependencies = [
     { name = "inputs", marker = "sys_platform == 'linux'" },
     { name = "jeepney", marker = "sys_platform == 'linux'" },
     { name = "libdatachannel-py", marker = "sys_platform == 'linux'" },
+    { name = "libusb-package", marker = "sys_platform == 'linux'" },
+    { name = "libusb1", marker = "sys_platform == 'linux'" },
+    { name = "nanobind", marker = "sys_platform == 'linux'" },
     { name = "numpy", marker = "sys_platform == 'linux'" },
     { name = "paramiko", marker = "sys_platform == 'linux'" },
     { name = "pillow", marker = "sys_platform == 'linux'" },
     { name = "pip", marker = "sys_platform == 'linux'" },
     { name = "pycapnp", marker = "sys_platform == 'linux'" },
+    { name = "pycryptodome", marker = "sys_platform == 'linux'" },
     { name = "pyjwt", extra = ["crypto"], marker = "sys_platform == 'linux'" },
     { name = "pyusb", marker = "sys_platform == 'linux'" },
     { name = "requests", marker = "sys_platform == 'linux'" },
     { name = "scons", marker = "sys_platform == 'linux'" },
     { name = "setproctitle", marker = "sys_platform == 'linux'" },
+    { name = "setuptools", marker = "sys_platform == 'linux'" },
     { name = "smbus2", marker = "sys_platform == 'linux'" },
     { name = "sounddevice", marker = "sys_platform == 'linux'" },
+    { name = "sympy", marker = "sys_platform == 'linux'" },
     { name = "tqdm", marker = "sys_platform == 'linux'" },
     { name = "websocket-client", marker = "sys_platform == 'linux'" },
     { name = "zstandard", marker = "sys_platform == 'linux'" },
@@ -547,6 +648,7 @@ requires-dist = [
     { name = "certifi", specifier = "==2026.10.19" },
     { name = "comma-deps-acados", specifier = "==0.2.2.post103" },
     { name = "comma-deps-capnproto", specifier = "==1.0.1.post103" },
+    { name = "comma-deps-eigen", specifier = "==3.4.0.post103" },
     { name = "comma-deps-ffmpeg", specifier = "==7.1.0.post103" },
     { name = "comma-deps-gcc-arm-none-eabi", specifier = "==13.2.1.post103" },
     { name = "comma-deps-json11", specifier = "==20170411.0.post103" },
@@ -559,18 +661,24 @@ requires-dist = [
     { name = "inputs", specifier = "==0.5" },
     { name = "jeepney", specifier = "==0.9.0" },
     { name = "libdatachannel-py", specifier = "==2026.1.0.dev2" },
+    { name = "libusb-package", specifier = "==1.0.30.0" },
+    { name = "libusb1", specifier = "==3.4.0" },
+    { name = "nanobind", specifier = "==3.1.0" },
     { name = "numpy", specifier = "==2.5.3" },
     { name = "paramiko", specifier = "==5.1.0" },
     { name = "pillow", specifier = "==13.0.0" },
     { name = "pip", specifier = "==26.2.2" },
     { name = "pycapnp", specifier = "==2.1.0" },
+    { name = "pycryptodome", specifier = "==3.23.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = "==2.15.1" },
     { name = "pyusb", specifier = "==1.3.1" },
     { name = "requests", specifier = "==2.34.2" },
     { name = "scons", specifier = "==4.11.1" },
     { name = "setproctitle", specifier = "==1.3.7" },
+    { name = "setuptools", specifier = "==84.1.0" },
     { name = "smbus2", specifier = "==0.5.0" },
     { name = "sounddevice", specifier = "==0.5.6" },
+    { name = "sympy", specifier = "==1.14.0" },
     { name = "tqdm", specifier = "==4.70.1" },
     { name = "websocket-client", specifier = "==1.9.2" },
     { name = "zstandard", specifier = "==0.25.0" },
