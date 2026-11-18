@@ -85,7 +85,7 @@ jobs:
       - name: install image tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y dosfstools e2fsprogs gdisk grub2-common jq mtools unzip
+          sudo apt-get install -y device-tree-compiler dosfstools e2fsprogs gdisk grub2-common jq mtools unzip
 
       - name: install release signature provider
         run: |
