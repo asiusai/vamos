@@ -323,7 +323,7 @@ selected slot.
 Install a signed HTTP manifest:
 
 ```bash
-sudo vamos-update install https://dist.asius.ai/vamos/vamos.json --reboot
+sudo vamos-update install https://dist.asius.ai/openpilot/vamos.json --reboot
 ```
 
 Install local recovery files without a manifest:
