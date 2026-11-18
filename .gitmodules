@@ -1,6 +1,6 @@
 [submodule "kernel/linux"]
 	path = kernel/linux
-	url = https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+	url = https://github.com/gregkh/linux.git
 [submodule "bootloader/u-boot"]
 	path = bootloader/u-boot
 	url = https://source.denx.de/u-boot/u-boot.git
