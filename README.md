@@ -368,11 +368,13 @@ Devices with the retired key need an explicit trust-key update or a factory flas
 
 The `build and publish vamOS images` workflow runs when `master` is promoted to `release`.
 Use `git push origin master:release` from the reviewed source checkout. Manual runs also require the `release` branch.
+Select `ota_only` in a manual run to publish a signed update without a factory image.
 Increment `userspace/root/VERSION` before each new release. Existing version tags must match the exact source commit.
 It builds the kernel, system image, and ESP on ARM64.
-It fetches compiled openpilot from `release-ci` before building the OS. Publish openpilot first when updating both components.
+Full releases fetch compiled openpilot from `release-ci` before building the factory image.
+Publish openpilot first when updating both components for a full release.
 Git and LFS integrity checks reject incomplete checkouts. Factory images retain signed manifests and content checksums.
-It signs the OTA manifest and both factory manifests, then uploads objects to R2.
+It signs the OTA manifest and any factory manifest, then uploads objects to R2.
 Factory manifests use `vamos/releases/<VERSION>/flash-ufs.json`. The signed `vamos.json` and
 `vamos.json.sig` are retained both as a 90-day workflow artifact and as durable
 assets on the matching GitHub source release. Finally, the workflow commits
