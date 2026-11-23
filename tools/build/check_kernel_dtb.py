@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject duplicate firmware reservations that prevent remoteproc from probing."""
+"""Validate firmware reservations and the Dragon UFS link policy."""
 
 from pathlib import Path
 import struct
@@ -50,5 +50,15 @@ def check_reservations(path: Path) -> None:
           raise ValueError(f"{node} overlaps /memreserve/ {low:#x}-{high:#x}; reserve firmware gaps separately")
 
 
+def check_ufs_link(path: Path) -> None:
+  node = "/soc@0/ufshc@1d84000"
+  rate = subprocess.check_output(["fdtget", "-t", "s", str(path), node, "limit-gear-rate"], text=True).strip()
+  lanes = subprocess.check_output(["fdtget", "-t", "u", str(path), node, "lanes-per-direction"], text=True).strip()
+  if rate != "rate-a" or lanes != "2":
+    raise ValueError(f"Dragon UFS requires Rate A with two lanes; found rate={rate!r}, lanes={lanes!r}")
+
+
 if __name__ == "__main__":
-  check_reservations(Path(sys.argv[1]))
+  path = Path(sys.argv[1])
+  check_reservations(path)
+  check_ufs_link(path)

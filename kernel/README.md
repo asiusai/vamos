@@ -110,6 +110,14 @@ dispatch, following the [upstream proposal](https://lore.kernel.org/r/2026091213
 Retest concurrent health queries, I/O and frequency changes when replacing
 these patches with a later stable kernel. Neither patch disables scaling.
 
+Dragon UFS defaults to HS Rate A through `limit-gear-rate` in patch 0054.
+Gear 4, two active lanes, frequency scaling, clock gating, and runtime power management remain available.
+Rate A uses 9.984 Gbit/s per lane, versus Rate B's 11.664 Gbit/s.
+A Samsung `KLUDG4UHGC-B0E1` sample passed checked I/O, a cold power cycle, and 60 idle cycles without link errors.
+Its initial checked speeds were 730 MB/s write and 822 MB/s read. Rate B repeatedly triggered data-link NAC recovery.
+This is a board-wide default. Stock YMTC Rate A performance, other Samsung samples, and sustained thermal/endurance behavior remain unverified.
+The compiled DTB check requires Rate A and two lanes before packaging.
+
 Patch 0094 prevents an LE LTK Reply from completing a pending remote-features
 request. On Asius 1, this race disconnected a bonded iPhone during connection
 setup. BlueZ then retained a stale connection. The patch preserves command

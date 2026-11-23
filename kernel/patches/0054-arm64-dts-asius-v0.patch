@@ -745,7 +745,7 @@ index 696fef50f577..20058b7fca04 100644
  &pcie0_clkreq_n {
  	bias-pull-up;
  	drive-strength = <2>;
-@@ -1093,3 +1389,424 @@ &sdc2_data {
+@@ -1093,3 +1389,427 @@ &sdc2_data {
  	bias-pull-up;
  	drive-strength = <10>;
  };
@@ -755,6 +755,9 @@ index 696fef50f577..20058b7fca04 100644
 +};
 +
 +&ufs_mem_hc {
++	/* Keep Gear 4 with margin for removable UFS modules. */
++	limit-gear-rate = "rate-a";
++
 +	cd-gpios = <&tlmm 7 GPIO_ACTIVE_LOW>;
 +	reset-gpios = <&tlmm 175 GPIO_ACTIVE_LOW>;
 +	vcc-supply = <&vreg_l7b_2p96>;

@@ -50,9 +50,11 @@ mcopy -i "$ESP_IMG" "$KERNEL_IMAGE" ::/EFI/vamos/Image
 mcopy -i "$ESP_IMG" "$EDL_APPLICATION" ::/EFI/vamos/edl.efi
 mcopy -i "$ESP_IMG" "$QUP_FW" ::/EFI/vamos/qupv3fw.elf
 mcopy -i "$ESP_IMG" "$DSP_STAGE/$DSP_PATH/adsp.mbn" "$DSP_STAGE/$DSP_PATH/cdsp.mbn" ::/EFI/vamos/
+python3 "$DIR/tools/build/check_kernel_dtb.py" "$DTB_FILE"
 mcopy -i "$ESP_IMG" "$DTB_FILE" ::/qcs6490-radxa-dragon-q6a.dtb
 cp "$DTB_FILE" "$NCM_DTB_FILE"
 fdtput -t s "$NCM_DTB_FILE" /soc@0/usb@a600000 dr_mode peripheral
+python3 "$DIR/tools/build/check_kernel_dtb.py" "$NCM_DTB_FILE"
 mcopy -i "$ESP_IMG" "$NCM_DTB_FILE" ::/qcs6490-radxa-dragon-q6a-ncm.dtb
 mcopy -i "$ESP_IMG" "$BOOTLOADER" ::/Image
 grub-editenv "$BUILD_DIR/grubenv" create
