@@ -32,6 +32,7 @@ jobs:
             tools.test_resources \
             tools.test_hardware \
             tools.test_boot_led_pattern \
+            tools.test_camera_led_recovery \
             tools.test_physical_login \
              tools.test_trim \
              tools.test_download_prebuilt \
