@@ -235,16 +235,14 @@ openpilot recording requires the Venus encoder and its product controls.
 
 ## Upgrade validation
 
-The camera LEDs breathe pure blue together during boot, with a 1.2-second rise
-and a 1.8-second fall. The outer LEDs retain a faint 2/255 glow between breaths.
-They peak at 25/255, below 10%, because camera exposure is not yet available.
-Logical LEDs 1-6 sit at 0, 7.5, 15, 45, 52.5 and 60 mm. LEDs 2 and 5 stay off.
-The three-second curve is sampled at 60 Hz without floating point in the kernel.
+The eight road-camera LEDs show a wide blue comet during boot, travelling left to right and back every 4.4 seconds.
+The head slows at each end. Two delayed positions create a soft tail, with a peak of 5/255 equivalent brightness.
+The 60 Hz table uses 16-bit brightness and linear interpolation without floating point in the kernel.
 `tools/build/generate_boot_led_pattern.py` generates the table in patch 0062.
-Patch 0054 maps each RGB trigger to its physical camera channel; logical 1 is
-wide-camera package 2 and logical 6 is road-camera package 0. Openpilot takes
-over the triggers and uses steady blue once startup is complete, adapting
-the peak between 10% and 50% when fresh wide-road camera exposure is available.
+Patches 0054 and 0077 map separate RGB triggers to each physical LED for U-Boot and stock EFI.
+Logical LEDs 1-8 map to camera 3 packages 3-0, then camera 2 packages 3-0.
+Openpilot uses the same curve and monotonic boot phase during handoff, then uses steady blue once startup is complete.
+Fresh wide-road exposure adjusts the peak from 5/255 to 127/255; otherwise, brightness remains at 5/255.
 
 Keep the previous kernel, DTB, modules, and boot metadata recoverable before a
 trial. Compare boot recovery, USB host/NCM, Wi-Fi, Bluetooth, UFS throughput,

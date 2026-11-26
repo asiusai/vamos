@@ -31,6 +31,7 @@ jobs:
             tools.validate_camerad_vfe_test \
             tools.test_resources \
             tools.test_hardware \
+            tools.test_boot_led_pattern \
             tools.test_physical_login \
              tools.test_trim \
              tools.test_download_prebuilt \
