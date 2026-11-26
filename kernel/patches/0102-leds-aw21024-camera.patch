@@ -5,7 +5,7 @@ diff --git a/drivers/leds/leds-aw21024.c b/drivers/leds/leds-aw21024.c
 new file mode 100644
 --- /dev/null
 +++ b/drivers/leds/leds-aw21024.c
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,215 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/* OUT1..10: joined IR sinks; OUT11..12: unused; OUT13..24: four RGB LEDs. */
 +#include <linux/delay.h>
@@ -32,6 +32,7 @@ new file mode 100644
 +struct aw21024 {
 +	struct i2c_client *client;
 +	struct mutex lock;
++	bool needs_init;
 +	u8 color_scale[24];
 +	struct aw21024_led leds[AW21024_RGB_COUNT + 1];
 +};
@@ -39,6 +40,39 @@ new file mode 100644
 +static int aw21024_write(struct aw21024 *chip, u8 reg, u8 value)
 +{
 +	return i2c_smbus_write_byte_data(chip->client, reg, value);
++}
++
++static int aw21024_init(struct aw21024 *chip)
++{
++	int ret, i;
++
++	chip->needs_init = true;
++	/* Reset disables all sinks. Never replay an old IR request after failure. */
++	ret = aw21024_write(chip, 0x7f, 0);
++	if (ret < 0)
++		return ret;
++	usleep_range(2000, 3000);
++	for (i = 0; i < 24; i++) {
++		ret = aw21024_write(chip, AW21024_BR_BASE + i, 0);
++		if (ret < 0)
++			return ret;
++		ret = aw21024_write(chip, 0x4a + i, 255);
++		if (ret < 0)
++			return ret;
++		chip->color_scale[i] = 255;
++	}
++	ret = aw21024_write(chip, AW21024_UPDATE, 0);
++	if (ret < 0)
++		return ret;
++	/* RSET sets 18.52 mA nominal full scale. */
++	ret = aw21024_write(chip, 0x6e, 255);
++	if (ret < 0)
++		return ret;
++	ret = aw21024_write(chip, 0x00, 1);
++	if (ret < 0)
++		return ret;
++	chip->needs_init = false;
++	return 0;
 +}
 +
 +static int aw21024_brightness_set(struct led_classdev *cdev,
@@ -64,6 +98,11 @@ new file mode 100644
 +
 +	/* UPDATE latches every BR register. Serialize RGB and the joined IR group. */
 +	mutex_lock(&chip->lock);
++	if (chip->needs_init) {
++		ret = aw21024_init(chip);
++		if (ret < 0)
++			goto clear;
++	}
 +	if (!ir && chip->color_scale[first] != scale) {
 +		/* COL is immediate; blank before changing current to avoid a flash. */
 +		ret = aw21024_write(chip, AW21024_BR_BASE + first, 0);
@@ -88,9 +127,10 @@ new file mode 100644
 +	mutex_unlock(&chip->lock);
 +	return 0;
 +clear:
-+	/* Do not leave part of the IR group enabled after an incomplete update. */
++	/* Disable on failure; a later request must safely initialize all sinks. */
++	chip->needs_init = true;
 +	aw21024_write(chip, 0x00, 0);
-+	for (i = first; i < first + count; i++)
++	for (i = 0; i < 24; i++)
 +		aw21024_write(chip, AW21024_BR_BASE + i, 0);
 +	aw21024_write(chip, AW21024_UPDATE, 0);
 +	mutex_unlock(&chip->lock);
@@ -103,6 +143,7 @@ new file mode 100644
 +	int i;
 +
 +	mutex_lock(&chip->lock);
++	chip->needs_init = true;
 +	aw21024_write(chip, 0x00, 0);
 +	for (i = 0; i < 24; i++)
 +		aw21024_write(chip, AW21024_BR_BASE + i, 0);
@@ -115,7 +156,7 @@ new file mode 100644
 +	struct device *dev = &client->dev;
 +	struct aw21024 *chip;
 +	unsigned long used = 0;
-+	int ret, i;
++	int ret;
 +
 +	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA))
 +		return -EOPNOTSUPP;
@@ -134,28 +175,7 @@ new file mode 100644
 +	if (ret)
 +		return ret;
 +
-+	/* Reset disables all sinks. Keep them zero while configuring current. */
-+	ret = aw21024_write(chip, 0x7f, 0);
-+	if (ret < 0)
-+		return ret;
-+	usleep_range(2000, 3000);
-+	for (i = 0; i < 24; i++) {
-+		ret = aw21024_write(chip, AW21024_BR_BASE + i, 0);
-+		if (ret < 0)
-+			return ret;
-+		ret = aw21024_write(chip, 0x4a + i, 255);
-+		if (ret < 0)
-+			return ret;
-+		chip->color_scale[i] = 255;
-+	}
-+	ret = aw21024_write(chip, AW21024_UPDATE, 0);
-+	if (ret < 0)
-+		return ret;
-+	/* RSET sets 18.52 mA nominal full scale. White-balance defaults are 255. */
-+	ret = aw21024_write(chip, 0x6e, 255);
-+	if (ret < 0)
-+		return ret;
-+	ret = aw21024_write(chip, 0x00, 1);
++	ret = aw21024_init(chip);
 +	if (ret < 0)
 +		return ret;
 +

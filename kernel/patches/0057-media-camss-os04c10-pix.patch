@@ -52,7 +52,7 @@ index 5d173e0ecf424f2f204f8d426be818e44357f8e4..0dbfb3e2ec258cb38dccf00d85f24cfc
 +	  This is a Video4Linux2 sensor driver for the OmniVision
 +	  OS04C10 camera sensor.
 +
-+	  The driver exposes the sensor as a RAW10/RAW12 V4L2 sub-device and
++	  The driver exposes the sensor as a RAW12 V4L2 sub-device and
 +	  accepts register writes from userspace through SENSOR_WRITE_REGS.
 +
 +	  To compile this driver as a module, choose M here: the module
@@ -78,7 +78,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec59a2d442
 --- /dev/null
 +++ b/drivers/media/i2c/os04c10.c
-@@ -0,0 +1,591 @@
+@@ -0,0 +1,577 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * OmniVision OS04C10 CMOS Image Sensor Driver
@@ -108,7 +108,7 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +
 +#define OS04C10_XCLK_FREQ		24000000
 +#define OS04C10_LINK_FREQ		456000000ULL
-+#define OS04C10_PIXEL_RATE		182400000ULL
++#define OS04C10_PIXEL_RATE		152000000ULL
 +
 +#define OS04C10_REG_CHIP_ID_H		CCI_REG8(0x300a)
 +#define OS04C10_REG_CHIP_ID_L		CCI_REG8(0x300b)
@@ -147,20 +147,17 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +	unsigned long link_freq_bitmap;
 +	u32 num_data_lanes;
 +	bool powered;
-+	u32 mbus_code;
 +	u32 active_width;
 +	u32 active_height;
 +};
 +
-+static void os04c10_fill_format(struct v4l2_mbus_framefmt *fmt, u32 code)
++static void os04c10_fill_format(struct v4l2_mbus_framefmt *fmt)
 +{
 +	if (!fmt->width || fmt->width > OS04C10_NATIVE_WIDTH)
 +		fmt->width = OS04C10_NATIVE_WIDTH;
 +	if (!fmt->height || fmt->height > OS04C10_NATIVE_HEIGHT)
 +		fmt->height = OS04C10_NATIVE_HEIGHT;
-+	if (code != MEDIA_BUS_FMT_SBGGR12_1X12)
-+		code = MEDIA_BUS_FMT_SBGGR10_1X10;
-+	fmt->code = code;
++	fmt->code = MEDIA_BUS_FMT_SBGGR12_1X12;
 +	fmt->field = V4L2_FIELD_NONE;
 +	fmt->colorspace = V4L2_COLORSPACE_RAW;
 +	fmt->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
@@ -230,7 +227,7 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +	else {
 +		fmt->format.width = sensor->active_width ?: OS04C10_NATIVE_WIDTH;
 +		fmt->format.height = sensor->active_height ?: OS04C10_NATIVE_HEIGHT;
-+		os04c10_fill_format(&fmt->format, sensor->mbus_code);
++		os04c10_fill_format(&fmt->format);
 +	}
 +
 +	return 0;
@@ -242,12 +239,11 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +{
 +	struct os04c10 *sensor = to_os04c10(sd);
 +
-+	os04c10_fill_format(&fmt->format, fmt->format.code);
++	os04c10_fill_format(&fmt->format);
 +
 +	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY)
 +		*v4l2_subdev_state_get_format(state, fmt->pad) = fmt->format;
 +	else {
-+		sensor->mbus_code = fmt->format.code;
 +		sensor->active_width = fmt->format.width;
 +		sensor->active_height = fmt->format.height;
 +	}
@@ -259,16 +255,9 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +				  struct v4l2_subdev_state *state,
 +				  struct v4l2_subdev_mbus_code_enum *code)
 +{
-+	switch (code->index) {
-+	case 0:
-+		code->code = MEDIA_BUS_FMT_SBGGR10_1X10;
-+		break;
-+	case 1:
-+		code->code = MEDIA_BUS_FMT_SBGGR12_1X12;
-+		break;
-+	default:
++	if (code->index > 0)
 +		return -EINVAL;
-+	}
++	code->code = MEDIA_BUS_FMT_SBGGR12_1X12;
 +	return 0;
 +}
 +
@@ -276,9 +265,7 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +				   struct v4l2_subdev_state *state,
 +				   struct v4l2_subdev_frame_size_enum *fse)
 +{
-+	if (fse->index > 0 ||
-+	    (fse->code != MEDIA_BUS_FMT_SBGGR12_1X12 &&
-+	     fse->code != MEDIA_BUS_FMT_SBGGR10_1X10))
++	if (fse->index > 0 || fse->code != MEDIA_BUS_FMT_SBGGR12_1X12)
 +		return -EINVAL;
 +
 +	fse->min_width = 1;
@@ -296,7 +283,7 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +
 +	fmt->width = OS04C10_NATIVE_WIDTH;
 +	fmt->height = OS04C10_NATIVE_HEIGHT;
-+	os04c10_fill_format(fmt, MEDIA_BUS_FMT_SBGGR10_1X10);
++	os04c10_fill_format(fmt);
 +	return 0;
 +}
 +
@@ -526,7 +513,6 @@ index 0000000000000000000000000000000000000000..f77cb440552d49433d6a53b79b2373ec
 +	if (!sensor)
 +		return -ENOMEM;
 +
-+	sensor->mbus_code = MEDIA_BUS_FMT_SBGGR10_1X10;
 +	sensor->dev = dev;
 +	v4l2_i2c_subdev_init(&sensor->sd, client, &os04c10_subdev_ops);
 +	sensor->sd.internal_ops = &os04c10_internal_ops;
@@ -1270,8 +1256,8 @@ index e5ee7e717b3bcb88916249cb710d90e840082a4a..435380b065d4a2aa0e6aae631bd2d6fa
 +	writel_relaxed(0x00000000, vfe->base + VFE_WB_CFG + 0x08);
 +	writel_relaxed(0x00000000, vfe->base + VFE_WB_CFG + 0x0c);
 +
-+	/* OS04 RAW10 black level 64 shifted into the 14-bit VFE domain. */
-+	writel_relaxed(0x04000400, vfe->base + VFE_BLC_CFG + 0x00);
++	/* OS04 RAW12 black level 48 shifted into the 14-bit VFE domain. */
++	writel_relaxed(0x040000c0, vfe->base + VFE_BLC_CFG + 0x00);
 +	writel_relaxed(0x00000000, vfe->base + VFE_BLC_CFG + 0x04);
 +	writel_relaxed(0x00000000, vfe->base + VFE_BLC_CFG + 0x08);
 +
@@ -2133,7 +2119,7 @@ diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platf
 index 319d191589884777bced456867e5a2a4211a2770..91a2b43dcbda20c38535646bb7a5df1e9e4bcf61 100644
 --- a/drivers/media/platform/qcom/camss/camss-vfe.c
 +++ b/drivers/media/platform/qcom/camss/camss-vfe.c
-@@ -277,10 +277,46 @@ const struct camss_formats vfe_formats_rdi_845 = {
+@@ -277,10 +277,38 @@ const struct camss_formats vfe_formats_rdi_845 = {
  	.formats = formats_rdi_845
  };
  
@@ -2157,14 +2143,6 @@ index 319d191589884777bced456867e5a2a4211a2770..91a2b43dcbda20c38535646bb7a5df1e
 +	{ MEDIA_BUS_FMT_VYUY8_1_5X8, 8, V4L2_PIX_FMT_NV21, 1,
 +	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
 +	/* Bayer input formats (sink pad accepts these, ISP converts to NV12) */
-+	{ MEDIA_BUS_FMT_SBGGR10_1X10, 10, V4L2_PIX_FMT_NV12, 1,
-+	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
-+	{ MEDIA_BUS_FMT_SGBRG10_1X10, 10, V4L2_PIX_FMT_NV12, 1,
-+	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
-+	{ MEDIA_BUS_FMT_SGRBG10_1X10, 10, V4L2_PIX_FMT_NV12, 1,
-+	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
-+	{ MEDIA_BUS_FMT_SRGGB10_1X10, 10, V4L2_PIX_FMT_NV12, 1,
-+	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
 +	{ MEDIA_BUS_FMT_SBGGR12_1X12, 12, V4L2_PIX_FMT_NV12, 1,
 +	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
 +	{ MEDIA_BUS_FMT_SGBRG12_1X12, 12, V4L2_PIX_FMT_NV12, 1,
@@ -2183,17 +2161,13 @@ index 319d191589884777bced456867e5a2a4211a2770..91a2b43dcbda20c38535646bb7a5df1e
  };
  
  static u32 vfe_src_pad_code(struct vfe_line *line, u32 sink_code,
-@@ -408,6 +444,30 @@ static u32 vfe_src_pad_code(struct vfe_line *line, u32 sink_code,
+@@ -408,6 +436,26 @@ static u32 vfe_src_pad_code(struct vfe_line *line, u32 sink_code,
  						      index, src_req_code);
  		}
  		default:
 +			/* PIX line: Bayer input -> NV12 output via ISP */
 +			if (line->id == VFE_LINE_PIX) {
 +				switch (sink_code) {
-+				case MEDIA_BUS_FMT_SBGGR10_1X10:
-+				case MEDIA_BUS_FMT_SGBRG10_1X10:
-+				case MEDIA_BUS_FMT_SGRBG10_1X10:
-+				case MEDIA_BUS_FMT_SRGGB10_1X10:
 +				case MEDIA_BUS_FMT_SBGGR12_1X12:
 +				case MEDIA_BUS_FMT_SGBRG12_1X12:
 +				case MEDIA_BUS_FMT_SGRBG12_1X12:
@@ -2214,7 +2188,7 @@ index 319d191589884777bced456867e5a2a4211a2770..91a2b43dcbda20c38535646bb7a5df1e
  			if (index > 0)
  				return 0;
  
-@@ -543,15 +603,20 @@ int vfe_enable_output_v2(struct vfe_line *line)
+@@ -543,15 +591,20 @@ int vfe_enable_output_v2(struct vfe_line *line)
  	output->wait_reg_update = 0;
  	reinit_completion(&output->reg_update);
  
@@ -2238,7 +2212,7 @@ index 319d191589884777bced456867e5a2a4211a2770..91a2b43dcbda20c38535646bb7a5df1e
  		ops->reg_update(vfe, line->id);
  	}
  
-@@ -585,9 +650,12 @@ int vfe_queue_buffer_v2(struct camss_video *vid,
+@@ -585,9 +638,12 @@ int vfe_queue_buffer_v2(struct camss_video *vid,
  
  	if (output->state == VFE_OUTPUT_ON &&
  	    output->gen2.active_num < 2) {
@@ -2253,7 +2227,7 @@ index 319d191589884777bced456867e5a2a4211a2770..91a2b43dcbda20c38535646bb7a5df1e
  		ops->reg_update(vfe, line->id);
  	} else {
  		vfe_buf_add_pending(output, buf);
-@@ -664,14 +732,18 @@ int vfe_get_output_v2(struct vfe_line *line)
+@@ -664,14 +720,18 @@ int vfe_get_output_v2(struct vfe_line *line)
  		goto error;
  	}
  
@@ -2280,7 +2254,7 @@ index 319d191589884777bced456867e5a2a4211a2770..91a2b43dcbda20c38535646bb7a5df1e
  
  	output->drop_update_idx = 0;
  
-@@ -1795,6 +1867,7 @@ int msm_vfe_subdev_init(struct camss *camss, struct vfe_device *vfe,
+@@ -1795,6 +1855,7 @@ int msm_vfe_subdev_init(struct camss *camss, struct vfe_device *vfe,
  
  	vfe->res = &res->vfe;
  	vfe->res->hw_ops->subdev_init(dev, vfe);
@@ -2288,7 +2262,7 @@ index 319d191589884777bced456867e5a2a4211a2770..91a2b43dcbda20c38535646bb7a5df1e
  
  	/* Power domain */
  
-@@ -2028,6 +2101,10 @@ static int vfe_bpl_align_pix(struct vfe_device *vfe)
+@@ -2028,6 +2089,10 @@ static int vfe_bpl_align_pix(struct vfe_device *vfe)
  	int ret = 16;
  
  	switch (vfe->camss->res->version) {

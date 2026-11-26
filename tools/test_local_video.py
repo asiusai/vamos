@@ -53,8 +53,38 @@ class LocalVideoTest(unittest.TestCase):
       self.session.request({'action': 'renew', 'owner': 'phone', 'lease': first['lease']})
     self.ap.stop.assert_called_once()
 
+  def test_camera_credentials_remain_stable_but_lease_changes(self):
+    with patch.object(video, 'AccessPoint', return_value=self.ap):
+      request = {'action': 'start', 'owner': 'remote-cameras',
+                 'network': {'ssid': 'Asius-Cameras-test', 'password': 'private-test-password'}}
+      first = self.session.request(request)
+      self.session.request({'action': 'stop', 'owner': 'remote-cameras', 'lease': first['lease']})
+      second = self.session.request(request)
+    self.assertEqual(first['password'], second['password'])
+    self.assertNotEqual(first['lease'], second['lease'])
+
+  def test_camera_network_rejects_other_owner_and_config_injection(self):
+    for owner, ssid in [('phone', 'safe'), ('remote-cameras', 'bad\ninterface=other')]:
+      with self.assertRaises(ValueError):
+        self.session.request({'action': 'start', 'owner': owner, 'network': {'ssid': ssid, 'password': 'password'}})
+    self.ap.start.assert_not_called()
+
 
 class AccessPointTest(unittest.TestCase):
+  def test_daemon_leaves_callers_cgroup_before_claiming_radio(self):
+    with TemporaryDirectory() as directory:
+      root = Path(directory)
+      group = root / 'service-cgroup'
+
+      def existing_daemon(*_):
+        self.assertEqual((group / 'cgroup.procs').read_text(), str(video.os.getpid()))
+        raise BlockingIOError()
+
+      with patch.object(video, 'ROOT', root), patch.object(video, 'CGROUP', group), \
+           patch.object(video.fcntl, 'flock', side_effect=existing_daemon), patch.object(video, 'AccessPoint') as ap:
+        video.serve()
+        ap.assert_not_called()
+
   def test_ap_lifecycle_preserves_station_and_does_not_require_a_saved_profile(self):
     present = {f'/sys/class/net/{video.INTERFACE}'}
     def command(*args, **kwargs):

@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
 
 ROOT = Path('/run/vamos-local-video')
 SOCKET = ROOT / 'control.sock'
@@ -20,6 +21,56 @@ INTERFACE = 'wlan0'
 AP_INTERFACE = 'asiusap0'
 ADDRESS = '192.168.43.1'
 LEASE_SECONDS = 120
+CGROUP = Path('/sys/fs/cgroup/vamos-local-video')
+
+
+def camera_network(body):
+  network = body.get('network')
+  if body.get('owner') != 'remote-cameras' or not isinstance(network, dict) or set(network) != {'ssid', 'password'}:
+    raise ValueError('Invalid camera network')
+  for name, minimum, maximum in (('ssid', 1, 32), ('password', 8, 63)):
+    value = network[name]
+    if not isinstance(value, str) or not minimum <= len(value) <= maximum or any(not 32 <= ord(c) <= 126 for c in value):
+      raise ValueError('Invalid camera network credentials')
+  return network
+
+
+class CameraStation:
+  def __init__(self):
+    self.uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, 'asius-remote-camera'))
+    self.path = Path('/run/NetworkManager/system-connections/asius-remote-camera.nmconnection')
+    self.previous = ''
+    self.retry = 0
+
+  def start(self, ssid, password):
+    self.previous = command('nmcli', '-g', 'GENERAL.CON-UUID', 'device', 'show', INTERFACE)
+    (ROOT / 'station-restore.json').write_text(json.dumps({'uuid': self.previous}))
+    # A byte-array SSID and escaped keyfile string avoid shell or nmcli secret arguments.
+    escaped = password.replace('\\', '\\\\').replace(' ', '\\s')
+    fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, 'w') as profile:
+      profile.write(f'[connection]\nid=Asius camera network\nuuid={self.uuid}\ntype=wifi\ninterface-name={INTERFACE}\n'
+                    'autoconnect=true\nautoconnect-priority=100\n[wifi]\nmode=infrastructure\nband=a\npowersave=2\n'
+                    f'ssid={";".join(str(b) for b in ssid.encode())};\n[wifi-security]\nkey-mgmt=wpa-psk\npsk={escaped}\n'
+                    '[ipv4]\nmethod=auto\nnever-default=true\n[ipv6]\nmethod=disabled\n')
+    command('nmcli', 'connection', 'load', str(self.path))
+    self.healthy()
+
+  def healthy(self):
+    if time.monotonic() >= self.retry:
+      self.retry = time.monotonic() + 15
+      current = command('nmcli', '-g', 'GENERAL.CON-UUID', 'device', 'show', INTERFACE)
+      if current != self.uuid:
+        command('nmcli', '--wait', '5', 'connection', 'up', 'uuid', self.uuid, check=False)
+    return self.path.exists()
+
+  def stop(self):
+    command('nmcli', 'connection', 'delete', 'uuid', self.uuid, check=False)
+    self.path.unlink(missing_ok=True)
+    if self.previous and self.previous not in ('--', self.uuid):
+      command('nmcli', '--wait', '0', 'connection', 'up', 'uuid', self.previous, check=False)
+    (ROOT / 'station-restore.json').unlink(missing_ok=True)
 
 
 def command(*args, check=True):
@@ -80,6 +131,9 @@ class AccessPoint:
   def healthy(self):
     if len(self.children) != 2 or any(child.poll() is not None for child in self.children):
       return False
+    # Station changes can remove the AP interface while hostapd keeps running.
+    if not Path(f'/sys/class/net/{AP_INTERFACE}').exists():
+      return False
     # A live hostapd process can still have a disabled AP.
     client_path = ROOT / ('status-' + secrets.token_hex(4))
     try:
@@ -139,6 +193,16 @@ class Session:
         suffix = hashlib.sha256(Path(f'/sys/class/net/{INTERFACE}/address').read_bytes()).hexdigest()[:6]
         details = {'ssid': 'Asius-Live-' + suffix, 'password': secrets.token_urlsafe(18),
                    'lease': secrets.token_hex(24), 'address': ADDRESS}
+        if 'network' in body:
+          details.update(camera_network(body))
+          if body.get('station') is True:
+            self.ap = CameraStation()
+          else:
+            self.ap = AccessPoint()
+        elif 'station' in body:
+          raise ValueError('A camera station requires network credentials')
+        elif isinstance(self.ap, CameraStation):
+          self.ap = AccessPoint()
         self.ap.start(details['ssid'], details['password'])
         self.owner, self.details = owner, details
       self.expires = time.monotonic() + LEASE_SECONDS
@@ -155,6 +219,10 @@ class Session:
 
 
 def serve():
+  # A manager restart kills the entire openpilot cgroup. Keep the lease daemon
+  # and its radio children outside that group so expiry can restore Wi-Fi.
+  CGROUP.mkdir(exist_ok=True)
+  (CGROUP / 'cgroup.procs').write_text(str(os.getpid()))
   daemon_lock = (ROOT / 'daemon.lock').open('w')
   try:
     fcntl.flock(daemon_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -163,6 +231,10 @@ def serve():
     return
   session = Session(AccessPoint())
   session.ap.stop()
+  if (ROOT / 'station-restore.json').exists():
+    station = CameraStation()
+    station.previous = json.loads((ROOT / 'station-restore.json').read_text())['uuid']
+    station.stop()
   # SIGTERM must release the radio just like a normal session close.
   def shutdown(_signal, _frame):
     raise SystemExit()

@@ -16,9 +16,11 @@ Each road board also exposes one IR output, from 0 to 100 percent.
 Ten joined sinks are capped at BR 206, giving 149.02 mA nominal total with RSET 4.32 kohm.
 The cabin board has no IR control. RSET limits each RGB sink to 18.52 mA nominal.
 RGB and IR updates share a mutex and the hardware UPDATE latch.
+After an I2C failure, disable and clear all sinks. The next request reinitializes the controller without replaying stale IR output.
 RGB brightness uses a 0-65535 scale, with per-channel current scaling and PWM for smooth dim fades.
 The blue startup curve peaks at 5/255 equivalent brightness. IR retains its existing 0-100 scale and current cap.
 
+The OS04C10 sensor and VFE PIX path use RAW12 only. Sensor formats default and negotiate to RAW12; processed output remains NV12.
 CAM1 uses four CSI-2 lanes at 364 MHz link frequency. CAM2 and CAM3 use two lanes.
 The sensor and receiver endpoints must agree. Deploy the matching kernel and device tree together.
 
@@ -115,7 +117,14 @@ Gear 4, two active lanes, frequency scaling, clock gating, and runtime power man
 Rate A uses 9.984 Gbit/s per lane, versus Rate B's 11.664 Gbit/s.
 A Samsung `KLUDG4UHGC-B0E1` sample passed checked I/O, a cold power cycle, and 60 idle cycles without link errors.
 Its initial checked speeds were 730 MB/s write and 822 MB/s read. Rate B repeatedly triggered data-link NAC recovery.
-This is a board-wide default. Stock YMTC Rate A performance, other Samsung samples, and sustained thermal/endurance behavior remain unverified.
+A second Samsung sample, firmware `0700`, passed three checked runs, twenty idle cycles, and cold verification without errors at Rate A.
+Median checked speeds were 765.9 MB/s write and 861.4 MB/s read. Rate B reproduced three data-link errors during its idle checks.
+Another firmware `1001` sample passed three checked runs, twenty idle cycles, and cold verification without errors at Rate A.
+Its median checked speeds were 772.5 MB/s write and 868.7 MB/s read. Rate B reproduced 66 data-link errors.
+This is a board-wide default. A stock YMTC `YMUS8A1TE2D1C1` sample also passed checked I/O, cold boot, and twenty idle cycles without errors.
+Three runs per rate used the same kernel, userspace, CPU settings, and normal UFS power management.
+Median checked writes changed from 242.6 to 242.1 MB/s; checked reads changed from 863.8 to 814.8 MB/s, a 5.7% reduction.
+These speeds include SHA-256 overhead. Maximum raw bandwidth, concurrent application performance, additional modules, and sustained thermal/endurance behavior remain unverified.
 The compiled DTB check requires Rate A and two lanes before packaging.
 
 Patch 0094 prevents an LE LTK Reply from completing a pending remote-features
