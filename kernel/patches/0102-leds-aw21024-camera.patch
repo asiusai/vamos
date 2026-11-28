@@ -19,8 +19,8 @@ new file mode 100644
 +#define AW21024_UPDATE 0x49
 +#define AW21024_RGB_COUNT 12
 +#define AW21024_RGB_MAX 65535
-+/* RSET 4.32 kohm: 10 * (0.4 * 200 / 4320) * 206 / 256 < 150 mA. */
-+#define AW21024_IR_MAX_BR 206
++/* RSET 4.32 kohm: ten sinks at full scale give 184.5 mA. D1 allows 500 mA. */
++#define AW21024_IR_MAX_BR 255
 +
 +struct aw21024;
 +struct aw21024_led {

@@ -64,7 +64,7 @@ static void setup(struct aw21024 *chip, struct i2c_client *bus) {
   }
   assert(aw21024_init(chip) == 0);
   assert(aw21024_brightness_set(&chip->leds[12].cdev, 100) == 0);
-  for (int i = 1; i <= 10; i++) assert(bus->regs[i] == 206);
+  for (int i = 1; i <= 10; i++) assert(bus->regs[i] == 255);
   assert(aw21024_brightness_set(&chip->leds[2].cdev, 1285) == 0);
   assert(bus->regs[15] == 213);
   assert(bus->regs[0x58] == 6);
@@ -77,7 +77,7 @@ static void recovered_rgb(struct aw21024 *chip, struct i2c_client *bus) {
   assert(bus->regs[15] == 213 && bus->regs[0x58] == 6);
   for (int i = 1; i <= 12; i++) assert(bus->regs[i] == 0);
   assert(aw21024_brightness_set(&chip->leds[12].cdev, 100) == 0);
-  for (int i = 1; i <= 10; i++) assert(bus->regs[i] == 206);
+  for (int i = 1; i <= 10; i++) assert(bus->regs[i] == 255);
   assert(bus->regs[15] == 213);
 }
 

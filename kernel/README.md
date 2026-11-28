@@ -12,9 +12,11 @@ Dragon port. The shared SoC defaults and internal USB controller are unchanged.
 
 The AW21024 camera LED driver exposes twelve RGB sinks per board at I2C address 0x30.
 It initializes all 24 brightness registers to zero before enabling outputs.
-Each road board also exposes one IR output, from 0 to 100 percent.
-Ten joined sinks are capped at BR 206, giving 149.02 mA nominal total with RSET 4.32 kohm.
-The cabin board has no IR control. RSET limits each RGB sink to 18.52 mA nominal.
+Each board also exposes one IR output, from 0 to 100 percent. All three boards use the same controls.
+Ten joined sinks reach BR 255 at 100 percent, giving 184.5 mA nominal total with RSET 4.32 kohm.
+This is the controller limit. The XYC-IRC18C-24 emitter allows 500 mA continuous.
+Only the road boards have boot triggers. RSET limits each RGB sink to 18.52 mA nominal. The RGB LED allows 30 mA at 25 C and about 6 mA at 80 C.
+The kernel exposes the controller limits. Userspace applies temperature derating and the 0.5 A connector budget.
 RGB and IR updates share a mutex and the hardware UPDATE latch.
 After an I2C failure, disable and clear all sinks. The next request reinitializes the controller without replaying stale IR output.
 RGB brightness uses a 0-65535 scale, with per-channel current scaling and PWM for smooth dim fades.

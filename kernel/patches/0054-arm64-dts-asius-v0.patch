@@ -745,7 +745,7 @@ index 696fef50f577..20058b7fca04 100644
  &pcie0_clkreq_n {
  	bias-pull-up;
  	drive-strength = <2>;
-@@ -1093,3 +1389,427 @@ &sdc2_data {
+@@ -1093,3 +1389,433 @@ &sdc2_data {
  	bias-pull-up;
  	drive-strength = <10>;
  };
@@ -960,6 +960,12 @@ index 696fef50f577..20058b7fca04 100644
 +		led@9 { reg = <9>; label = "asius:cam1:red:3"; led-max-microamp = <18500>; };
 +		led@a { reg = <10>; label = "asius:cam1:green:3"; led-max-microamp = <18500>; };
 +		led@b { reg = <11>; label = "asius:cam1:blue:3"; led-max-microamp = <18500>; };
++
++		led@c {
++			reg = <12>;
++			label = "asius:cam1:ir";
++			led-max-microamp = <184500>;
++		};
 +	};
 +};
 +
@@ -1045,7 +1051,7 @@ index 696fef50f577..20058b7fca04 100644
 +		led@c {
 +			reg = <12>;
 +			label = "asius:cam2:ir";
-+			led-max-microamp = <150000>;
++			led-max-microamp = <184500>;
 +		};
 +	};
 +};
@@ -1128,7 +1134,7 @@ index 696fef50f577..20058b7fca04 100644
 +		led@c {
 +			reg = <12>;
 +			label = "asius:cam3:ir";
-+			led-max-microamp = <150000>;
++			led-max-microamp = <184500>;
 +		};
 +	};
 +};

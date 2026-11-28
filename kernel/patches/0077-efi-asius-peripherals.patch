@@ -529,7 +529,7 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +	if (status)
 +		return status;
 +
-+	for (i = 0; i < (camera_number == 1 ? 12 : 13); i++) {
++	for (i = 0; i < 13; i++) {
 +		child_name[4] = "0123456789abc"[i];
 +		child = asius_fdt_subnode(fdt, controller, child_name);
 +		if (child < 0)
@@ -555,7 +555,7 @@ diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/f
 +		status = fdt_setprop_u32(fdt, child, "reg", i) ?:
 +			 fdt_setprop_string(fdt, child, "label", label) ?:
 +			 fdt_setprop_u32(fdt, child, "led-max-microamp",
-+					 i == 12 ? 150000 : 18500);
++					 i == 12 ? 184500 : 18500);
 +		if (status)
 +			return status;
 +
